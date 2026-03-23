@@ -1,0 +1,294 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+
+  /* ============================================
+     PALETA - Focus Club Vallecas
+     Verdes oscuros + Blanco hueso
+     ============================================ */
+
+  /* Fondo - Negro Carbón */
+  --color-carbon: #0A0A0A;
+
+  /* Verde Bosque */
+  --color-forest: #1B4332;
+
+  /* Verde Esmeralda */
+  --color-emerald: #2D6A4F;
+
+  /* Verde Esmeralda Claro */
+  --color-emerald-light: #40916C;
+
+  /* Blanco Hueso */
+  --color-ivory: #F8F9FA;
+
+  /* Sidebar */
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+
+  /* Gráficos */
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+
+  /* UI */
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+
+  /* Radio */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.75rem;
+
+  /* Fondo */
+  --background: #0A0A0A;
+  --foreground: #F8F9FA;
+
+  /* Tarjetas */
+  --card: rgba(27, 67, 50, 0.15);
+  --card-foreground: #F8F9FA;
+
+  /* Popover */
+  --popover: rgba(10, 10, 10, 0.98);
+  --popover-foreground: #F8F9FA;
+
+  /* Primario - Verde Esmeralda */
+  --primary: #2D6A4F;
+  --primary-foreground: #F8F9FA;
+
+  /* Secundario */
+  --secondary: rgba(45, 106, 79, 0.2);
+  --secondary-foreground: #F8F9FA;
+
+  /* Atenuado */
+  --muted: rgba(248, 249, 250, 0.1);
+  --muted-foreground: rgba(248, 249, 250, 0.7);
+
+  /* Acento - Verde Esmeralda Claro */
+  --accent: #40916C;
+  --accent-foreground: #F8F9FA;
+
+  /* Destructivo */
+  --destructive: #DC2626;
+  --destructive-foreground: #F8F9FA;
+
+  /* Bordes */
+  --border: rgba(27, 67, 50, 0.3);
+  --input: rgba(27, 67, 50, 0.25);
+  --ring: #40916C;
+
+  /* Gráficos */
+  --chart-1: #2D6A4F;
+  --chart-2: #40916C;
+  --chart-3: #52B788;
+  --chart-4: #1B4332;
+  --chart-5: #74C69D;
+
+  /* Sidebar */
+  --sidebar: rgba(10, 10, 10, 0.98);
+  --sidebar-foreground: #F8F9FA;
+  --sidebar-primary: #2D6A4F;
+  --sidebar-primary-foreground: #F8F9FA;
+  --sidebar-accent: rgba(64, 145, 108, 0.2);
+  --sidebar-accent-foreground: #F8F9FA;
+  --sidebar-border: rgba(27, 67, 50, 0.3);
+  --sidebar-ring: #40916C;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    background: #0A0A0A;
+    color: #F8F9FA;
+    font-family: var(--font-sans), system-ui, sans-serif;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Barra de desplazamiento personalizada */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(10, 10, 10, 0.5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(45, 106, 79, 0.6);
+  border-radius: 4px;
+  border: 2px solid rgba(10, 10, 10, 0.5);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #40916C;
+}
+
+/* Glassmorphism */
+.glass {
+  background: rgba(27, 67, 50, 0.15);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(27, 67, 50, 0.3);
+}
+
+.glass-dark {
+  background: rgba(10, 10, 10, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(27, 67, 50, 0.25);
+}
+
+.glass-card {
+  background: rgba(27, 67, 50, 0.15);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(27, 67, 50, 0.3);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  border-color: rgba(64, 145, 108, 0.4);
+  background: rgba(27, 67, 50, 0.2);
+}
+
+.glass-elevated {
+  background: rgba(27, 67, 50, 0.2);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(45, 106, 79, 0.4);
+}
+
+/* Sombras */
+.shadow-glow {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.shadow-glow-lg {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+.shadow-emerald {
+  box-shadow: 0 4px 20px rgba(64, 145, 108, 0.3);
+}
+
+.shadow-emerald-glow {
+  box-shadow: 0 0 15px rgba(64, 145, 108, 0.3);
+}
+
+/* Animaciones */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse-accent {
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(64, 145, 108, 0.4);
+  }
+
+  50% {
+    box-shadow: 0 0 0 10px rgba(64, 145, 108, 0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+.animate-slide-in-right {
+  animation: slideInRight 0.5s ease-out forwards;
+}
+
+.animate-pulse-accent {
+  animation: pulse-accent 2s ease-in-out infinite;
+}
+
+/* Elementos de formulario */
+input,
+textarea,
+select {
+  transition: all 0.2s ease;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: rgba(64, 145, 108, 0.5);
+  box-shadow: 0 0 0 3px rgba(64, 145, 108, 0.1);
+}
+
+/* Fix: opciones de select visibles en fondo oscuro */
+select option {
+  background-color: #0A0A0A;
+  color: #F8F9FA;
+}
+
+/* Fix: calendario nativo de input[type=date] en modo oscuro */
+input[type="date"] {
+  color-scheme: dark;
+}

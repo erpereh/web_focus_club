@@ -1,0 +1,69 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+node_modules
+.firebase/
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+/.firebase/
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+local-*
+.claude
+.z-ai-config
+dev.log
+test
+prompt
+
+server.log
+
+# Firebase service account keys (NEVER commit these)
+*-adminsdk*.json
+
+# Skills directory
+/skills/
+
+# AI tools config (contains local paths)
+opencode.json
+skills-lock.json
+.agents/
+
+# Database files
+*.db
+
+# Personal/temp files
+promt.txt
+worklog.md

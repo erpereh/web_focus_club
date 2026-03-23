@@ -1,0 +1,122 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── USUARIOS ───
+    match /users/{uid} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.auth.uid == uid;
+      // Un usuario puede actualizar su propio doc EXCEPTO el campo role.
+      // Solo admin puede cambiar el role.
+      allow update: if request.auth != null && (
+        (request.auth.uid == uid && !('role' in request.resource.data) || request.resource.data.role == resource.data.role)
+        || isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // ─── CITAS ───
+    match /appointments/{appointmentId} {
+      // Cualquier usuario autenticado puede crear, pero SOLO con status 'pending'
+      allow create: if request.auth != null
+                    && request.resource.data.status == 'pending';
+
+      // Un usuario puede leer sus propias citas; admin lee todas;
+      // un trainer puede leer las citas donde está asignado
+      allow read: if request.auth != null
+                  && (resource.data.userId == request.auth.uid
+                      || isAdmin()
+                      || isAssignedTrainer(resource));
+
+      // Admin puede modificar o eliminar cualquier cita.
+      // Un trainer solo puede actualizar trainerNotes en sus citas asignadas.
+      allow update: if isAdmin()
+                    || (isTrainer()
+                        && isAssignedTrainer(resource)
+                        && onlyTrainerNotesChanged());
+      allow delete: if isAdmin();
+    }
+
+    // ─── ENTRENADORES ───
+    match /trainers/{trainerId} {
+      // Cualquier usuario autenticado puede leer (para poblar desplegables)
+      allow read: if request.auth != null;
+      // Solo admin puede crear, modificar o eliminar entrenadores
+      allow write: if isAdmin();
+    }
+
+    // ─── FRANJAS BLOQUEADAS ───
+    match /blocked_slots/{slotId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
+
+    // ─── AFORO POR FRANJA (datos públicos, sin info de usuarios) ───
+    match /slot_occupancy/{slotId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
+
+    // ─── SERVICIOS ───
+    match /services/{serviceId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── TESTIMONIOS ───
+    match /testimonials/{testimonialId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update, delete: if isAdmin();
+    }
+
+    // ─── CMS / CONTENIDO DEL SITIO ───
+    match /site_content/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── CONFIGURACIÓN GLOBAL (horarios, duración de sesiones) ───
+    match /site_config/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── ACTIVITY LOGS ───
+    match /activity_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+    }
+
+    // ─── FUNCIONES HELPER ───
+    function isAdmin() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isTrainer() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'trainer';
+    }
+
+    // Comprueba si el trainer actual está asignado a esta cita.
+    // Busca en trainers por uid y compara con assignedTrainer del appointment.
+    function isAssignedTrainer(appt) {
+      return request.auth != null
+        && appt.data.assignedTrainer != null
+        && isTrainerAssignedByUid(appt.data.assignedTrainer);
+    }
+
+    // Verifica que el trainer doc referenciado tenga el uid del usuario actual
+    function isTrainerAssignedByUid(trainerId) {
+      return get(/databases/$(database)/documents/trainers/$(trainerId)).data.uid == request.auth.uid;
+    }
+
+    // Solo permite cambiar el campo trainerNotes y updatedAt
+    function onlyTrainerNotesChanged() {
+      let diff = request.resource.data.diff(resource.data);
+      return diff.affectedKeys().hasOnly(['trainerNotes', 'updatedAt']);
+    }
+  }
+}
