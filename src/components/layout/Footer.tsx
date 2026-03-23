@@ -13,7 +13,7 @@ const footerLinks = [
   { href: '/centro', label: 'El Centro' },
   { href: '/galeria', label: 'Galería' },
   { href: '/contacto', label: 'Contacto' },
-  { href: '/solicitar-cita', label: 'Reservar Cita' },
+  { href: '/portal', label: 'Reservar Cita' },
 ];
 
 export function Footer() {

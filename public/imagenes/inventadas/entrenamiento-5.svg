@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="280" viewBox="0 0 400 280">
+  <rect width="400" height="280" fill="#0A1A0F"/>
+  <polygon points="200,60 230,120 300,120 245,158 265,220 200,182 135,220 155,158 100,120 170,120" fill="none" stroke="#40916C" stroke-width="2.5" opacity="0.7"/>
+  <polygon points="200,80 222,130 278,130 234,160 250,212 200,184 150,212 166,160 122,130 178,130" fill="#1B4332" opacity="0.3"/>
+  <text x="200" y="248" font-family="sans-serif" font-size="18" font-weight="bold" fill="#F8F9FA" text-anchor="middle">Prep. Competición</text>
+  <text x="200" y="268" font-family="sans-serif" font-size="12" fill="#40916C" text-anchor="middle">Élite Performance</text>
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
+  <rect width="400" height="400" fill="#0A1208"/>
+  <circle cx="200" cy="160" r="60" fill="none" stroke="#2D6A4F" stroke-width="2" opacity="0.5"/>
+  <path d="M 170 160 L 190 180 L 230 140" fill="none" stroke="#40916C" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="200" y="290" font-family="sans-serif" font-size="18" font-weight="bold" fill="#F8F9FA" text-anchor="middle">Hipertrofia Muscular</text>
+  <text x="200" y="315" font-family="sans-serif" font-size="12" fill="#40916C" text-anchor="middle">Programa Especializado</text>
+</svg>

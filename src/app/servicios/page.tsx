@@ -95,7 +95,7 @@ export default function ServiciosPage() {
                             ))}
                           </div>
                         )}
-                        <Link href="/solicitar-cita">
+                        <Link href="/portal">
                           <PremiumButton
                             variant="outline"
                             size="sm"

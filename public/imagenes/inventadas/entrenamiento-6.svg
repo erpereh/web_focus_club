@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="320" viewBox="0 0 400 320">
+  <rect width="400" height="320" fill="#111910"/>
+  <circle cx="200" cy="140" r="70" fill="none" stroke="#1B4332" stroke-width="20" opacity="0.5"/>
+  <circle cx="200" cy="140" r="70" fill="none" stroke="#40916C" stroke-width="5" stroke-dasharray="220 220" stroke-linecap="round" transform="rotate(-90 200 140)" opacity="0.8"/>
+  <text x="200" y="148" font-family="sans-serif" font-size="28" font-weight="bold" fill="#40916C" text-anchor="middle">85%</text>
+  <text x="200" y="258" font-family="sans-serif" font-size="18" font-weight="bold" fill="#F8F9FA" text-anchor="middle">Seguimiento Progreso</text>
+  <text x="200" y="282" font-family="sans-serif" font-size="12" fill="#40916C" text-anchor="middle">Análisis semanal · Focus Club</text>
+</svg>

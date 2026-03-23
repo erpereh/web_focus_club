@@ -336,7 +336,7 @@ export default function SandraPage() {
                   <p className="text-muted-foreground text-sm mb-6">
                     Reserva tu primera consulta gratuita y descubre cómo podemos ayudarte.
                   </p>
-                  <Link href="/solicitar-cita">
+                  <Link href="/portal">
                     <PremiumButton variant="cta" icon={<ArrowRight className="w-4 h-4" />} iconPosition="right">
                       Reservar Cita
                     </PremiumButton>

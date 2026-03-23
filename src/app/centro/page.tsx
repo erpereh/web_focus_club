@@ -290,7 +290,7 @@ export default function CentroPage() {
                 </div>
               </div>
 
-              <Link href="/solicitar-cita" className="inline-block mt-8">
+              <Link href="/portal" className="inline-block mt-8">
                 <PremiumButton variant="cta" icon={<ArrowRight className="w-4 h-4" />} iconPosition="right">
                   Reservar Visita
                 </PremiumButton>

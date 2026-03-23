@@ -5,7 +5,7 @@ import { getSiteContent, getServices, getApprovedTestimonials, getTestimonials }
 import type { CMSContent, Service, Testimonial } from '@/types';
 
 // Datos por defecto (usados mientras se carga Firestore o si falla)
-const defaultCMS: CMSContent = {
+export const defaultCMS: CMSContent = {
     heroTitle: 'Centro premium de bienestar y transformación física',
     heroSubtitle: 'Descubre un espacio exclusivo donde el entrenamiento personalizado, la preparación para competición y la nutrición se fusionan para alcanzar tus mejores resultados.',
     heroCTA: 'Solicitar Cita',
