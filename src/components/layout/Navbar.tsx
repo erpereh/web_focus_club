@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Menu, X, Dumbbell, User, LogOut, Settings } from 'lucide-react';
+import { Menu, X, User, LogOut, Settings } from 'lucide-react';
+import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { useAuth } from '@/contexts/AuthContext';
@@ -55,11 +56,17 @@ export function Navbar() {
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 group">
             <motion.div
-              className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center"
+              className="w-10 h-10 rounded-xl overflow-hidden"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-              <Dumbbell className="w-5 h-5 text-ivory" />
+              <Image
+                src="/imagenes/logo.jpeg"
+                alt="Focus Club Vallecas"
+                width={40}
+                height={40}
+                className="w-full h-full object-cover"
+              />
             </motion.div>
             <div className="flex flex-col">
               <span className="text-lg font-bold tracking-tight text-ivory group-hover:text-accent transition-colors">

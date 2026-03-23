@@ -89,7 +89,7 @@ export default function ContactoPage() {
                   icon: MapPin,
                   title: 'Dirección',
                   content: cmsContent.address,
-                  action: null,
+                  action: 'https://maps.app.goo.gl/EHFk2xEh9xwHBaDKA',
                 },
                 {
                   icon: Phone,
@@ -290,14 +290,15 @@ export default function ContactoPage() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
           >
-            <div className="aspect-video md:aspect-[21/9] rounded-2xl bg-gradient-to-br from-primary/20 to-accent/10 flex items-center justify-center">
-              <div className="text-center p-8">
-                <MapPin className="w-12 h-12 text-accent mx-auto mb-4" />
-                <p className="text-ivory font-semibold text-lg">Focus Club Vallecas</p>
-                <p className="text-muted-foreground text-sm mt-2">
-                  {cmsContent.address}
-                </p>
-              </div>
+            <div className="relative aspect-video md:aspect-[21/9] rounded-2xl overflow-hidden">
+              <iframe
+                src="https://maps.google.com/maps?q=C.+de+Pe%C3%B1aranda+de+Bracamonte+69+Local+4,Villa+de+Vallecas,28051+Madrid&output=embed"
+                className="absolute inset-0 w-full h-full"
+                style={{ border: 0 }}
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+                title="Focus Club Vallecas — Calle de la Ilusión 45, Vallecas, Madrid"
+              />
             </div>
           </motion.div>
         </div>

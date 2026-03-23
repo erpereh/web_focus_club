@@ -91,8 +91,8 @@ export default function CookiesPage() {
                         <h2 className="text-xl font-semibold text-ivory mt-8">4. Contacto</h2>
                         <p>
                             Si tienes alguna pregunta sobre nuestra política de cookies, puedes contactarnos en{' '}
-                            <a href="mailto:info@focusclubvallecas.com" className="text-accent hover:underline">
-                                info@focusclubvallecas.com
+                            <a href="mailto:infofocusclub2026@gmail.com" className="text-accent hover:underline">
+                                infofocusclub2026@gmail.com
                             </a>.
                         </p>
                     </div>

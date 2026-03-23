@@ -10,23 +10,27 @@ import { useCMS } from '@/hooks/useFirestore';
 
 const facilities = [
   {
-    title: 'Zona de Entrenamiento',
-    description: 'Equipamiento de última generación en un espacio diseñado para maximizar tu rendimiento.',
+    title: 'Entrada',
+    description: 'Acceso exclusivo al centro, diseñado para que tu experiencia comience desde el primer paso.',
+    image: '/imagenes/el_centro/entrada.jpeg',
     gradient: 'from-primary/40 to-forest-700/40',
   },
   {
-    title: 'Sala de Fisioterapia',
-    description: 'Camillas profesionales y equipos de electroterapia para tu recuperación óptima.',
+    title: 'Zona de Entrenamiento',
+    description: 'Espacio equipado con todo lo necesario para tus sesiones de entrenamiento funcional y cardio.',
+    image: '/imagenes/el_centro/gym1.jpeg',
     gradient: 'from-accent/30 to-accent/20',
   },
   {
-    title: 'Estudio de Pilates',
-    description: 'Reformers y equipamiento completo para sesiones de pilates de alta calidad.',
+    title: 'Zona de Musculación',
+    description: 'Área dedicada al trabajo de fuerza con maquinaria y pesos libres de calidad profesional.',
+    image: '/imagenes/el_centro/gym3.jpeg',
     gradient: 'from-forest-700/40 to-primary/30',
   },
   {
-    title: 'Zona de Descanso',
-    description: 'Espacio tranquilo para relajarte antes y después de tus sesiones.',
+    title: 'Baño',
+    description: 'Instalaciones limpias y bien equipadas para que puedas asearte cómodamente tras tu sesión.',
+    image: '/imagenes/el_centro/baño.jpeg',
     gradient: 'from-primary/30 to-accent/20',
   },
 ];
@@ -140,10 +144,13 @@ export default function CentroPage() {
               >
                 <div className={`absolute inset-0 bg-gradient-to-br ${facility.gradient} opacity-10 group-hover:opacity-20 transition-opacity duration-500`} />
                 <div className="relative h-full flex flex-col p-6">
-                  {/* Placeholder for images */}
-                  <div className="w-full h-48 md:h-64 bg-muted/10 rounded-2xl mb-6 flex flex-col justify-center items-center border border-dashed border-border/50">
-                    <p className="text-muted-foreground/50 text-sm font-medium uppercase tracking-wider">{facility.title}</p>
-                    <p className="text-muted-foreground/30 text-xs mt-2">Próximamente fotos aquí</p>
+                  <div className="relative w-full h-48 md:h-64 rounded-2xl mb-6 overflow-hidden">
+                    <Image
+                      src={facility.image}
+                      alt={facility.title}
+                      fill
+                      className="object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
                   </div>
                   <div className="flex-1">
                     <h3 className="text-2xl font-bold text-ivory mb-3 group-hover:text-accent transition-colors">{facility.title}</h3>
@@ -234,7 +241,14 @@ export default function CentroPage() {
                   </div>
                   <div>
                     <h3 className="font-semibold text-ivory mb-1">Dirección</h3>
-                    <p className="text-muted-foreground">{cmsContent?.address || 'Focus Club Vallecas'}</p>
+                    <a
+                      href="https://maps.app.goo.gl/EHFk2xEh9xwHBaDKA"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-muted-foreground hover:text-accent transition-colors"
+                    >
+                      {cmsContent?.address || 'Focus Club Vallecas'}
+                    </a>
                   </div>
                 </div>
 
@@ -289,14 +303,15 @@ export default function CentroPage() {
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true }}
             >
-              <div className="aspect-square md:aspect-[4/3] rounded-2xl bg-gradient-to-br from-primary/30 to-accent/10 flex items-center justify-center">
-                <div className="text-center p-8">
-                  <MapPin className="w-12 h-12 text-accent mx-auto mb-4" />
-                  <p className="text-ivory font-semibold">Mapa interactivo</p>
-                  <p className="text-muted-foreground text-sm mt-2">
-                    {cmsContent?.address || 'Cargando ubicación...'}
-                  </p>
-                </div>
+              <div className="relative aspect-square md:aspect-[4/3] rounded-2xl overflow-hidden">
+                <iframe
+                  src="https://maps.google.com/maps?q=C.+de+Pe%C3%B1aranda+de+Bracamonte+69+Local+4,Villa+de+Vallecas,28051+Madrid&output=embed"
+                  className="absolute inset-0 w-full h-full"
+                  style={{ border: 0 }}
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  title="Focus Club Vallecas — Calle de la Ilusión 45, Vallecas, Madrid"
+                />
               </div>
             </motion.div>
           </div>

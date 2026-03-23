@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Award, Heart, Users, User, Target, ArrowRight, Calendar, CheckCircle, Trophy, Medal, Star } from 'lucide-react';
+import { Award, Heart, Users, Target, ArrowRight, Calendar, CheckCircle, Trophy, Medal, Star } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { useCMS } from '@/hooks/useFirestore';
@@ -171,11 +171,16 @@ export default function SandraPage() {
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.6 }}
             >
-              <div className="aspect-square rounded-3xl overflow-hidden glass-card p-2 max-w-md mx-auto">
-                <div className="relative w-full h-full rounded-2xl overflow-hidden">
-                  <div className="w-full h-full bg-gradient-to-br from-carbon to-background flex items-center justify-center">
-                    <User className="w-32 h-32 text-muted-foreground opacity-20" />
-                  </div>
+              <div className="rounded-3xl overflow-hidden glass-card p-2 max-w-md mx-auto">
+                <div className="relative rounded-2xl overflow-hidden">
+                  <Image
+                    src="/imagenes/sandra.jpg"
+                    alt="Sandra Andújar — Entrenadora personal y jueza internacional en Focus Club Vallecas"
+                    width={600}
+                    height={600}
+                    className="w-full h-auto object-cover object-top"
+                    priority
+                  />
                   <div className="absolute inset-0 bg-gradient-to-t from-carbon/80 via-transparent to-transparent" />
                   <div className="absolute bottom-0 left-0 right-0 p-6">
                     <div className="flex flex-wrap gap-2">

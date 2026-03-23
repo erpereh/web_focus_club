@@ -32,7 +32,7 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "Focus Club Vallecas" }],
   icons: {
-    icon: "/favicon.ico",
+    icon: "/imagenes/logo.jpeg",
   },
   openGraph: {
     title: "Focus Club Vallecas | Entrenamiento Personal Premium en Madrid",

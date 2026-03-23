@@ -83,8 +83,8 @@ export default function PoliticaDePrivacidadPage() {
                         </ul>
                         <p>
                             Para ejercer tus derechos, contacta con nosotros en{' '}
-                            <a href="mailto:info@focusclubvallecas.com" className="text-accent hover:underline">
-                                info@focusclubvallecas.com
+                            <a href="mailto:infofocusclub2026@gmail.com" className="text-accent hover:underline">
+                                infofocusclub2026@gmail.com
                             </a>.
                         </p>
 

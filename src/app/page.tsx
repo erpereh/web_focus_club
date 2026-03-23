@@ -3,7 +3,8 @@
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArrowRight, Star, Clock, Users, User, Award, Dumbbell, Heart, Activity, Apple } from 'lucide-react';
+import { ArrowRight, Star, Clock, Users, Award, Dumbbell, Heart, Activity, Apple, Trophy } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { useCMS, useServices, useTestimonials } from '@/hooks/useFirestore';
@@ -27,7 +28,7 @@ const itemVariants = {
   },
 };
 
-const serviceIcons = [Dumbbell, Activity, Heart, Apple];
+const ICON_MAP: Record<string, LucideIcon> = { Dumbbell, Trophy, Apple, Activity, Users, Heart };
 
 export default function Home() {
   const { cmsContent } = useCMS();
@@ -41,7 +42,7 @@ export default function Home() {
         {/* Background Image */}
         <div className="absolute inset-0">
           <Image
-            src="/images/hero-gym.png"
+            src="/imagenes/hero.jpeg"
             alt="Focus Club Vallecas"
             fill
             className="object-cover opacity-50"
@@ -199,12 +200,16 @@ export default function Home() {
               viewport={{ once: true }}
               transition={{ duration: 0.6 }}
             >
-              <div className="aspect-[3/4] rounded-3xl overflow-hidden glass-card p-2">
-                <div className="relative w-full h-full rounded-2xl overflow-hidden">
-                  <div className="w-full h-full bg-gradient-to-br from-carbon to-background flex items-center justify-center">
-                    <User className="w-16 h-16 text-muted-foreground opacity-20" />
-                  </div>
-                  <div className="absolute inset-0 bg-background/80" />
+              <div className="rounded-3xl overflow-hidden glass-card p-2">
+                <div className="relative rounded-2xl overflow-hidden">
+                  <Image
+                    src="/imagenes/sandra.jpg"
+                    alt="Sandra Andújar — Fundadora & Coach Principal de Focus Club Vallecas"
+                    width={600}
+                    height={800}
+                    className="w-full h-auto object-cover object-top"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent" />
                   <div className="absolute bottom-0 left-0 right-0 p-4 text-center">
                     <p className="text-foreground font-semibold">Sandra Andújar</p>
                     <p className="text-primary text-sm">Fundadora & Coach Principal</p>
@@ -247,8 +252,8 @@ export default function Home() {
             whileInView="visible"
             viewport={{ once: true }}
           >
-            {services.slice(0, 4).map((service, index) => {
-              const Icon = serviceIcons[index] || Dumbbell;
+            {services.slice(0, 4).map((service) => {
+              const Icon = (service.icon && ICON_MAP[service.icon]) || Dumbbell;
               return (
                 <motion.div key={service.id} variants={itemVariants}>
                   <Link href={`/servicios#${service.id}`}>

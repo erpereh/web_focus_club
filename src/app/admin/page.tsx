@@ -728,13 +728,10 @@ export default function AdminPage() {
                 </form>
 
                 {/* Separator */}
-                <div className="relative my-4">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-border" />
-                  </div>
-                  <div className="relative flex justify-center text-xs">
-                    <span className="px-3 bg-carbon text-muted-foreground">o</span>
-                  </div>
+                <div className="flex items-center gap-3 my-4 text-xs text-muted-foreground">
+                  <div className="flex-1 border-t border-border" />
+                  <span>o</span>
+                  <div className="flex-1 border-t border-border" />
                 </div>
 
                 {/* Google Sign-In */}
