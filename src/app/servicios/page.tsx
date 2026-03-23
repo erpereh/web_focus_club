@@ -2,12 +2,15 @@
 
 import { motion } from 'framer-motion';
 import Link from 'next/link';
-import { Clock, CheckCircle, ArrowRight, Dumbbell, Activity, Heart, Apple } from 'lucide-react';
+import { Clock, CheckCircle, ArrowRight, Dumbbell, Activity, Heart, Apple, Trophy, Users } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { useServices, useCMS } from '@/hooks/useFirestore';
+import type { LucideIcon } from 'lucide-react';
 
-const serviceIcons = [Dumbbell, Activity, Heart, Apple];
+const ICON_MAP: Record<string, LucideIcon> = {
+  Dumbbell, Activity, Heart, Apple, Trophy, Users,
+};
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -60,8 +63,8 @@ export default function ServiciosPage() {
             initial="hidden"
             animate="visible"
           >
-            {services.map((service, index) => {
-              const Icon = serviceIcons[index] || Dumbbell;
+            {services.map((service) => {
+              const Icon = (service.icon && ICON_MAP[service.icon]) || Dumbbell;
               return (
                 <motion.div key={service.id} id={service.id} variants={itemVariants}>
                   <GlassCard className="h-full group">

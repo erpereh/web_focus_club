@@ -21,6 +21,7 @@ export interface Service {
     image?: string;
     features?: string[];
     order?: number;
+    icon?: string;
 }
 
 export interface TimeSlot {

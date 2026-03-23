@@ -153,9 +153,9 @@ export default function Home() {
       </section>
 
       {/* About Section */}
-      <section className="py-24 relative">
+      <section className="py-14 relative">
         <div className="container mx-auto px-4">
-          <div className="grid lg:grid-cols-2 gap-12 items-center">
+          <div className="grid lg:grid-cols-2 gap-10 items-center max-w-5xl mx-auto">
             <motion.div
               initial={{ opacity: 0, x: -30 }}
               whileInView={{ opacity: 1, x: 0 }}
@@ -165,27 +165,27 @@ export default function Home() {
               <span className="text-primary text-sm font-medium uppercase tracking-wider">
                 Conoce a tu entrenadora
               </span>
-              <h2 className="text-3xl md:text-4xl font-bold text-foreground mt-3 mb-6">
+              <h2 className="text-2xl md:text-3xl font-bold text-foreground mt-2 mb-4">
                 {cmsContent.aboutTitle}
               </h2>
-              <p className="text-muted-foreground text-lg leading-relaxed mb-6">
+              <p className="text-muted-foreground leading-relaxed mb-5">
                 {cmsContent.aboutText}
               </p>
-              <div className="flex flex-wrap gap-4">
+              <div className="flex flex-wrap gap-3">
                 <div className="flex items-center gap-2">
-                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <Award className="w-5 h-5 text-primary" />
+                  <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <Award className="w-4 h-4 text-primary" />
                   </div>
                   <span className="text-sm text-muted-foreground">Certificación Internacional</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <Heart className="w-5 h-5 text-primary" />
+                  <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <Heart className="w-4 h-4 text-primary" />
                   </div>
                   <span className="text-sm text-muted-foreground">Atención Personalizada</span>
                 </div>
               </div>
-              <Link href="/sandra" className="inline-block mt-8">
+              <Link href="/sandra" className="inline-block mt-6">
                 <PremiumButton variant="outline" icon={<ArrowRight className="w-4 h-4" />} iconPosition="right">
                   Leer más
                 </PremiumButton>
@@ -193,27 +193,27 @@ export default function Home() {
             </motion.div>
 
             <motion.div
-              className="relative"
+              className="relative max-w-xs mx-auto lg:max-w-none"
               initial={{ opacity: 0, x: 30 }}
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.6 }}
             >
-              <div className="aspect-[4/5] rounded-3xl overflow-hidden glass-card p-2">
+              <div className="aspect-[3/4] rounded-3xl overflow-hidden glass-card p-2">
                 <div className="relative w-full h-full rounded-2xl overflow-hidden">
                   <div className="w-full h-full bg-gradient-to-br from-carbon to-background flex items-center justify-center">
-                    <User className="w-20 h-20 text-muted-foreground opacity-20" />
+                    <User className="w-16 h-16 text-muted-foreground opacity-20" />
                   </div>
                   <div className="absolute inset-0 bg-background/80" />
-                  <div className="absolute bottom-0 left-0 right-0 p-6 text-center">
-                    <p className="text-foreground font-semibold text-lg">Sandra Andújar</p>
+                  <div className="absolute bottom-0 left-0 right-0 p-4 text-center">
+                    <p className="text-foreground font-semibold">Sandra Andújar</p>
                     <p className="text-primary text-sm">Fundadora & Coach Principal</p>
                   </div>
                 </div>
               </div>
               {/* Decorative elements */}
-              <div className="absolute -top-4 -right-4 w-24 h-24 bg-primary/20 rounded-full blur-2xl" />
-              <div className="absolute -bottom-4 -left-4 w-32 h-32 bg-accent/20 rounded-full blur-2xl" />
+              <div className="absolute -top-4 -right-4 w-20 h-20 bg-primary/20 rounded-full blur-2xl" />
+              <div className="absolute -bottom-4 -left-4 w-24 h-24 bg-accent/20 rounded-full blur-2xl" />
             </motion.div>
           </div>
         </div>

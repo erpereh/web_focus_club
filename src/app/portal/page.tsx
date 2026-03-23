@@ -21,6 +21,8 @@ import {
   Activity,
   Apple,
   Trophy,
+  Users,
+  Heart,
   AlertCircle,
   Eye,
   EyeOff,
@@ -29,6 +31,7 @@ import {
   RefreshCw,
   KeyRound,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { InteractiveCalendar } from '@/components/ui/interactive-calendar';
@@ -85,7 +88,9 @@ const serviceLabels: Record<string, string> = {
   assessment: 'Valoración Inicial',
 };
 
-const serviceIcons = [Dumbbell, Trophy, Apple, Activity];
+const ICON_MAP: Record<string, LucideIcon> = {
+  Dumbbell, Trophy, Apple, Activity, Users, Heart,
+};
 
 const durations = [
   { value: '30', label: '30 minutos', desc: 'Consulta rápida' },
@@ -998,8 +1003,8 @@ export default function PortalPage() {
                         Tipo de Servicio
                       </h3>
                       <div className="grid sm:grid-cols-2 gap-4">
-                        {services.map((service, index) => {
-                          const Icon = serviceIcons[index] || Dumbbell;
+                        {services.map((service) => {
+                          const Icon = (service.icon && ICON_MAP[service.icon]) || Dumbbell;
                           return (
                           <button
                             key={service.id}
