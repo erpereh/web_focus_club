@@ -28,33 +28,10 @@ import { PremiumButton } from '@/components/ui/premium-button';
 import { addAppointment as addAppointmentFS, getSiteConfig, generateTimeSlots } from '@/lib/firestore';
 import { TimeSlot } from '@/types';
 import { useAuth } from '@/contexts/AuthContext';
+import { useServices } from '@/hooks/useFirestore';
 
-const serviceTypes = [
-  {
-    id: 'training',
-    title: 'Entrenamiento Personal',
-    description: 'Programas personalizados con metodología científica',
-    icon: Dumbbell,
-  },
-  {
-    id: 'competition',
-    title: 'Preparación para Competición',
-    description: 'Para atletas que buscan competir',
-    icon: Trophy,
-  },
-  {
-    id: 'nutrition',
-    title: 'Nutrición y Recomposición',
-    description: 'Planes nutricionales personalizados',
-    icon: Apple,
-  },
-  {
-    id: 'assessment',
-    title: 'Valoración Inicial',
-    description: 'Evaluación completa - ¡Gratis!',
-    icon: Activity,
-  },
-];
+const serviceIcons = [Dumbbell, Activity, Heart, Apple, Trophy];
+const EXCLUDED_BOOKING_TITLES = ['valoración inicial'];
 
 const durations = [
   { value: '30', label: '30 minutos', desc: 'Consulta rápida' },
@@ -89,6 +66,10 @@ export default function SolicitarCitaPage() {
   const router = useRouter();
   const { user, userProfile, loading: authLoading } = useAuth();
   const isAuthenticated = !!user && !!userProfile?.phone;
+  const { services: rawServices } = useServices();
+  const bookingServices = rawServices.filter(
+    (s) => !EXCLUDED_BOOKING_TITLES.includes(s.title.trim().toLowerCase())
+  );
 
   const [currentStep, setCurrentStep] = useState(1);
   const [direction, setDirection] = useState(0);
@@ -198,7 +179,7 @@ export default function SolicitarCitaPage() {
         name: formData.name,
         email: formData.email,
         phone: formData.phone,
-        serviceType: formData.serviceType,
+        serviceType: selectedService?.title || formData.serviceType,
         duration: formData.duration,
         preferredSlots: formData.preferredSlots,
         reason: formData.reason,
@@ -209,7 +190,7 @@ export default function SolicitarCitaPage() {
     }
   };
 
-  const selectedService = serviceTypes.find((s) => s.id === formData.serviceType);
+  const selectedService = bookingServices.find((s) => s.id === formData.serviceType);
   const selectedDuration = durations.find((d) => d.value === formData.duration);
 
   if (submitted) {
@@ -302,50 +283,53 @@ export default function SolicitarCitaPage() {
                     Selecciona el servicio que mejor se adapte a tus necesidades.
                   </p>
                   <div className="grid sm:grid-cols-2 gap-4">
-                    {serviceTypes.map((service) => (
-                      <motion.div
-                        key={service.id}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                      >
-                        <GlassCard
-                          className={`cursor-pointer transition-all ${formData.serviceType === service.id
-                            ? 'border-accent shadow-emerald-glow'
-                            : ''
-                            }`}
-                          onClick={() =>
-                            setFormData((prev) => ({
-                              ...prev,
-                              serviceType: service.id,
-                            }))
-                          }
+                    {bookingServices.map((service, index) => {
+                      const Icon = serviceIcons[index] || Dumbbell;
+                      return (
+                        <motion.div
+                          key={service.id}
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
                         >
-                          <div className="flex items-start gap-4">
-                            <div
-                              className={`w-12 h-12 rounded-xl flex items-center justify-center ${formData.serviceType === service.id
-                                ? 'bg-accent/20'
-                                : 'bg-primary/20'
-                                }`}
-                            >
-                              <service.icon
-                                className={`w-6 h-6 ${formData.serviceType === service.id
-                                  ? 'text-accent'
-                                  : 'text-muted-foreground'
+                          <GlassCard
+                            className={`cursor-pointer transition-all ${formData.serviceType === service.id
+                              ? 'border-accent shadow-emerald-glow'
+                              : ''
+                              }`}
+                            onClick={() =>
+                              setFormData((prev) => ({
+                                ...prev,
+                                serviceType: service.id,
+                              }))
+                            }
+                          >
+                            <div className="flex items-start gap-4">
+                              <div
+                                className={`w-12 h-12 rounded-xl flex items-center justify-center ${formData.serviceType === service.id
+                                  ? 'bg-accent/20'
+                                  : 'bg-primary/20'
                                   }`}
-                              />
+                              >
+                                <Icon
+                                  className={`w-6 h-6 ${formData.serviceType === service.id
+                                    ? 'text-accent'
+                                    : 'text-muted-foreground'
+                                    }`}
+                                />
+                              </div>
+                              <div>
+                                <h3 className="font-semibold text-ivory">
+                                  {service.title}
+                                </h3>
+                                <p className="text-sm text-muted-foreground">
+                                  {service.description}
+                                </p>
+                              </div>
                             </div>
-                            <div>
-                              <h3 className="font-semibold text-ivory">
-                                {service.title}
-                              </h3>
-                              <p className="text-sm text-muted-foreground">
-                                {service.description}
-                              </p>
-                            </div>
-                          </div>
-                        </GlassCard>
-                      </motion.div>
-                    ))}
+                          </GlassCard>
+                        </motion.div>
+                      );
+                    })}
                   </div>
                 </div>
               )}

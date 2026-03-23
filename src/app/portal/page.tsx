@@ -35,6 +35,7 @@ import { InteractiveCalendar } from '@/components/ui/interactive-calendar';
 import { useAuth } from '@/contexts/AuthContext';
 import type { TimeSlot, Appointment } from '@/types';
 import { addAppointment as addAppointmentFS, getAppointmentsByUser } from '@/lib/firestore';
+import { useServices } from '@/hooks/useFirestore';
 import { cn } from '@/lib/utils';
 
 // ============================================
@@ -76,19 +77,15 @@ const statusConfig = {
   },
 };
 
-const serviceTypes = [
-  { id: 'training', title: 'Entrenamiento Personal', icon: Dumbbell },
-  { id: 'competition', title: 'Preparación para Competición', icon: Trophy },
-  { id: 'nutrition', title: 'Nutrición y Recomposición', icon: Apple },
-  { id: 'assessment', title: 'Valoración Inicial', icon: Activity },
-];
-
+// Fallback labels for appointments created before dynamic loading
 const serviceLabels: Record<string, string> = {
   training: 'Entrenamiento Personal',
   competition: 'Preparación para Competición',
   nutrition: 'Nutrición y Recomposición',
   assessment: 'Valoración Inicial',
 };
+
+const serviceIcons = [Dumbbell, Trophy, Apple, Activity];
 
 const durations = [
   { value: '30', label: '30 minutos', desc: 'Consulta rápida' },
@@ -103,6 +100,7 @@ const durations = [
 export default function PortalPage() {
   const { user, userProfile, loading: authContextLoading, login, register, loginWithGoogle, logout, resetPassword, resendVerification, completeGoogleProfile } = useAuth();
   const isAuthenticated = !!user && !!userProfile?.phone;
+  const { services } = useServices();
 
   const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [portalView, setPortalView] = useState<PortalView>('dashboard');
@@ -300,7 +298,7 @@ export default function PortalPage() {
         name: userProfile.name,
         email: userProfile.email,
         phone: userProfile.phone || '',
-        serviceType: formData.serviceType,
+        serviceType: services.find(s => s.id === formData.serviceType)?.title || formData.serviceType,
         duration: formData.duration,
         preferredSlots: [formData.preferredSlot],
         reason: formData.reason,
@@ -1000,7 +998,9 @@ export default function PortalPage() {
                         Tipo de Servicio
                       </h3>
                       <div className="grid sm:grid-cols-2 gap-4">
-                        {serviceTypes.map((service) => (
+                        {services.map((service, index) => {
+                          const Icon = serviceIcons[index] || Dumbbell;
+                          return (
                           <button
                             key={service.id}
                             onClick={() => setFormData({ ...formData, serviceType: service.id })}
@@ -1016,7 +1016,7 @@ export default function PortalPage() {
                                 'w-12 h-12 rounded-lg flex items-center justify-center transition-colors',
                                 formData.serviceType === service.id ? 'bg-accent/20' : 'bg-obsidian/50 group-hover:bg-accent/10'
                               )}>
-                                <service.icon className={cn(
+                                <Icon className={cn(
                                   'w-6 h-6',
                                   formData.serviceType === service.id ? 'text-accent' : 'text-muted-foreground group-hover:text-accent'
                                 )} />
@@ -1029,7 +1029,8 @@ export default function PortalPage() {
                               </span>
                             </div>
                           </button>
-                        ))}
+                          );
+                        })}
                       </div>
                     </GlassCard>
 

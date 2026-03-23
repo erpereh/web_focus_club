@@ -66,34 +66,23 @@ export default function ServiciosPage() {
                 <motion.div key={service.id} id={service.id} variants={itemVariants}>
                   <GlassCard className="h-full group">
                     <div className="flex flex-col md:flex-row gap-6">
-                      {/* Icon */}
                       <div className="flex-shrink-0">
                         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary/30 to-accent/10 flex items-center justify-center group-hover:shadow-glow transition-shadow">
                           <Icon className="w-8 h-8 text-accent" />
                         </div>
                       </div>
-
-                      {/* Content */}
                       <div className="flex-1">
-                        <div className="flex items-start justify-between mb-3">
-                          <h2 className="text-2xl font-bold text-ivory group-hover:text-accent transition-colors">
-                            {service.title}
-                          </h2>
-                          <span className="text-accent font-semibold text-lg">
-                            {service.price}
-                          </span>
-                        </div>
-
+                        <h2 className="text-2xl font-bold text-ivory group-hover:text-accent transition-colors mb-3">
+                          {service.title}
+                        </h2>
                         <p className="text-muted-foreground mb-4">
                           {service.description}
                         </p>
-
                         <div className="flex items-center gap-2 text-muted-foreground text-sm mb-4">
                           <Clock className="w-4 h-4 text-accent" />
                           <span>Duración: {service.duration}</span>
                         </div>
-
-                        {service.features && (
+                        {service.features && service.features.length > 0 && (
                           <div className="space-y-2 mb-6">
                             {service.features.map((feature, i) => (
                               <div key={i} className="flex items-center gap-2">
@@ -103,7 +92,6 @@ export default function ServiciosPage() {
                             ))}
                           </div>
                         )}
-
                         <Link href="/solicitar-cita">
                           <PremiumButton
                             variant="outline"
@@ -120,30 +108,6 @@ export default function ServiciosPage() {
                 </motion.div>
               );
             })}
-          </motion.div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="py-20">
-        <div className="container mx-auto px-4">
-          <motion.div
-            className="max-w-3xl mx-auto text-center glass-card rounded-3xl p-6 md:p-12"
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-          >
-            <h2 className="text-3xl font-bold text-ivory mb-4">
-              ¿No sabes qué servicio elegir?
-            </h2>
-            <p className="text-muted-foreground mb-8">
-              Reserva una consulta gratuita y te ayudaremos a encontrar el programa perfecto para ti.
-            </p>
-            <Link href="/solicitar-cita">
-              <PremiumButton variant="cta" size="lg" icon={<ArrowRight className="w-5 h-5" />} iconPosition="right">
-                Consulta Gratuita
-              </PremiumButton>
-            </Link>
           </motion.div>
         </div>
       </section>
@@ -171,8 +135,8 @@ export default function ServiciosPage() {
                 a: 'No, nuestros programas están diseñados para todos los niveles, desde principiantes hasta atletas avanzados.',
               },
               {
-                q: '¿Puedo combinar diferentes servicios?',
-                a: '¡Por supuesto! Muchos de nuestros clientes combinan entrenamiento personal con fisioterapia o pilates para resultados óptimos.',
+                q: '¿Cómo funciona el bono de entrenamiento?',
+                a: 'El bono mensual se adquiere directamente en el gimnasio. Incluye 1 sesión de 1 hora semanal o 2 sesiones de 30 minutos, adaptándose a tu disponibilidad.',
               },
               {
                 q: '¿Cuál es la política de cancelación?',

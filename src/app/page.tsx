@@ -262,13 +262,10 @@ export default function Home() {
                       <p className="text-muted-foreground text-sm mb-4 line-clamp-2">
                         {service.description}
                       </p>
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center">
                         <span className="text-xs text-muted-foreground flex items-center gap-1">
                           <Clock className="w-3 h-3" />
                           {service.duration}
-                        </span>
-                        <span className="text-primary font-medium text-sm">
-                          {service.price}
                         </span>
                       </div>
                     </GlassCard>
@@ -363,7 +360,7 @@ export default function Home() {
             </p>
             <Link href="/solicitar-cita">
               <PremiumButton variant="cta" size="lg" icon={<ArrowRight className="w-5 h-5" />} iconPosition="right">
-                Solicitar Cita Gratuita
+                Solicitar Cita
               </PremiumButton>
             </Link>
           </motion.div>
