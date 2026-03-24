@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   User,
   Mail,
@@ -928,8 +929,8 @@ export default function PortalPage() {
         <div className="container mx-auto px-4">
           <div className="flex items-center justify-between h-16">
             <Link href="/" className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald to-accent flex items-center justify-center">
-                <Dumbbell className="w-4 h-4 text-obsidian" />
+              <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0">
+                <Image src="/imagenes/logo.jpeg" alt="Focus Club" width={32} height={32} className="w-full h-full object-cover" />
               </div>
               <span className="font-bold text-ivory hidden sm:block">Focus Club</span>
             </Link>

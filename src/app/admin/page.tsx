@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   LayoutDashboard,
   Calendar,
@@ -848,8 +849,8 @@ export default function AdminPage() {
           <div className="container mx-auto px-4">
             <div className="flex items-center justify-between h-16">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald to-accent flex items-center justify-center">
-                  <Dumbbell className="w-4 h-4 text-obsidian" />
+                <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0">
+                  <Image src="/imagenes/logo.jpeg" alt="Focus Club" width={32} height={32} className="w-full h-full object-cover" />
                 </div>
                 <div>
                   <span className="font-bold text-ivory">Panel Entrenador</span>
@@ -951,8 +952,8 @@ export default function AdminPage() {
                 {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
               </button>
               <Link href="/" className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald to-accent flex items-center justify-center">
-                  <LayoutDashboard className="w-4 h-4 text-obsidian" />
+                <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0">
+                  <Image src="/imagenes/logo.jpeg" alt="Focus Club" width={32} height={32} className="w-full h-full object-cover" />
                 </div>
                 <span className="font-bold text-ivory hidden sm:block">Focus Club Admin</span>
               </Link>

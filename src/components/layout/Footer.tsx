@@ -3,7 +3,8 @@
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Dumbbell, Mail, Phone, MapPin, Instagram } from 'lucide-react';
+import Image from 'next/image';
+import { Mail, Phone, MapPin, Instagram } from 'lucide-react';
 import { useCMS } from '@/hooks/useFirestore';
 
 const footerLinks = [
@@ -35,10 +36,10 @@ export function Footer() {
           <div className="space-y-4">
             <Link href="/" className="flex items-center gap-2">
               <motion.div
-                className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-forest-500 flex items-center justify-center"
+                className="w-10 h-10 rounded-xl overflow-hidden shrink-0"
                 whileHover={{ scale: 1.05 }}
               >
-                <Dumbbell className="w-5 h-5 text-ivory" />
+                <Image src="/imagenes/logo.jpeg" alt="Focus Club Vallecas" width={40} height={40} className="w-full h-full object-cover" />
               </motion.div>
               <div className="flex flex-col">
                 <span className="text-lg font-bold tracking-tight text-ivory">
