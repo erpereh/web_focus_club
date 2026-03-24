@@ -26,6 +26,7 @@ import type {
     CMSContent,
     SandraData,
     CentroData,
+    GaleriaContent,
     TimeSlot,
     BlockedSlot,
     SlotOccupancy,
@@ -222,6 +223,10 @@ export async function updateCentroData(data: Partial<CentroData>): Promise<void>
     await updateDoc(doc(db, 'site_content', SITE_CONTENT_DOC), {
         centro: { ...current.centro, ...data },
     });
+}
+
+export async function updateGaleriaData(data: GaleriaContent): Promise<void> {
+    await updateDoc(doc(db, 'site_content', SITE_CONTENT_DOC), { galeria: data });
 }
 
 // ============================================

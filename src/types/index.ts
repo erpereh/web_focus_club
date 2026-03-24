@@ -147,6 +147,14 @@ export interface Bono {
     createdAt: string;
 }
 
+export interface GaleriaContent {
+    heroTitle: string;
+    heroSubtitle: string;
+    stats: { value: number; suffix: string; label: string }[];
+    transformaciones: { name: string; periodo: string; resultado: string }[];
+    resultados: { name: string; stat: string; statLabel: string; tag: string; story: string; detail: string }[];
+}
+
 export interface CMSContent {
     heroTitle: string;
     heroSubtitle: string;
@@ -159,6 +167,7 @@ export interface CMSContent {
 
     sandra: SandraData;
     centro: CentroData;
+    galeria: GaleriaContent;
 
     servicesTitle: string;
     servicesSubtitle: string;

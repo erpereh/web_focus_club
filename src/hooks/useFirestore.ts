@@ -32,6 +32,26 @@ export const defaultCMS: CMSContent = {
         gallery: [],
         schedule: { weekdays: '7:00 - 21:00', saturday: '9:00 - 14:00' },
     },
+    galeria: {
+        heroTitle: 'Galería Focus Club Vallecas',
+        heroSubtitle: 'Resultados reales, historias de transformación auténticas.',
+        stats: [
+            { value: 200, suffix: '+', label: 'Clientes transformados' },
+            { value: 20, suffix: ' años', label: 'De experiencia' },
+            { value: 100, suffix: '%', label: 'Compromiso' },
+        ],
+        transformaciones: [
+            { name: 'María García', periodo: '16 semanas', resultado: '-18 kg' },
+            { name: 'Carlos Martínez', periodo: '20 semanas', resultado: '+12 kg músculo' },
+            { name: 'Laura Pérez', periodo: '12 semanas', resultado: '1er puesto' },
+        ],
+        resultados: [
+            { name: 'María García', stat: '-18 kg', statLabel: 'en 4 meses', tag: 'Pérdida de peso', story: '"Nunca pensé que podría estar así de bien. Sandra me cambió la vida, no solo el cuerpo. El método es brutal."', detail: 'De 78 kg a 60 kg. Cambio total de composición corporal con plan de nutrición incluido.' },
+            { name: 'Carlos Martínez', stat: '+12 kg', statLabel: 'masa muscular', tag: 'Hipertrofia', story: '"Llevaba años en el gimnasio sin avanzar. En 6 meses con Sandra conseguí más que en 4 años solo."', detail: 'Programa de hipertrofia progresivo con periodización avanzada y seguimiento semanal.' },
+            { name: 'Laura Pérez', stat: '1er', statLabel: 'puesto competición', tag: 'Competición', story: '"Preparar mi primera competición con Sandra fue la mejor decisión. Técnica, nutrición y mentalidad: 10/10."', detail: 'Preparación completa para competición de fitness en 5 meses. Primera vez en escenario.' },
+            { name: 'Ana Rodríguez', stat: '100%', statLabel: 'objetivo cumplido', tag: 'Definición', story: '"Entré buscando definición y salí con un estilo de vida completamente nuevo. Increíble equipo."', detail: 'Programa de definición y tonificación de 3 meses con resultados visibles desde la semana 4.' },
+        ],
+    },
     servicesTitle: 'Servicios Especializados',
     servicesSubtitle: 'Programas diseñados para atletas y personas que buscan la excelencia física',
     testimonialsTitle: 'Historias de Transformación',

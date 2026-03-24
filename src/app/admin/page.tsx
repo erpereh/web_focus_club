@@ -53,7 +53,8 @@ import { PremiumButton } from '@/components/ui/premium-button';
 import { ImageUpload } from '@/components/ui/ImageUpload';
 import { ContextualImageManager } from '@/components/ui/ContextualImageManager';
 import { useAuth } from '@/contexts/AuthContext';
-import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, BlockedSlot, Trainer, SiteConfig, Bono } from '@/types';
+import { defaultCMS } from '@/hooks/useFirestore';
+import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono } from '@/types';
 import {
   getAppointments,
   updateAppointmentStatus as updateAppointmentStatusFS,
@@ -71,6 +72,7 @@ import {
   updateSiteContent,
   updateSandraData as updateSandraDataFS,
   updateCentroData as updateCentroDataFS,
+  updateGaleriaData as updateGaleriaDataFS,
   getUsers,
   getUserProfile,
   addActivityLog,
@@ -130,141 +132,6 @@ async function sendWebhook(payload: {
   }
 }
 
-// --- Galería Tab: fetches live from Cloudinary ---
-interface CloudinaryResource {
-  public_id: string;
-  url: string;
-  resource_type: 'image' | 'video';
-  format: string;
-  width: number;
-  height: number;
-  folder: string;
-}
-
-function GaleriaTab() {
-  const [resources, setResources] = useState<CloudinaryResource[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
-
-  const fetchResources = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/images?folder=Galeria');
-      const data = await res.json();
-      setResources(data.images || []);
-    } catch (err) {
-      console.error('Error fetching gallery:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchResources(); }, []);
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('folder', 'Galeria');
-      const res = await fetch('/api/upload', { method: 'POST', body: formData });
-      if (res.ok) {
-        await fetchResources();
-      }
-    } catch (err) {
-      console.error('Upload error:', err);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const getVideoThumbnail = (url: string) => {
-    // Cloudinary auto-generates video thumbnails by changing extension to .jpg
-    return url.replace(/\.(mp4|mov|avi|webm)$/i, '.jpg');
-  };
-
-  return (
-    <motion.div
-      key="Galeria"
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-    >
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-ivory">Galería Pública</h1>
-        <div className="flex gap-3">
-          <label className="cursor-pointer">
-            <input type="file" accept="image/*,video/*" className="hidden" onChange={handleUpload} />
-            <PremiumButton variant="cta" icon={<Plus className="w-4 h-4" />} onClick={() => { }}>
-              {uploading ? 'Subiendo...' : 'Subir archivo'}
-            </PremiumButton>
-          </label>
-          <PremiumButton variant="outline" icon={<RefreshCw className="w-4 h-4" />} onClick={fetchResources}>
-            Actualizar
-          </PremiumButton>
-        </div>
-      </div>
-
-      <GlassCard className="p-6">
-        <h2 className="text-lg font-semibold text-ivory mb-2 flex items-center gap-2">
-          <ImageIcon className="w-5 h-5 text-accent" />
-          Contenido de Cloudinary ({resources.length} archivos)
-        </h2>
-        <p className="text-sm text-muted-foreground mb-4">
-          Estos archivos se cargan en tiempo real desde Cloudinary. Sube nuevos o gestionalos desde el panel de Cloudinary.
-        </p>
-
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <RefreshCw className="w-6 h-6 animate-spin text-accent" />
-            <span className="ml-3 text-muted-foreground">Cargando desde Cloudinary...</span>
-          </div>
-        ) : resources.length === 0 ? (
-          <div className="text-center py-12 text-muted-foreground">
-            <ImageIcon className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <p>No hay archivos en la carpeta Galería de Cloudinary</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            {resources.map((resource) => (
-              <div
-                key={resource.public_id}
-                className="relative group rounded-xl overflow-hidden border border-border aspect-square bg-muted/20"
-              >
-                {resource.resource_type === 'video' ? (
-                  <>
-                    <img
-                      src={getVideoThumbnail(resource.url)}
-                      alt={resource.public_id}
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="w-12 h-12 rounded-full bg-obsidian/70 flex items-center justify-center border-2 border-white/30">
-                        <div className="w-0 h-0 border-t-[8px] border-t-transparent border-l-[14px] border-l-white border-b-[8px] border-b-transparent ml-1" />
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <img
-                    src={resource.url}
-                    alt={resource.public_id}
-                    className="w-full h-full object-cover"
-                  />
-                )}
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-obsidian/80 to-transparent p-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <p className="text-xs text-white truncate">{resource.public_id.split('/').pop()}</p>
-                  <p className="text-[10px] text-white/60 uppercase">{resource.resource_type} · {resource.format}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </GlassCard>
-    </motion.div>
-  );
-}
 
 type TabType = 'Inicio' | 'appointments' | 'availability' | 'clients' | 'team' | 'services' | 'testimonials' | 'Sandra' | 'Centro' | 'Galeria' | 'Contacto' | 'config';
 type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
@@ -433,8 +300,9 @@ export default function AdminPage() {
     setEditConfig(config);
     setEditBonoConfig(config.bonoExpirationMonths || 1);
     if (cms) {
-      setCmsContent(cms);
-      setEditedContent(cms);
+      const mergedCms = { ...cms, galeria: cms.galeria ?? defaultCMS.galeria };
+      setCmsContent(mergedCms);
+      setEditedContent(mergedCms);
     }
 
     // Bonos: expirar vencidos y cargar mapa de bonos activos por cliente
@@ -605,6 +473,15 @@ export default function AdminPage() {
     await addActivityLog({ action: 'cms_centro_updated', adminEmail: user?.email || 'unknown' });
     await refreshData();
     alert('✅ Datos del Centro actualizados');
+  };
+
+  // Manejar guardado de la Galería
+  const handleSaveGaleria = async () => {
+    if (!editedContent?.galeria) return;
+    await updateGaleriaDataFS(editedContent.galeria);
+    await addActivityLog({ action: 'cms_galeria_updated', adminEmail: user?.email || 'unknown' });
+    await refreshData();
+    alert('✅ Datos de la Galería actualizados');
   };
 
   // Manejar guardado de servicio
@@ -2262,6 +2139,38 @@ export default function AdminPage() {
                           />
                         </div>
                       </div>
+                      <div className="grid sm:grid-cols-2 gap-4 mt-4">
+                        <div>
+                          <label className="block text-sm text-muted-foreground mb-2">Subtítulo</label>
+                          <input
+                            type="text"
+                            value={editedContent?.sandra?.subtitle || ''}
+                            onChange={(e) => {
+                              setEditedContent((prev) => {
+                                if (!prev?.sandra) return prev;
+                                return { ...prev, sandra: { ...prev.sandra, subtitle: e.target.value } } as CMSContent;
+                              });
+                            }}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            placeholder="La experta detrás del proyecto"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-muted-foreground mb-2">Años de experiencia</label>
+                          <input
+                            type="text"
+                            value={editedContent?.sandra?.experience || ''}
+                            onChange={(e) => {
+                              setEditedContent((prev) => {
+                                if (!prev?.sandra) return prev;
+                                return { ...prev, sandra: { ...prev.sandra, experience: e.target.value } } as CMSContent;
+                              });
+                            }}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            placeholder="20+ años"
+                          />
+                        </div>
+                      </div>
                       <div className="mt-4">
                         <label className="block text-sm text-muted-foreground mb-2">Biografía</label>
                         <textarea
@@ -2721,10 +2630,266 @@ export default function AdminPage() {
               )}
 
               {/* ============================================
-                  CMS - GALERÍA (Cloudinary-native)
+                  CMS - GALERÍA
                   ============================================ */}
               {activeTab === 'Galeria' && (
-                <GaleriaTab />
+                <motion.div
+                  key="Galeria"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                >
+                  <div className="flex items-center justify-between mb-6">
+                    <h1 className="text-2xl font-bold text-ivory">CMS Galería</h1>
+                    <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveGaleria}>
+                      Guardar Cambios
+                    </PremiumButton>
+                  </div>
+
+                  <div className="space-y-6">
+                    {/* Imágenes - informativo */}
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-ivory mb-3 flex items-center gap-2">
+                        <ImageIcon className="w-5 h-5 text-accent" />
+                        Gestión de Imágenes
+                      </h2>
+                      <p className="text-muted-foreground text-sm">
+                        La gestión de imágenes estará disponible próximamente mediante Firebase Storage.
+                      </p>
+                    </GlassCard>
+
+                    {/* Hero */}
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-ivory mb-4">Hero de Galería</h2>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm text-muted-foreground mb-2">Título</label>
+                          <input
+                            type="text"
+                            value={editedContent?.galeria?.heroTitle || ''}
+                            onChange={(e) => setEditedContent((prev) => prev ? { ...prev, galeria: { ...prev.galeria, heroTitle: e.target.value } } as CMSContent : prev)}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-muted-foreground mb-2">Subtítulo</label>
+                          <input
+                            type="text"
+                            value={editedContent?.galeria?.heroSubtitle || ''}
+                            onChange={(e) => setEditedContent((prev) => prev ? { ...prev, galeria: { ...prev.galeria, heroSubtitle: e.target.value } } as CMSContent : prev)}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                          />
+                        </div>
+                      </div>
+                    </GlassCard>
+
+                    {/* Estadísticas */}
+                    <GlassCard className="p-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-semibold text-ivory">Estadísticas</h2>
+                        <PremiumButton
+                          variant="outline"
+                          size="sm"
+                          icon={<Plus className="w-4 h-4" />}
+                          onClick={() => setEditedContent((prev) => {
+                            if (!prev?.galeria) return prev;
+                            return { ...prev, galeria: { ...prev.galeria, stats: [...prev.galeria.stats, { value: 0, suffix: '', label: '' }] } } as CMSContent;
+                          })}
+                        >
+                          Añadir stat
+                        </PremiumButton>
+                      </div>
+                      <div className="space-y-4">
+                        {(editedContent?.galeria?.stats || []).map((stat, i) => (
+                          <div key={i} className="grid grid-cols-3 gap-3 items-end">
+                            <div>
+                              <label className="block text-xs text-muted-foreground mb-1">Valor</label>
+                              <input
+                                type="number"
+                                value={stat.value}
+                                onChange={(e) => setEditedContent((prev) => {
+                                  if (!prev?.galeria) return prev;
+                                  const stats = [...prev.galeria.stats];
+                                  stats[i] = { ...stats[i], value: Number(e.target.value) };
+                                  return { ...prev, galeria: { ...prev.galeria, stats } } as CMSContent;
+                                })}
+                                className="w-full px-3 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-muted-foreground mb-1">Sufijo (ej: +, %)</label>
+                              <input
+                                type="text"
+                                value={stat.suffix}
+                                onChange={(e) => setEditedContent((prev) => {
+                                  if (!prev?.galeria) return prev;
+                                  const stats = [...prev.galeria.stats];
+                                  stats[i] = { ...stats[i], suffix: e.target.value };
+                                  return { ...prev, galeria: { ...prev.galeria, stats } } as CMSContent;
+                                })}
+                                className="w-full px-3 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              />
+                            </div>
+                            <div className="flex gap-2">
+                              <div className="flex-1">
+                                <label className="block text-xs text-muted-foreground mb-1">Etiqueta</label>
+                                <input
+                                  type="text"
+                                  value={stat.label}
+                                  onChange={(e) => setEditedContent((prev) => {
+                                    if (!prev?.galeria) return prev;
+                                    const stats = [...prev.galeria.stats];
+                                    stats[i] = { ...stats[i], label: e.target.value };
+                                    return { ...prev, galeria: { ...prev.galeria, stats } } as CMSContent;
+                                  })}
+                                  className="w-full px-3 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                />
+                              </div>
+                              <button
+                                onClick={() => setEditedContent((prev) => {
+                                  if (!prev?.galeria) return prev;
+                                  const stats = prev.galeria.stats.filter((_, idx) => idx !== i);
+                                  return { ...prev, galeria: { ...prev.galeria, stats } } as CMSContent;
+                                })}
+                                className="mt-5 p-2 rounded-xl text-red-400 hover:bg-red-400/10 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </GlassCard>
+
+                    {/* Transformaciones */}
+                    <GlassCard className="p-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-semibold text-ivory">Transformaciones</h2>
+                        <PremiumButton
+                          variant="outline"
+                          size="sm"
+                          icon={<Plus className="w-4 h-4" />}
+                          onClick={() => setEditedContent((prev) => {
+                            if (!prev?.galeria) return prev;
+                            return { ...prev, galeria: { ...prev.galeria, transformaciones: [...prev.galeria.transformaciones, { name: '', periodo: '', resultado: '' }] } } as CMSContent;
+                          })}
+                        >
+                          Añadir caso
+                        </PremiumButton>
+                      </div>
+                      <div className="space-y-4">
+                        {(editedContent?.galeria?.transformaciones || []).map((t, i) => (
+                          <div key={i} className="p-4 rounded-xl border border-border bg-muted/10">
+                            <div className="flex items-center justify-between mb-3">
+                              <span className="text-sm font-medium text-ivory">Caso {i + 1}</span>
+                              <button
+                                onClick={() => setEditedContent((prev) => {
+                                  if (!prev?.galeria) return prev;
+                                  const transformaciones = prev.galeria.transformaciones.filter((_, idx) => idx !== i);
+                                  return { ...prev, galeria: { ...prev.galeria, transformaciones } } as CMSContent;
+                                })}
+                                className="p-1 rounded-lg text-red-400 hover:bg-red-400/10 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                            <div className="grid sm:grid-cols-3 gap-3">
+                              {(['name', 'periodo', 'resultado'] as const).map((field) => (
+                                <div key={field}>
+                                  <label className="block text-xs text-muted-foreground mb-1 capitalize">{field === 'name' ? 'Nombre' : field === 'periodo' ? 'Período' : 'Resultado'}</label>
+                                  <input
+                                    type="text"
+                                    value={t[field]}
+                                    onChange={(e) => setEditedContent((prev) => {
+                                      if (!prev?.galeria) return prev;
+                                      const transformaciones = [...prev.galeria.transformaciones];
+                                      transformaciones[i] = { ...transformaciones[i], [field]: e.target.value };
+                                      return { ...prev, galeria: { ...prev.galeria, transformaciones } } as CMSContent;
+                                    })}
+                                    className="w-full px-3 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </GlassCard>
+
+                    {/* Resultados */}
+                    <GlassCard className="p-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-semibold text-ivory">Resultados (Flip Cards)</h2>
+                        <PremiumButton
+                          variant="outline"
+                          size="sm"
+                          icon={<Plus className="w-4 h-4" />}
+                          onClick={() => setEditedContent((prev) => {
+                            if (!prev?.galeria) return prev;
+                            return { ...prev, galeria: { ...prev.galeria, resultados: [...prev.galeria.resultados, { name: '', stat: '', statLabel: '', tag: '', story: '', detail: '' }] } } as CMSContent;
+                          })}
+                        >
+                          Añadir resultado
+                        </PremiumButton>
+                      </div>
+                      <div className="space-y-4">
+                        {(editedContent?.galeria?.resultados || []).map((r, i) => (
+                          <div key={i} className="p-4 rounded-xl border border-border bg-muted/10">
+                            <div className="flex items-center justify-between mb-3">
+                              <span className="text-sm font-medium text-ivory">Resultado {i + 1}</span>
+                              <button
+                                onClick={() => setEditedContent((prev) => {
+                                  if (!prev?.galeria) return prev;
+                                  const resultados = prev.galeria.resultados.filter((_, idx) => idx !== i);
+                                  return { ...prev, galeria: { ...prev.galeria, resultados } } as CMSContent;
+                                })}
+                                className="p-1 rounded-lg text-red-400 hover:bg-red-400/10 transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                            <div className="grid sm:grid-cols-2 gap-3 mb-3">
+                              {([['name', 'Nombre'], ['stat', 'Stat principal'], ['statLabel', 'Subtítulo stat'], ['tag', 'Categoría']] as [keyof typeof r, string][]).map(([field, label]) => (
+                                <div key={field}>
+                                  <label className="block text-xs text-muted-foreground mb-1">{label}</label>
+                                  <input
+                                    type="text"
+                                    value={r[field]}
+                                    onChange={(e) => setEditedContent((prev) => {
+                                      if (!prev?.galeria) return prev;
+                                      const resultados = [...prev.galeria.resultados];
+                                      resultados[i] = { ...resultados[i], [field]: e.target.value };
+                                      return { ...prev, galeria: { ...prev.galeria, resultados } } as CMSContent;
+                                    })}
+                                    className="w-full px-3 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                            <div className="space-y-3">
+                              {([['story', 'Testimonio (cita)'], ['detail', 'Detalle del logro']] as [keyof typeof r, string][]).map(([field, label]) => (
+                                <div key={field}>
+                                  <label className="block text-xs text-muted-foreground mb-1">{label}</label>
+                                  <textarea
+                                    value={r[field]}
+                                    onChange={(e) => setEditedContent((prev) => {
+                                      if (!prev?.galeria) return prev;
+                                      const resultados = [...prev.galeria.resultados];
+                                      resultados[i] = { ...resultados[i], [field]: e.target.value };
+                                      return { ...prev, galeria: { ...prev.galeria, resultados } } as CMSContent;
+                                    })}
+                                    rows={2}
+                                    className="w-full px-3 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light resize-none"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </GlassCard>
+                  </div>
+                </motion.div>
               )}
 
               {/* ============================================
@@ -3010,6 +3175,41 @@ export default function AdminPage() {
                             }}
                             rows={2}
                             className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light resize-none"
+                          />
+                        </div>
+                      </div>
+                    </GlassCard>
+
+                    {/* Testimonials & Footer */}
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-ivory mb-4">Testimonios y Footer</h2>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm text-muted-foreground mb-2">Título de la sección Testimonios</label>
+                          <input
+                            type="text"
+                            value={editedContent?.testimonialsTitle || ''}
+                            onChange={(e) => {
+                              setEditedContent((prev) => {
+                                if (!prev) return prev;
+                                return { ...prev, testimonialsTitle: e.target.value } as CMSContent;
+                              });
+                            }}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-muted-foreground mb-2">Texto del footer</label>
+                          <input
+                            type="text"
+                            value={editedContent?.footerText || ''}
+                            onChange={(e) => {
+                              setEditedContent((prev) => {
+                                if (!prev) return prev;
+                                return { ...prev, footerText: e.target.value } as CMSContent;
+                              });
+                            }}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
                           />
                         </div>
                       </div>
@@ -4415,6 +4615,243 @@ export default function AdminPage() {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* ============================================
+                SERVICE EDIT MODAL
+                ============================================ */}
+            <AnimatePresence>
+              {editingService && (
+                <motion.div
+                  key="service-edit-modal"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                  onClick={() => setEditingService(null)}
+                >
+                  <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+                  >
+                    <GlassCard className="p-6">
+                      <h2 className="text-xl font-bold text-ivory mb-1">
+                        {editingService.id.startsWith('new-') ? 'Nuevo Servicio' : 'Editar Servicio'}
+                      </h2>
+                      <p className="text-sm text-muted-foreground mb-6">
+                        {editingService.id.startsWith('new-') ? 'Crea un nuevo servicio' : `Editando: ${editingService.title}`}
+                      </p>
+
+                      <div className="space-y-4">
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-muted-foreground mb-2">Título *</label>
+                            <input
+                              type="text"
+                              value={editingService.title}
+                              onChange={(e) => setEditingService({ ...editingService, title: e.target.value })}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              placeholder="Entrenamiento Personal"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-muted-foreground mb-2">Duración *</label>
+                            <input
+                              type="text"
+                              value={editingService.duration}
+                              onChange={(e) => setEditingService({ ...editingService, duration: e.target.value })}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              placeholder="60 min"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-muted-foreground mb-2">Precio</label>
+                            <input
+                              type="text"
+                              value={editingService.price || ''}
+                              onChange={(e) => setEditingService({ ...editingService, price: e.target.value })}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              placeholder="Desde 50€"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-muted-foreground mb-2">Icono (nombre Lucide)</label>
+                            <input
+                              type="text"
+                              value={editingService.icon || ''}
+                              onChange={(e) => setEditingService({ ...editingService, icon: e.target.value })}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              placeholder="Dumbbell, Trophy, Apple…"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm text-muted-foreground mb-2">Descripción</label>
+                          <textarea
+                            value={editingService.description}
+                            onChange={(e) => setEditingService({ ...editingService, description: e.target.value })}
+                            rows={3}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light resize-none"
+                            placeholder="Descripción del servicio…"
+                          />
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="block text-sm text-muted-foreground">Características</label>
+                            <button
+                              onClick={() => setEditingService({ ...editingService, features: [...(editingService.features || []), ''] })}
+                              className="text-xs text-accent hover:underline flex items-center gap-1"
+                            >
+                              <Plus className="w-3 h-3" /> Añadir
+                            </button>
+                          </div>
+                          <div className="space-y-2">
+                            {(editingService.features || []).map((feat, i) => (
+                              <div key={i} className="flex gap-2">
+                                <input
+                                  type="text"
+                                  value={feat}
+                                  onChange={(e) => {
+                                    const feats = [...(editingService.features || [])];
+                                    feats[i] = e.target.value;
+                                    setEditingService({ ...editingService, features: feats });
+                                  }}
+                                  className="flex-1 px-3 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                  placeholder="Característica…"
+                                />
+                                <button
+                                  onClick={() => setEditingService({ ...editingService, features: (editingService.features || []).filter((_, idx) => idx !== i) })}
+                                  className="p-2 rounded-xl text-red-400 hover:bg-red-400/10 transition-colors"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm text-muted-foreground mb-2">Orden</label>
+                          <input
+                            type="number"
+                            value={editingService.order ?? 0}
+                            onChange={(e) => setEditingService({ ...editingService, order: Number(e.target.value) })}
+                            className="w-32 px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            min={0}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3 mt-6 justify-end">
+                        <PremiumButton variant="outline" onClick={() => setEditingService(null)}>
+                          Cancelar
+                        </PremiumButton>
+                        <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveService}>
+                          Guardar Servicio
+                        </PremiumButton>
+                      </div>
+                    </GlassCard>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ============================================
+                TESTIMONIAL EDIT MODAL
+                ============================================ */}
+            <AnimatePresence>
+              {editingTestimonial && (
+                <motion.div
+                  key="testimonial-edit-modal"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                  onClick={() => setEditingTestimonial(null)}
+                >
+                  <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full max-w-lg"
+                  >
+                    <GlassCard className="p-6">
+                      <h2 className="text-xl font-bold text-ivory mb-1">
+                        {editingTestimonial.id.startsWith('new-') ? 'Nuevo Testimonio' : 'Editar Testimonio'}
+                      </h2>
+                      <p className="text-sm text-muted-foreground mb-6">
+                        {editingTestimonial.id.startsWith('new-') ? 'Crea un nuevo testimonio' : `Editando: ${editingTestimonial.name}`}
+                      </p>
+
+                      <div className="space-y-4">
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-muted-foreground mb-2">Nombre *</label>
+                            <input
+                              type="text"
+                              value={editingTestimonial.name}
+                              onChange={(e) => setEditingTestimonial({ ...editingTestimonial, name: e.target.value })}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              placeholder="María García"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-muted-foreground mb-2">Cargo / Rol</label>
+                            <input
+                              type="text"
+                              value={editingTestimonial.role}
+                              onChange={(e) => setEditingTestimonial({ ...editingTestimonial, role: e.target.value })}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              placeholder="Cliente, Atleta, …"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm text-muted-foreground mb-2">Testimonio *</label>
+                          <textarea
+                            value={editingTestimonial.content}
+                            onChange={(e) => setEditingTestimonial({ ...editingTestimonial, content: e.target.value })}
+                            rows={4}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light resize-none"
+                            placeholder="Texto del testimonio…"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-muted-foreground mb-2">
+                            Valoración: {editingTestimonial.rating} estrella{editingTestimonial.rating !== 1 ? 's' : ''}
+                          </label>
+                          <div className="flex gap-2">
+                            {[1, 2, 3, 4, 5].map((star) => (
+                              <button
+                                key={star}
+                                onClick={() => setEditingTestimonial({ ...editingTestimonial, rating: star })}
+                                className="focus:outline-none"
+                              >
+                                <Star className={cn('w-6 h-6 transition-colors', star <= editingTestimonial.rating ? 'text-accent fill-accent' : 'text-muted-foreground')} />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3 mt-6 justify-end">
+                        <PremiumButton variant="outline" onClick={() => setEditingTestimonial(null)}>
+                          Cancelar
+                        </PremiumButton>
+                        <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveTestimonial}>
+                          Guardar Testimonio
+                        </PremiumButton>
+                      </div>
+                    </GlassCard>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
           </main>
         </div>
       </div>

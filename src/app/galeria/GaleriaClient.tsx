@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence, useInView, animate } from 'framer-motion';
 import Image from 'next/image';
 import { Play, X, ChevronLeft, ChevronRight, Quote } from 'lucide-react';
+import type { GaleriaContent } from '@/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,15 +30,15 @@ interface TrainingItem {
   type: 'image' | 'video';
 }
 
-// ─── Static data ──────────────────────────────────────────────────────────────
+// ─── Static fallback data ─────────────────────────────────────────────────────
 
-const STATS = [
+const STATS_FALLBACK = [
   { value: 200, suffix: '+', label: 'Clientes transformados' },
   { value: 20, suffix: ' años', label: 'De experiencia' },
   { value: 100, suffix: '%', label: 'Compromiso' },
 ];
 
-const TRANSFORMACIONES = [
+const TRANSFORMACIONES_FALLBACK = [
   {
     name: 'María García',
     periodo: '16 semanas',
@@ -70,7 +71,7 @@ const TRAINING_FALLBACK: TrainingItem[] = [
   { src: '/imagenes/inventadas/entrenamiento-6.svg', title: 'Seguimiento Progreso', type: 'image' },
 ];
 
-const RESULTADOS = [
+const RESULTADOS_FALLBACK = [
   {
     name: 'María García',
     stat: '-18 kg',
@@ -132,7 +133,7 @@ function AnimatedCounter({ value, suffix }: { value: number; suffix: string }) {
 
 // ─── Before/After Card ────────────────────────────────────────────────────────
 
-function BeforeAfterCard({ item }: { item: (typeof TRANSFORMACIONES)[0] }) {
+function BeforeAfterCard({ item }: { item: (typeof TRANSFORMACIONES_FALLBACK)[0] }) {
   const [sliderPos, setSliderPos] = useState(50);
   const cardRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
@@ -306,8 +307,19 @@ function ImageCarousel({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function GaleriaClient({ initialResources }: { initialResources: CloudinaryResource[] }) {
+export default function GaleriaClient({ initialResources, galeriaContent }: { initialResources: CloudinaryResource[]; galeriaContent?: GaleriaContent }) {
   const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
+
+  const STATS = galeriaContent?.stats ?? STATS_FALLBACK;
+  const TRANSFORMACIONES = (galeriaContent?.transformaciones ?? TRANSFORMACIONES_FALLBACK).map((t, i) => ({
+    ...t,
+    antes: `/imagenes/inventadas/antes-${i + 1}.svg`,
+    despues: `/imagenes/inventadas/despues-${i + 1}.svg`,
+  }));
+  const RESULTADOS = (galeriaContent?.resultados ?? RESULTADOS_FALLBACK).map((r, i) => ({
+    ...r,
+    image: `/imagenes/inventadas/resultado-${i + 1}.svg`,
+  }));
 
   const trainingItems: TrainingItem[] = initialResources.length > 0
     ? initialResources.map((r) => ({
@@ -339,10 +351,10 @@ export default function GaleriaClient({ initialResources }: { initialResources: 
               Nuestra Galería
             </span>
             <h1 className="text-4xl md:text-5xl font-bold text-ivory mt-3 mb-6">
-              Resultados Reales
+              {galeriaContent?.heroTitle ?? 'Resultados Reales'}
             </h1>
             <p className="text-muted-foreground text-lg">
-              Cada imagen cuenta una historia de esfuerzo, constancia y transformación.
+              {galeriaContent?.heroSubtitle ?? 'Cada imagen cuenta una historia de esfuerzo, constancia y transformación.'}
             </p>
           </motion.div>
 
