@@ -1240,7 +1240,7 @@ export default function AdminPage() {
                               <div>
                                 <p className="font-medium text-ivory hover:text-accent transition-colors">{appointment.name}</p>
                                 <p className="text-sm text-muted-foreground">
-                                  {serviceLabels[appointment.serviceType]} - {durationLabels[appointment.duration]}
+                                  {serviceLabels[appointment.serviceType] || appointment.serviceType} - {durationLabels[appointment.duration]}
                                 </p>
                               </div>
                             </div>
@@ -1341,29 +1341,19 @@ export default function AdminPage() {
                                 <div className="flex flex-wrap gap-4 text-sm">
                                   <div className="flex items-center gap-2">
                                     <Calendar className="w-4 h-4 text-accent" />
-                                    <span className="text-ivory">{serviceLabels[appointment.serviceType]}</span>
+                                    <span className="text-ivory">
+                                      {appointment.preferredSlots[0]
+                                        ? `${new Date(appointment.preferredSlots[0].date).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })} - ${appointment.preferredSlots[0].time}`
+                                        : '—'}
+                                    </span>
                                   </div>
                                   <div className="flex items-center gap-2">
                                     <Clock className="w-4 h-4 text-accent" />
                                     <span className="text-ivory">{durationLabels[appointment.duration]}</span>
                                   </div>
-                                </div>
-
-                                <div>
-                                  <p className="text-sm text-muted-foreground mb-2">Franjas propuestas:</p>
-                                  <div className="flex flex-wrap gap-2">
-                                    {appointment.preferredSlots.map((slot, index) => (
-                                      <span
-                                        key={index}
-                                        className="px-3 py-1.5 rounded-lg bg-emerald/20 text-ivory text-sm"
-                                      >
-                                        {new Date(slot.date).toLocaleDateString('es-ES', {
-                                          weekday: 'short',
-                                          day: 'numeric',
-                                          month: 'short',
-                                        })} - {slot.time}
-                                      </span>
-                                    ))}
+                                  <div className="flex items-center gap-2">
+                                    <Dumbbell className="w-4 h-4 text-accent" />
+                                    <span className="text-ivory">{serviceLabels[appointment.serviceType] || appointment.serviceType}</span>
                                   </div>
                                 </div>
 

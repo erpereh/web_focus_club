@@ -31,6 +31,7 @@ import {
   RefreshCw,
   KeyRound,
   Ticket,
+  History,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -39,7 +40,6 @@ import { InteractiveCalendar } from '@/components/ui/interactive-calendar';
 import { useAuth } from '@/contexts/AuthContext';
 import type { TimeSlot, Appointment, Bono } from '@/types';
 import { addAppointment as addAppointmentFS, getAppointmentsByUser, getActiveBonoByUser, getBonosByUser } from '@/lib/firestore';
-import { useServices } from '@/hooks/useFirestore';
 import { cn } from '@/lib/utils';
 
 // ============================================
@@ -106,7 +106,6 @@ const durations = [
 export default function PortalPage() {
   const { user, userProfile, loading: authContextLoading, login, register, loginWithGoogle, logout, resetPassword, resendVerification, completeGoogleProfile } = useAuth();
   const isAuthenticated = !!user && !!userProfile?.phone;
-  const { services } = useServices();
 
   const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [portalView, setPortalView] = useState<PortalView>('dashboard');
@@ -145,6 +144,15 @@ export default function PortalPage() {
   // Bono state
   const [activeBono, setActiveBono] = useState<Bono | null>(null);
   const [bonoLoading, setBonoLoading] = useState(true);
+  const [allBonos, setAllBonos] = useState<Bono[]>([]);
+
+  // Derivados del bono activo — determinan servicio y duración de la cita
+  const bonoServiceLabel = activeBono
+    ? activeBono.tipo === 'sesion_personal'
+      ? 'Sesión de Entrenamiento Personal'
+      : 'Bono Mensual de Entrenamiento'
+    : '';
+  const bonoDurationValue: '30' | '60' = activeBono?.modalidad === '30min' ? '30' : '60';
 
   useEffect(() => {
     if (user) {
@@ -159,6 +167,8 @@ export default function PortalPage() {
           } else {
             setActiveBono(bono);
           }
+          const bonos = await getBonosByUser(user.uid);
+          setAllBonos(bonos);
         } catch (err) {
           console.error('Error loading bono:', err);
         } finally {
@@ -316,7 +326,7 @@ export default function PortalPage() {
   };
 
   const handleSubmitAppointment = async () => {
-    if (!user || !userProfile || !formData.serviceType || !formData.preferredSlot) return;
+    if (!user || !userProfile || !formData.preferredSlot) return;
 
     // Verificar bono activo con sesiones disponibles
     const currentBono = await getActiveBonoByUser(user.uid);
@@ -331,8 +341,8 @@ export default function PortalPage() {
         name: userProfile.name,
         email: userProfile.email,
         phone: userProfile.phone || '',
-        serviceType: services.find(s => s.id === formData.serviceType)?.title || formData.serviceType,
-        duration: formData.duration,
+        serviceType: bonoServiceLabel,
+        duration: bonoDurationValue,
         preferredSlots: [formData.preferredSlot],
         reason: formData.reason,
       });
@@ -884,13 +894,14 @@ export default function PortalPage() {
               exit={{ opacity: 0, y: -20 }}
             >
               {/* Welcome Section */}
-              <div className="mb-8">
-                <h1 className="text-3xl font-bold text-ivory mb-2">
-                  ¡Hola, {userProfile?.name?.split(' ')[0]}!
-                </h1>
-                <p className="text-muted-foreground text-lg">
-                  Gestiona tus citas y solicita nuevas sesiones desde tu portal personal.
-                </p>
+              <div className="mb-8 flex items-center gap-4">
+                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald to-accent flex items-center justify-center text-obsidian font-bold text-lg shrink-0">
+                  {userProfile?.name?.charAt(0)}
+                </div>
+                <div>
+                  <h1 className="text-2xl font-bold text-ivory leading-tight">{userProfile?.name}</h1>
+                  <p className="text-sm text-muted-foreground">{userProfile?.email}</p>
+                </div>
               </div>
 
               <div className="space-y-8">
@@ -955,6 +966,43 @@ export default function PortalPage() {
                   )}
                 </GlassCard>
 
+                {/* Historial de Bonos */}
+                {allBonos.filter(b => b.estado !== 'activo').length > 0 && (
+                  <GlassCard className="p-6">
+                    <div className="flex items-center gap-3 mb-4">
+                      <History className="w-5 h-5 text-muted-foreground" />
+                      <h2 className="text-xl font-semibold text-ivory">Historial de Bonos</h2>
+                    </div>
+                    <div className="space-y-3">
+                      {allBonos.filter(b => b.estado !== 'activo').map((bono) => {
+                        const usadas = bono.sesionesTotales - bono.sesionesRestantes;
+                        const estadoBadge =
+                          bono.estado === 'agotado' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                          bono.estado === 'expirado' ? 'bg-muted/20 text-muted-foreground border-muted/20' :
+                          'bg-red-500/10 text-red-400 border-red-500/20';
+                        return (
+                          <div key={bono.id} className="p-4 rounded-xl bg-muted/10 border border-white/5 space-y-2">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <span className="text-ivory text-sm font-medium">
+                                {bono.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
+                                {bono.modalidad && ` · ${bono.modalidad}`}
+                              </span>
+                              <span className={cn('text-xs px-2 py-0.5 rounded-full border font-medium', estadoBadge)}>
+                                {bono.estado.charAt(0).toUpperCase() + bono.estado.slice(1)}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
+                              <span>Asignado: {new Date(bono.fechaAsignacion).toLocaleDateString('es-ES')}</span>
+                              <span>Expiró: {new Date(bono.fechaExpiracion).toLocaleDateString('es-ES')}</span>
+                              <span>Sesiones usadas: {usadas}/{bono.sesionesTotales}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </GlassCard>
+                )}
+
                 {/* Botón principal: Pedir Cita */}
                 {bonoLoading ? (
                   <PremiumButton
@@ -983,20 +1031,20 @@ export default function PortalPage() {
                   </PremiumButton>
                 )}
 
-                {/* Appointments List */}
+                {/* Mis Citas — solo pendientes */}
                 <div className="space-y-6">
                   <div className="flex items-center justify-between">
                     <h2 className="text-xl font-semibold text-ivory">Mis Citas</h2>
                   </div>
 
-                  {userAppointments.length === 0 ? (
+                  {userAppointments.filter(a => a.status === 'pending').length === 0 ? (
                     <GlassCard className="p-12 text-center rounded-2xl border-dashed border-accent/30 bg-muted/5">
                       <div className="w-20 h-20 rounded-full bg-emerald/10 flex items-center justify-center mx-auto mb-6 shadow-emerald-glow">
                         <Calendar className="w-10 h-10 text-accent opacity-90" />
                       </div>
-                      <h3 className="text-2xl font-semibold text-ivory mb-3">No tienes citas aún</h3>
+                      <h3 className="text-2xl font-semibold text-ivory mb-3">No tienes citas pendientes</h3>
                       <p className="text-muted-foreground mb-8 max-w-sm mx-auto">
-                        Estás a un paso de comenzar tu transformación. Solicita tu primera sesión y nosotros nos encargamos del resto.
+                        Solicita una nueva sesión y Sandra la confirmará en breve.
                       </p>
                       <PremiumButton
                         variant="cta"
@@ -1004,12 +1052,12 @@ export default function PortalPage() {
                         iconPosition="right"
                         onClick={() => setPortalView('new-appointment')}
                       >
-                        Solicitar Primera Cita
+                        Solicitar Cita
                       </PremiumButton>
                     </GlassCard>
                   ) : (
                     <div className="space-y-4">
-                      {userAppointments.map((appointment) => {
+                      {userAppointments.filter(a => a.status === 'pending').map((appointment) => {
                         const status = statusConfig[appointment.status];
                         const StatusIcon = status.icon;
 
@@ -1056,6 +1104,56 @@ export default function PortalPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Historial de Citas — aprobadas y rechazadas */}
+                {userAppointments.filter(a => a.status !== 'pending').length > 0 && (
+                  <div className="space-y-4">
+                    <h2 className="text-xl font-semibold text-ivory">Historial de Citas</h2>
+                    <div className="space-y-3">
+                      {userAppointments.filter(a => a.status !== 'pending').map((appointment) => {
+                        const status = statusConfig[appointment.status];
+                        const StatusIcon = status.icon;
+                        return (
+                          <motion.div
+                            key={appointment.id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                          >
+                            <GlassCard
+                              className="p-5 cursor-pointer rounded-2xl hover:border-accent/40 group transition-all duration-300"
+                              onClick={() => {
+                                setSelectedAppointment(appointment.id);
+                                setPortalView('appointment-detail');
+                              }}
+                            >
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-xl bg-muted/20 flex items-center justify-center shrink-0">
+                                    <Calendar className="w-5 h-5 text-muted-foreground" />
+                                  </div>
+                                  <div>
+                                    <p className="font-medium text-ivory text-sm">
+                                      {serviceLabels[appointment.serviceType] || appointment.serviceType}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground mt-0.5">
+                                      {appointment.preferredSlots[0]
+                                        ? `${new Date(appointment.preferredSlots[0].date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} · ${appointment.preferredSlots[0].time}`
+                                        : new Date(appointment.createdAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                    </p>
+                                  </div>
+                                </div>
+                                <span className={cn('inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border bg-obsidian/50 shrink-0', status.color)}>
+                                  <StatusIcon className="w-3 h-3" />
+                                  {status.label}
+                                </span>
+                              </div>
+                            </GlassCard>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </motion.div>
           )}
@@ -1096,85 +1194,29 @@ export default function PortalPage() {
                   </p>
 
                   <div className="max-w-3xl mx-auto space-y-8 mt-8">
-                    {/* Service Type */}
+                    {/* Servicio y duración derivados del bono */}
                     <GlassCard className="p-8 rounded-2xl">
                       <h3 className="text-xl font-bold text-ivory mb-6 flex items-center gap-3">
                         <span className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald/20 text-accent text-sm">1</span>
-                        Tipo de Servicio
+                        Servicio y Duración
                       </h3>
-                      <div className="grid sm:grid-cols-2 gap-4">
-                        {services.map((service) => {
-                          const Icon = (service.icon && ICON_MAP[service.icon]) || Dumbbell;
-                          return (
-                          <button
-                            key={service.id}
-                            onClick={() => setFormData({ ...formData, serviceType: service.id })}
-                            className={cn(
-                              'p-5 rounded-xl border transition-all text-left group hover:shadow-glow',
-                              formData.serviceType === service.id
-                                ? 'bg-emerald/20 border-accent shadow-emerald-glow'
-                                : 'bg-muted/30 border-border hover:border-accent/40'
-                            )}
-                          >
-                            <div className="flex items-center gap-4">
-                              <div className={cn(
-                                'w-12 h-12 rounded-lg flex items-center justify-center transition-colors',
-                                formData.serviceType === service.id ? 'bg-accent/20' : 'bg-obsidian/50 group-hover:bg-accent/10'
-                              )}>
-                                <Icon className={cn(
-                                  'w-6 h-6',
-                                  formData.serviceType === service.id ? 'text-accent' : 'text-muted-foreground group-hover:text-accent'
-                                )} />
-                              </div>
-                              <span className={cn(
-                                'font-semibold text-lg transition-colors',
-                                formData.serviceType === service.id ? 'text-ivory' : 'text-muted-foreground group-hover:text-ivory'
-                              )}>
-                                {service.title}
-                              </span>
-                            </div>
-                          </button>
-                          );
-                        })}
+                      <div className="ml-11 flex flex-col sm:flex-row gap-4">
+                        <div className="flex-1 p-4 rounded-xl bg-emerald/10 border border-accent/30">
+                          <p className="text-xs text-muted-foreground mb-1">Servicio</p>
+                          <p className="text-ivory font-semibold">{bonoServiceLabel}</p>
+                        </div>
+                        <div className="p-4 rounded-xl bg-emerald/10 border border-accent/30">
+                          <p className="text-xs text-muted-foreground mb-1">Duración</p>
+                          <p className="text-ivory font-semibold">{bonoDurationValue} min</p>
+                        </div>
                       </div>
-                    </GlassCard>
-
-                    {/* Duration */}
-                    <GlassCard className="p-8 rounded-2xl">
-                      <h3 className="text-xl font-bold text-ivory mb-6 flex items-center gap-3">
-                        <span className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald/20 text-accent text-sm">2</span>
-                        Duración
-                      </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        {durations.map((dur) => (
-                          <button
-                            key={dur.value}
-                            onClick={() => setFormData({ ...formData, duration: dur.value })}
-                            className={cn(
-                              'p-5 rounded-xl border transition-all text-center group hover:shadow-glow',
-                              formData.duration === dur.value
-                                ? 'bg-emerald/20 border-accent shadow-emerald-glow'
-                                : 'bg-muted/30 border-border hover:border-accent/40'
-                            )}
-                          >
-                            <Clock className={cn(
-                              'w-6 h-6 mx-auto mb-3 transition-colors',
-                              formData.duration === dur.value ? 'text-accent' : 'text-muted-foreground group-hover:text-accent'
-                            )} />
-                            <div className={cn(
-                              'font-bold text-lg mb-1 transition-colors',
-                              formData.duration === dur.value ? 'text-ivory' : 'text-muted-foreground group-hover:text-ivory'
-                            )}>{dur.label}</div>
-                            <div className="text-xs text-muted-foreground">{dur.desc}</div>
-                          </button>
-                        ))}
-                      </div>
+                      <p className="text-xs text-muted-foreground mt-4 ml-11">Determinado por tu bono activo.</p>
                     </GlassCard>
 
                     {/* Time Slots — Calendario Interactivo */}
                     <GlassCard className="p-8 rounded-2xl">
                       <h3 className="text-xl font-bold text-ivory mb-2 flex items-center gap-3">
-                        <span className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald/20 text-accent text-sm">3</span>
+                        <span className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald/20 text-accent text-sm">2</span>
                         Franja Horaria
                       </h3>
                       <p className="text-sm text-muted-foreground mb-6 ml-11">
@@ -1193,7 +1235,7 @@ export default function PortalPage() {
                     {/* Reason */}
                     <GlassCard className="p-8 rounded-2xl">
                       <h3 className="text-xl font-bold text-ivory mb-6 flex items-center gap-3">
-                        <span className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald/20 text-accent text-sm">4</span>
+                        <span className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald/20 text-accent text-sm">3</span>
                         Comentario (opcional)
                       </h3>
                       <div className="ml-11">
@@ -1219,7 +1261,7 @@ export default function PortalPage() {
                       <PremiumButton
                         variant="cta"
                         onClick={handleSubmitAppointment}
-                        disabled={!formData.serviceType || !formData.preferredSlot}
+                        disabled={!formData.preferredSlot}
                         icon={<CheckCircle className="w-5 h-5" />}
                         className="flex-1 text-lg py-6"
                       >
