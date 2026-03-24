@@ -141,7 +141,7 @@ export interface Bono {
     modalidad?: '1h' | '30min';                  // solo para bono_mensual
     fechaAsignacion: string;                     // ISO date
     fechaExpiracion: string;                     // calculada
-    estado: 'activo' | 'agotado' | 'expirado';
+    estado: 'activo' | 'agotado' | 'expirado' | 'eliminado';
     historial: BonoHistorialEntry[];
     asignadoPor: string;                         // admin email
     createdAt: string;

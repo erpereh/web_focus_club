@@ -521,6 +521,27 @@ export async function deactivateBono(bonoId: string): Promise<void> {
     await updateDoc(doc(db, 'bonos', bonoId), { estado: 'agotado' });
 }
 
+/** Marcar un bono como eliminado (preserva historial) */
+export async function deleteBono(bonoId: string): Promise<void> {
+    await updateDoc(doc(db, 'bonos', bonoId), { estado: 'eliminado' });
+}
+
+/** Añade 1 sesión al bono; si estaba agotado, lo reactiva */
+export async function addBonoSession(bonoId: string): Promise<void> {
+    await runTransaction(db, async (transaction) => {
+        const bonoRef = doc(db, 'bonos', bonoId);
+        const snap = await transaction.get(bonoRef);
+        if (!snap.exists()) throw new Error('Bono no encontrado');
+        const bono = snap.data() as Omit<Bono, 'id'>;
+        const newRemaining = bono.sesionesRestantes + 1;
+        transaction.update(bonoRef, {
+            sesionesRestantes: newRemaining,
+            sesionesTotales: bono.sesionesTotales + 1,
+            estado: bono.estado === 'agotado' ? 'activo' : bono.estado,
+        });
+    });
+}
+
 /** Descontar una sesión del bono (transacción atómica) */
 export async function deductBonoSession(bonoId: string, entry: BonoHistorialEntry): Promise<void> {
     await runTransaction(db, async (transaction) => {

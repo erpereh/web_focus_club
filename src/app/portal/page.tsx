@@ -38,7 +38,7 @@ import { PremiumButton } from '@/components/ui/premium-button';
 import { InteractiveCalendar } from '@/components/ui/interactive-calendar';
 import { useAuth } from '@/contexts/AuthContext';
 import type { TimeSlot, Appointment, Bono } from '@/types';
-import { addAppointment as addAppointmentFS, getAppointmentsByUser, getActiveBonoByUser, getBonosByUser, expireOverdueBonos } from '@/lib/firestore';
+import { addAppointment as addAppointmentFS, getAppointmentsByUser, getActiveBonoByUser, getBonosByUser } from '@/lib/firestore';
 import { useServices } from '@/hooks/useFirestore';
 import { cn } from '@/lib/utils';
 
@@ -152,9 +152,13 @@ export default function PortalPage() {
       // Load bono data
       (async () => {
         try {
-          await expireOverdueBonos();
           const bono = await getActiveBonoByUser(user.uid);
-          setActiveBono(bono);
+          // Comprobación de expiración en cliente (sin escribir a Firestore)
+          if (bono && new Date(bono.fechaExpiracion) < new Date()) {
+            setActiveBono({ ...bono, estado: 'expirado' });
+          } else {
+            setActiveBono(bono);
+          }
         } catch (err) {
           console.error('Error loading bono:', err);
         } finally {
@@ -952,7 +956,17 @@ export default function PortalPage() {
                 </GlassCard>
 
                 {/* Botón principal: Pedir Cita */}
-                {!bonoLoading && (!activeBono || activeBono.sesionesRestantes <= 0) ? (
+                {bonoLoading ? (
+                  <PremiumButton
+                    variant="cta"
+                    icon={<CalendarPlus className="w-4 h-4" />}
+                    iconPosition="right"
+                    className="w-full sm:w-auto opacity-60 cursor-not-allowed"
+                    onClick={() => {}}
+                  >
+                    Cargando...
+                  </PremiumButton>
+                ) : (!activeBono || activeBono.sesionesRestantes <= 0) ? (
                   <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm flex items-center gap-2">
                     <AlertCircle className="w-4 h-4 shrink-0" />
                     No tienes sesiones disponibles. Consulta en el gimnasio para adquirir o renovar tu bono.

@@ -98,6 +98,8 @@ import {
   getBonosByUser,
   assignBono,
   deactivateBono,
+  deleteBono,
+  addBonoSession,
   deductBonoSession,
   returnBonoSession,
   manualDeductBonoSession,
@@ -274,6 +276,8 @@ export default function AdminPage() {
   const [showBonoHistoryModal, setShowBonoHistoryModal] = useState(false);
   const [bonoHistoryData, setBonoHistoryData] = useState<Bono[]>([]);
   const [bonoHistoryClientName, setBonoHistoryClientName] = useState('');
+  const [showDeleteBonoModal, setShowDeleteBonoModal] = useState(false);
+  const [deleteBonoClient, setDeleteBonoClient] = useState<UserProfile | null>(null);
 
   // Delete appointments when blocking
   const [deleteOnBlock, setDeleteOnBlock] = useState(false);
@@ -1712,6 +1716,29 @@ export default function AdminPage() {
                                   className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
                                 >
                                   <Minus className="w-3 h-3" /> Descontar Sesión
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    const bono = clientBonos[client.uid]!;
+                                    if (!window.confirm(`¿Añadir 1 sesión al bono de ${client.name}?`)) return;
+                                    try {
+                                      await addBonoSession(bono.id);
+                                      await addActivityLog({ action: 'bono_manual_add', adminEmail: user?.email || 'unknown', details: `Cliente: ${client.name}, Bono: ${bono.id}` });
+                                      await refreshData();
+                                    } catch (err) {
+                                      console.error('Error adding session:', err);
+                                      alert('Error al añadir sesión');
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald/10 text-emerald border border-emerald/20 hover:bg-emerald/20 transition-colors flex items-center gap-1"
+                                >
+                                  <Plus className="w-3 h-3" /> Añadir Sesión
+                                </button>
+                                <button
+                                  onClick={() => { setDeleteBonoClient(client); setShowDeleteBonoModal(true); }}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors flex items-center gap-1"
+                                >
+                                  <Trash2 className="w-3 h-3" /> Eliminar Bono
                                 </button>
                                 <button
                                   onClick={async () => {
@@ -4294,7 +4321,8 @@ export default function AdminPage() {
                                   "px-2 py-0.5 rounded text-xs font-medium",
                                   bono.estado === 'activo' ? "bg-emerald/10 text-emerald" :
                                   bono.estado === 'agotado' ? "bg-amber-500/10 text-amber-400" :
-                                  "bg-red-500/10 text-red-400"
+                                  bono.estado === 'eliminado' ? "bg-red-500/10 text-red-400" :
+                                  "bg-muted/20 text-muted-foreground"
                                 )}>
                                   {bono.estado.charAt(0).toUpperCase() + bono.estado.slice(1)}
                                 </span>
@@ -4309,7 +4337,7 @@ export default function AdminPage() {
                               <div className="text-xs text-muted-foreground mb-2">
                                 {bono.sesionesRestantes}/{bono.sesionesTotales} sesiones restantes · Expira: {new Date(bono.fechaExpiracion).toLocaleDateString('es-ES')}
                               </div>
-                              {bono.historial.length > 0 && (
+                              {(bono.historial?.length ?? 0) > 0 && (
                                 <div className="mt-2 pt-2 border-t border-white/5 space-y-1">
                                   {bono.historial.map((h, i) => (
                                     <div key={i} className="flex justify-between text-xs text-muted-foreground">
@@ -4845,6 +4873,70 @@ export default function AdminPage() {
                         <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveTestimonial}>
                           Guardar Testimonio
                         </PremiumButton>
+                      </div>
+                    </GlassCard>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ============================================
+                DELETE BONO CONFIRMATION MODAL
+                ============================================ */}
+            <AnimatePresence>
+              {showDeleteBonoModal && deleteBonoClient && (
+                <motion.div
+                  key="delete-bono-modal"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                  onClick={() => setShowDeleteBonoModal(false)}
+                >
+                  <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full max-w-md"
+                  >
+                    <GlassCard className="p-6">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center shrink-0">
+                          <Trash2 className="w-5 h-5 text-red-400" />
+                        </div>
+                        <div>
+                          <h2 className="text-xl font-bold text-ivory">Eliminar Bono</h2>
+                          <p className="text-sm text-muted-foreground">{deleteBonoClient.name}</p>
+                        </div>
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-6">
+                        ¿Seguro que quieres eliminar el bono activo de{' '}
+                        <strong className="text-ivory">{deleteBonoClient.name}</strong>?
+                        El historial de sesiones se conservará. Esta acción no se puede deshacer.
+                      </p>
+                      <div className="flex gap-3 justify-end">
+                        <PremiumButton variant="outline" onClick={() => { setShowDeleteBonoModal(false); setDeleteBonoClient(null); }}>
+                          Cancelar
+                        </PremiumButton>
+                        <button
+                          onClick={async () => {
+                            const bono = clientBonos[deleteBonoClient.uid]!;
+                            try {
+                              await deleteBono(bono.id);
+                              await addActivityLog({ action: 'bono_deleted', adminEmail: user?.email || 'unknown', details: `Cliente: ${deleteBonoClient.name}, Bono: ${bono.id}` });
+                              setShowDeleteBonoModal(false);
+                              setDeleteBonoClient(null);
+                              await refreshData();
+                            } catch (err) {
+                              console.error('Error deleting bono:', err);
+                              alert('Error al eliminar el bono');
+                            }
+                          }}
+                          className="px-4 py-2 rounded-xl bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors text-sm font-medium flex items-center gap-2"
+                        >
+                          <Trash2 className="w-4 h-4" /> Eliminar Bono
+                        </button>
                       </div>
                     </GlassCard>
                   </motion.div>
