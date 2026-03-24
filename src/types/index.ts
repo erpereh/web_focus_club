@@ -118,6 +118,33 @@ export interface SiteConfig {
     startHour: number;        // ej: 8
     endHour: number;          // ej: 20
     sessionDuration: number;  // en minutos: 60
+    bonoExpirationMonths: number; // meses de validez de los bonos (default: 1)
+}
+
+// ============================================
+// BONOS
+// ============================================
+
+export interface BonoHistorialEntry {
+    fecha: string;          // ISO date de la sesión
+    tipo: string;           // nombre del servicio o "Deducción manual"
+    duracion: string;       // '30' | '60' | duración en minutos
+    appointmentId: string;  // ref a appointments/{id} o 'manual'
+}
+
+export interface Bono {
+    id: string;
+    userId: string;                              // ref a users/{uid}
+    tipo: 'sesion_personal' | 'bono_mensual';
+    sesionesTotales: number;                     // 1 | 4 | 8
+    sesionesRestantes: number;
+    modalidad?: '1h' | '30min';                  // solo para bono_mensual
+    fechaAsignacion: string;                     // ISO date
+    fechaExpiracion: string;                     // calculada
+    estado: 'activo' | 'agotado' | 'expirado';
+    historial: BonoHistorialEntry[];
+    asignadoPor: string;                         // admin email
+    createdAt: string;
 }
 
 export interface CMSContent {

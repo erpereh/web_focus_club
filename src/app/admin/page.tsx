@@ -44,13 +44,16 @@ import {
   X,
   MailCheck,
   KeyRound,
+  Ticket,
+  Minus,
+  History,
 } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { ImageUpload } from '@/components/ui/ImageUpload';
 import { ContextualImageManager } from '@/components/ui/ContextualImageManager';
 import { useAuth } from '@/contexts/AuthContext';
-import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, BlockedSlot, Trainer, SiteConfig } from '@/types';
+import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, BlockedSlot, Trainer, SiteConfig, Bono } from '@/types';
 import {
   getAppointments,
   updateAppointmentStatus as updateAppointmentStatusFS,
@@ -88,6 +91,16 @@ import {
   updateSiteConfig as updateSiteConfigFS,
   generateTimeSlots,
   updateAppointmentSlot as updateAppointmentSlotFS,
+  getAllActiveBonos,
+  getActiveBonoByUser,
+  getBonosByUser,
+  assignBono,
+  deactivateBono,
+  deductBonoSession,
+  returnBonoSession,
+  manualDeductBonoSession,
+  recalculateAllBonoExpirations,
+  expireOverdueBonos,
 } from '@/lib/firestore';
 import { cn } from '@/lib/utils';
 import type { UserProfile } from '@/types';
@@ -377,10 +390,23 @@ export default function AdminPage() {
   const [clientSearch, setClientSearch] = useState('');
 
   // Site config (dynamic time slots)
-  const [siteConfig, setSiteConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, sessionDuration: 60 });
-  const [editConfig, setEditConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, sessionDuration: 60 });
+  const [siteConfig, setSiteConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, sessionDuration: 60, bonoExpirationMonths: 1 });
+  const [editConfig, setEditConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, sessionDuration: 60, bonoExpirationMonths: 1 });
   const [savingConfig, setSavingConfig] = useState(false);
   const timeSlots = generateTimeSlots(siteConfig);
+
+  // Bonos
+  const [editBonoConfig, setEditBonoConfig] = useState(1);
+  const [savingBonoConfig, setSavingBonoConfig] = useState(false);
+  const [clientBonos, setClientBonos] = useState<Record<string, Bono | null>>({});
+  const [showAssignBonoModal, setShowAssignBonoModal] = useState(false);
+  const [assignBonoClient, setAssignBonoClient] = useState<UserProfile | null>(null);
+  const [assignBonoType, setAssignBonoType] = useState<'sesion_personal' | 'bono_mensual'>('bono_mensual');
+  const [assignBonoModalidad, setAssignBonoModalidad] = useState<'1h' | '30min'>('1h');
+  const [savingBono, setSavingBono] = useState(false);
+  const [showBonoHistoryModal, setShowBonoHistoryModal] = useState(false);
+  const [bonoHistoryData, setBonoHistoryData] = useState<Bono[]>([]);
+  const [bonoHistoryClientName, setBonoHistoryClientName] = useState('');
 
   // Delete appointments when blocking
   const [deleteOnBlock, setDeleteOnBlock] = useState(false);
@@ -405,10 +431,20 @@ export default function AdminPage() {
     setTrainers(trainersList);
     setSiteConfig(config);
     setEditConfig(config);
+    setEditBonoConfig(config.bonoExpirationMonths || 1);
     if (cms) {
       setCmsContent(cms);
       setEditedContent(cms);
     }
+
+    // Bonos: expirar vencidos y cargar mapa de bonos activos por cliente
+    await expireOverdueBonos();
+    const activeBonos = await getAllActiveBonos();
+    const bonoMap: Record<string, Bono | null> = {};
+    for (const bono of activeBonos) {
+      bonoMap[bono.userId] = bono;
+    }
+    setClientBonos(bonoMap);
   };
 
   // Cargar datos específicos del entrenador
@@ -508,12 +544,32 @@ export default function AdminPage() {
       if (slot) {
         await incrementSlotOccupancy(slot.date, slot.time);
       }
+      // Descontar sesión del bono activo del usuario
+      if (currentAppt) {
+        const activeBono = await getActiveBonoByUser(currentAppt.userId);
+        if (activeBono && activeBono.sesionesRestantes > 0) {
+          await deductBonoSession(activeBono.id, {
+            fecha: new Date().toISOString(),
+            tipo: currentAppt.serviceType,
+            duracion: currentAppt.duration,
+            appointmentId: id,
+          });
+        }
+      }
     }
     // Si ESTABA aprobada y ahora cambia a otro estado, decrementar
     if (prevStatus === 'approved' && status !== 'approved') {
       const slot = currentAppt?.approvedSlot || currentAppt?.preferredSlots?.[0];
       if (slot) {
         await decrementSlotOccupancy(slot.date, slot.time);
+      }
+      // Devolver sesión al bono si tenía una entrada para esta cita
+      if (currentAppt) {
+        const userBonos = await getBonosByUser(currentAppt.userId);
+        const bonoWithEntry = userBonos.find(b => b.historial.some(h => h.appointmentId === id));
+        if (bonoWithEntry) {
+          await returnBonoSession(bonoWithEntry.id, id);
+        }
       }
     }
 
@@ -1728,6 +1784,85 @@ export default function AdminPage() {
                               <option value="admin">Admin</option>
                             </select>
                           </div>
+                        </div>
+
+                        {/* Bono Section */}
+                        <div className="mt-4 pt-4 border-t border-white/10">
+                          {clientBonos[client.uid] ? (
+                            <div className="space-y-3">
+                              <div className="flex flex-wrap items-center gap-3">
+                                <span className="px-2.5 py-1 rounded-lg bg-emerald/10 text-emerald text-xs font-medium border border-emerald/20">
+                                  <Ticket className="w-3 h-3 inline mr-1" />
+                                  {clientBonos[client.uid]!.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
+                                  {clientBonos[client.uid]!.modalidad && ` (${clientBonos[client.uid]!.modalidad === '1h' ? '4×1h' : '8×30min'})`}
+                                </span>
+                                <span className="text-sm text-ivory">
+                                  {clientBonos[client.uid]!.sesionesRestantes}/{clientBonos[client.uid]!.sesionesTotales} sesiones
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  Expira: {new Date(clientBonos[client.uid]!.fechaExpiracion).toLocaleDateString('es-ES')}
+                                </span>
+                              </div>
+                              {/* Progress bar */}
+                              <div className="h-1.5 rounded-full bg-muted/30 overflow-hidden max-w-xs">
+                                <div
+                                  className="h-full rounded-full bg-gradient-to-r from-emerald to-accent transition-all"
+                                  style={{ width: `${(clientBonos[client.uid]!.sesionesRestantes / clientBonos[client.uid]!.sesionesTotales) * 100}%` }}
+                                />
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  onClick={async () => {
+                                    const bono = clientBonos[client.uid]!;
+                                    if (bono.sesionesRestantes <= 0) {
+                                      alert('Este bono no tiene sesiones restantes.');
+                                      return;
+                                    }
+                                    if (!window.confirm(`¿Descontar 1 sesión manualmente del bono de ${client.name}?`)) return;
+                                    try {
+                                      await manualDeductBonoSession(bono.id, user?.email || 'admin');
+                                      await addActivityLog({
+                                        action: 'bono_manual_deduct',
+                                        adminEmail: user?.email || 'unknown',
+                                        details: `Cliente: ${client.name}, Bono: ${bono.id}`,
+                                      });
+                                      await refreshData();
+                                    } catch (err) {
+                                      console.error('Error deducting session:', err);
+                                      alert('Error al descontar sesión');
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
+                                >
+                                  <Minus className="w-3 h-3" /> Descontar Sesión
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    const bonos = await getBonosByUser(client.uid);
+                                    setBonoHistoryData(bonos);
+                                    setBonoHistoryClientName(client.name);
+                                    setShowBonoHistoryModal(true);
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-muted/20 text-muted-foreground border border-white/10 hover:text-ivory hover:border-white/20 transition-colors flex items-center gap-1"
+                                >
+                                  <History className="w-3 h-3" /> Historial
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground mb-2">Sin bono activo</p>
+                          )}
+                          <button
+                            onClick={() => {
+                              setAssignBonoClient(client);
+                              setAssignBonoType('bono_mensual');
+                              setAssignBonoModalidad('1h');
+                              setShowAssignBonoModal(true);
+                            }}
+                            className="mt-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald/10 text-emerald border border-emerald/20 hover:bg-emerald/20 transition-colors flex items-center gap-1"
+                          >
+                            <Plus className="w-3 h-3" /> Asignar Bono
+                          </button>
                         </div>
                       </GlassCard>
                     ))}
@@ -3641,6 +3776,85 @@ export default function AdminPage() {
                         </div>
                       </div>
                     </GlassCard>
+
+                    {/* Configuración de Bonos */}
+                    <GlassCard className="p-6 lg:col-span-2">
+                      <div className="flex items-center gap-3 mb-4">
+                        <Ticket className="w-5 h-5 text-emerald" />
+                        <h2 className="text-lg font-semibold text-ivory">Configuración de Bonos</h2>
+                      </div>
+                      <p className="text-sm text-muted-foreground mb-6">
+                        Define la duración de validez para todos los bonos asignados. Al cambiar este valor se recalculará la fecha de expiración de todos los bonos activos.
+                      </p>
+
+                      <div>
+                        <label className="block text-sm font-medium text-ivory mb-1.5">Duración de Expiración</label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="number"
+                            min={1}
+                            value={editBonoConfig}
+                            onChange={(e) => setEditBonoConfig(Math.max(1, parseInt(e.target.value) || 1))}
+                            className="w-24 px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-ivory focus:border-emerald/50 focus:outline-none"
+                          />
+                          <span className="text-sm text-muted-foreground">mes(es)</span>
+                        </div>
+                      </div>
+
+                      <div className="mt-6 flex items-center gap-4">
+                        <button
+                          disabled={savingBonoConfig || editBonoConfig === (siteConfig.bonoExpirationMonths || 1)}
+                          onClick={async () => {
+                            const confirmed = window.confirm(
+                              'Este cambio afectará a todos los bonos activos recalculando su fecha de expiración. ¿Continuar?'
+                            );
+                            if (!confirmed) return;
+                            setSavingBonoConfig(true);
+                            try {
+                              await updateSiteConfigFS({ bonoExpirationMonths: editBonoConfig });
+                              await recalculateAllBonoExpirations(editBonoConfig);
+                              setSiteConfig(prev => ({ ...prev, bonoExpirationMonths: editBonoConfig }));
+                              await addActivityLog({
+                                action: 'bono_config_updated',
+                                adminEmail: user?.email || 'unknown',
+                                details: `Expiración: ${editBonoConfig} mes(es)`,
+                              });
+                              await refreshData();
+                            } catch (err) {
+                              console.error('Error saving bono config:', err);
+                              alert('Error al guardar la configuración de bonos');
+                            } finally {
+                              setSavingBonoConfig(false);
+                            }
+                          }}
+                          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald to-accent text-obsidian font-semibold hover:shadow-lg hover:shadow-emerald/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                          {savingBonoConfig ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Save className="w-4 h-4" />
+                          )}
+                          {savingBonoConfig ? 'Guardando...' : 'Guardar Configuración de Bonos'}
+                        </button>
+
+                        {editBonoConfig !== (siteConfig.bonoExpirationMonths || 1) && (
+                          <button
+                            onClick={() => setEditBonoConfig(siteConfig.bonoExpirationMonths || 1)}
+                            className="px-4 py-2.5 rounded-xl border border-white/10 text-muted-foreground hover:text-ivory hover:border-white/20 transition-colors text-sm"
+                          >
+                            Descartar cambios
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Current saved bono config */}
+                      <div className="mt-6 pt-4 border-t border-white/10">
+                        <h3 className="text-sm font-medium text-ivory mb-2">Configuración Actual</h3>
+                        <div className="text-sm text-muted-foreground">
+                          Expiración: <strong className="text-ivory">{siteConfig.bonoExpirationMonths || 1} mes(es)</strong>
+                        </div>
+                      </div>
+                    </GlassCard>
                   </div>
                 </motion.div>
               )}
@@ -3656,6 +3870,262 @@ export default function AdminPage() {
                   onSelect={activeImageManager.onSelect}
                   onClose={() => setActiveImageManager(null)}
                 />
+              )}
+            </AnimatePresence>
+
+            {/* ============================================
+                ASSIGN BONO MODAL
+                ============================================ */}
+            <AnimatePresence>
+              {showAssignBonoModal && assignBonoClient && (
+                <motion.div
+                  key="assign-bono-modal"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                  onClick={() => setShowAssignBonoModal(false)}
+                >
+                  <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full max-w-lg"
+                  >
+                    <GlassCard className="p-6">
+                      <h2 className="text-xl font-bold text-ivory mb-1">Asignar Bono</h2>
+                      <p className="text-sm text-muted-foreground mb-6">
+                        Asigna un bono a <strong className="text-ivory">{assignBonoClient.name}</strong>
+                      </p>
+
+                      {/* Warning if client already has active bono */}
+                      {clientBonos[assignBonoClient.uid] && (
+                        <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          Este cliente ya tiene un bono activo. Asignar uno nuevo reemplazará el actual.
+                        </div>
+                      )}
+
+                      <div className="space-y-5">
+                        {/* Bono Type */}
+                        <div>
+                          <label className="block text-sm font-medium text-ivory mb-1.5">Tipo de Bono</label>
+                          <select
+                            value={assignBonoType}
+                            onChange={(e) => setAssignBonoType(e.target.value as 'sesion_personal' | 'bono_mensual')}
+                            className="w-full px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-ivory focus:border-emerald/50 focus:outline-none"
+                          >
+                            <option value="sesion_personal">Sesión de Entrenamiento Personal (1 sesión)</option>
+                            <option value="bono_mensual">Bono Mensual de Entrenamiento</option>
+                          </select>
+                        </div>
+
+                        {/* Modalidad (only for bono_mensual) */}
+                        {assignBonoType === 'bono_mensual' && (
+                          <div>
+                            <label className="block text-sm font-medium text-ivory mb-1.5">Modalidad</label>
+                            <div className="flex gap-3">
+                              <button
+                                onClick={() => setAssignBonoModalidad('1h')}
+                                className={cn(
+                                  "flex-1 px-4 py-3 rounded-xl border text-sm font-medium transition-all",
+                                  assignBonoModalidad === '1h'
+                                    ? "bg-emerald/10 border-emerald/30 text-emerald"
+                                    : "bg-muted/20 border-white/10 text-muted-foreground hover:text-ivory"
+                                )}
+                              >
+                                4 sesiones × 1h/semana
+                              </button>
+                              <button
+                                onClick={() => setAssignBonoModalidad('30min')}
+                                className={cn(
+                                  "flex-1 px-4 py-3 rounded-xl border text-sm font-medium transition-all",
+                                  assignBonoModalidad === '30min'
+                                    ? "bg-emerald/10 border-emerald/30 text-emerald"
+                                    : "bg-muted/20 border-white/10 text-muted-foreground hover:text-ivory"
+                                )}
+                              >
+                                8 sesiones × 30min
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Summary */}
+                        <div className="p-4 rounded-xl bg-muted/10 border border-white/5">
+                          <h3 className="text-sm font-medium text-ivory mb-3">Resumen del Bono</h3>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Cliente</span>
+                              <span className="text-ivory">{assignBonoClient.name}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Tipo</span>
+                              <span className="text-ivory">
+                                {assignBonoType === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Sesiones</span>
+                              <span className="text-ivory">
+                                {assignBonoType === 'sesion_personal' ? '1' : assignBonoModalidad === '1h' ? '4' : '8'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Expira</span>
+                              <span className="text-ivory">
+                                {(() => {
+                                  const exp = new Date();
+                                  exp.setMonth(exp.getMonth() + (siteConfig.bonoExpirationMonths || 1));
+                                  return exp.toLocaleDateString('es-ES');
+                                })()}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex gap-3 justify-end mt-6">
+                        <button
+                          onClick={() => setShowAssignBonoModal(false)}
+                          className="px-4 py-2.5 rounded-xl border border-white/10 text-muted-foreground hover:text-ivory transition-colors"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          disabled={savingBono}
+                          onClick={async () => {
+                            setSavingBono(true);
+                            try {
+                              // Deactivate existing bono if any
+                              const existingBono = clientBonos[assignBonoClient.uid];
+                              if (existingBono) {
+                                await deactivateBono(existingBono.id);
+                              }
+
+                              const now = new Date();
+                              const expiration = new Date(now);
+                              expiration.setMonth(expiration.getMonth() + (siteConfig.bonoExpirationMonths || 1));
+
+                              const totalSessions = assignBonoType === 'sesion_personal' ? 1
+                                : assignBonoModalidad === '1h' ? 4 : 8;
+
+                              await assignBono({
+                                userId: assignBonoClient.uid,
+                                tipo: assignBonoType,
+                                sesionesTotales: totalSessions,
+                                sesionesRestantes: totalSessions,
+                                modalidad: assignBonoType === 'bono_mensual' ? assignBonoModalidad : undefined,
+                                fechaAsignacion: now.toISOString(),
+                                fechaExpiracion: expiration.toISOString(),
+                                estado: 'activo',
+                                historial: [],
+                                asignadoPor: user?.email || 'admin',
+                              });
+
+                              await addActivityLog({
+                                action: 'bono_assigned',
+                                adminEmail: user?.email || 'unknown',
+                                details: `Cliente: ${assignBonoClient.name}, Tipo: ${assignBonoType}${assignBonoType === 'bono_mensual' ? ` (${assignBonoModalidad})` : ''}, Sesiones: ${totalSessions}`,
+                              });
+
+                              setShowAssignBonoModal(false);
+                              await refreshData();
+                            } catch (err) {
+                              console.error('Error assigning bono:', err);
+                              alert('Error al asignar el bono');
+                            } finally {
+                              setSavingBono(false);
+                            }
+                          }}
+                          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald to-accent text-obsidian font-semibold hover:shadow-lg hover:shadow-emerald/25 transition-all disabled:opacity-50 flex items-center gap-2"
+                        >
+                          {savingBono ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Ticket className="w-4 h-4" />}
+                          {savingBono ? 'Asignando...' : 'Asignar Bono'}
+                        </button>
+                      </div>
+                    </GlassCard>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ============================================
+                BONO HISTORY MODAL
+                ============================================ */}
+            <AnimatePresence>
+              {showBonoHistoryModal && (
+                <motion.div
+                  key="bono-history-modal"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                  onClick={() => setShowBonoHistoryModal(false)}
+                >
+                  <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full max-w-lg max-h-[80vh] overflow-y-auto"
+                  >
+                    <GlassCard className="p-6">
+                      <div className="flex items-center justify-between mb-6">
+                        <div>
+                          <h2 className="text-xl font-bold text-ivory">Historial de Bonos</h2>
+                          <p className="text-sm text-muted-foreground">{bonoHistoryClientName}</p>
+                        </div>
+                        <button onClick={() => setShowBonoHistoryModal(false)} className="text-muted-foreground hover:text-ivory">
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+
+                      {bonoHistoryData.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-8">No hay historial de bonos.</p>
+                      ) : (
+                        <div className="space-y-4">
+                          {bonoHistoryData.map((bono) => (
+                            <div key={bono.id} className="p-4 rounded-xl bg-muted/10 border border-white/5">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className={cn(
+                                  "px-2 py-0.5 rounded text-xs font-medium",
+                                  bono.estado === 'activo' ? "bg-emerald/10 text-emerald" :
+                                  bono.estado === 'agotado' ? "bg-amber-500/10 text-amber-400" :
+                                  "bg-red-500/10 text-red-400"
+                                )}>
+                                  {bono.estado.charAt(0).toUpperCase() + bono.estado.slice(1)}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  {new Date(bono.fechaAsignacion).toLocaleDateString('es-ES')}
+                                </span>
+                              </div>
+                              <div className="text-sm text-ivory mb-1">
+                                {bono.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
+                                {bono.modalidad && ` (${bono.modalidad === '1h' ? '4×1h' : '8×30min'})`}
+                              </div>
+                              <div className="text-xs text-muted-foreground mb-2">
+                                {bono.sesionesRestantes}/{bono.sesionesTotales} sesiones restantes · Expira: {new Date(bono.fechaExpiracion).toLocaleDateString('es-ES')}
+                              </div>
+                              {bono.historial.length > 0 && (
+                                <div className="mt-2 pt-2 border-t border-white/5 space-y-1">
+                                  {bono.historial.map((h, i) => (
+                                    <div key={i} className="flex justify-between text-xs text-muted-foreground">
+                                      <span>{new Date(h.fecha).toLocaleDateString('es-ES')}</span>
+                                      <span>{h.tipo}{h.duracion !== '-' ? ` · ${h.duracion}min` : ''}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </GlassCard>
+                  </motion.div>
+                </motion.div>
               )}
             </AnimatePresence>
 

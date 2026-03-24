@@ -83,6 +83,15 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ─── BONOS ───
+    match /bonos/{bonoId} {
+      // Usuarios pueden leer su propio bono; admin puede leer todos
+      allow read: if request.auth != null
+                  && (resource.data.userId == request.auth.uid || isAdmin());
+      // Solo admin puede crear, modificar o eliminar bonos
+      allow create, update, delete: if isAdmin();
+    }
+
     // ─── ACTIVITY LOGS ───
     match /activity_logs/{logId} {
       allow read: if isAdmin();

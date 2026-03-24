@@ -30,14 +30,15 @@ import {
   MailCheck,
   RefreshCw,
   KeyRound,
+  Ticket,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { InteractiveCalendar } from '@/components/ui/interactive-calendar';
 import { useAuth } from '@/contexts/AuthContext';
-import type { TimeSlot, Appointment } from '@/types';
-import { addAppointment as addAppointmentFS, getAppointmentsByUser } from '@/lib/firestore';
+import type { TimeSlot, Appointment, Bono } from '@/types';
+import { addAppointment as addAppointmentFS, getAppointmentsByUser, getActiveBonoByUser, getBonosByUser, expireOverdueBonos } from '@/lib/firestore';
 import { useServices } from '@/hooks/useFirestore';
 import { cn } from '@/lib/utils';
 
@@ -141,9 +142,25 @@ export default function PortalPage() {
   // Obtener citas del usuario desde Firestore
   const [userAppointments, setUserAppointments] = useState<Appointment[]>([]);
 
+  // Bono state
+  const [activeBono, setActiveBono] = useState<Bono | null>(null);
+  const [bonoLoading, setBonoLoading] = useState(true);
+
   useEffect(() => {
     if (user) {
       getAppointmentsByUser(user.uid).then(setUserAppointments).catch(console.error);
+      // Load bono data
+      (async () => {
+        try {
+          await expireOverdueBonos();
+          const bono = await getActiveBonoByUser(user.uid);
+          setActiveBono(bono);
+        } catch (err) {
+          console.error('Error loading bono:', err);
+        } finally {
+          setBonoLoading(false);
+        }
+      })();
     }
   }, [user]);
 
@@ -296,6 +313,13 @@ export default function PortalPage() {
 
   const handleSubmitAppointment = async () => {
     if (!user || !userProfile || !formData.serviceType || !formData.preferredSlot) return;
+
+    // Verificar bono activo con sesiones disponibles
+    const currentBono = await getActiveBonoByUser(user.uid);
+    if (!currentBono || currentBono.sesionesRestantes <= 0) {
+      alert('No tienes sesiones disponibles en tu bono. Consulta en el gimnasio para renovar o adquirir un bono.');
+      return;
+    }
 
     try {
       await addAppointmentFS({
@@ -866,16 +890,84 @@ export default function PortalPage() {
               </div>
 
               <div className="space-y-8">
+                {/* Mi Bono */}
+                <GlassCard className="p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <Ticket className="w-5 h-5 text-emerald" />
+                    <h2 className="text-xl font-semibold text-ivory">Mi Bono</h2>
+                  </div>
+                  {bonoLoading ? (
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span className="text-sm">Cargando...</span>
+                    </div>
+                  ) : activeBono ? (
+                    <div className="space-y-4">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="px-2.5 py-1 rounded-lg bg-emerald/10 text-emerald text-xs font-medium border border-emerald/20">
+                          {activeBono.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
+                          {activeBono.modalidad && ` (${activeBono.modalidad === '1h' ? '4×1h' : '8×30min'})`}
+                        </span>
+                      </div>
+                      {/* Progress bar */}
+                      <div>
+                        <div className="flex justify-between text-sm mb-1.5">
+                          <span className="text-muted-foreground">Sesiones restantes</span>
+                          <span className="text-ivory font-medium">{activeBono.sesionesRestantes}/{activeBono.sesionesTotales}</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-muted/30 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-emerald to-accent transition-all"
+                            style={{ width: `${(activeBono.sesionesRestantes / activeBono.sesionesTotales) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Válido hasta</span>
+                        <span className="text-ivory">{new Date(activeBono.fechaExpiracion).toLocaleDateString('es-ES')}</span>
+                      </div>
+                      {/* Session history */}
+                      {activeBono.historial.length > 0 && (
+                        <div className="pt-4 border-t border-white/10">
+                          <h3 className="text-sm font-medium text-ivory mb-2">Sesiones consumidas</h3>
+                          <div className="space-y-1">
+                            {activeBono.historial.map((h, i) => (
+                              <div key={i} className="flex justify-between text-xs text-muted-foreground">
+                                <span>{new Date(h.fecha).toLocaleDateString('es-ES')}</span>
+                                <span>{h.tipo}{h.duracion !== '-' ? ` · ${h.duracion}min` : ''}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-4">
+                      <Ticket className="w-8 h-8 mx-auto mb-2 text-muted-foreground opacity-40" />
+                      <p className="text-muted-foreground text-sm">
+                        No tienes un bono activo. Consulta en el gimnasio para adquirir uno.
+                      </p>
+                    </div>
+                  )}
+                </GlassCard>
+
                 {/* Botón principal: Pedir Cita */}
-                <PremiumButton
-                  variant="cta"
-                  icon={<CalendarPlus className="w-4 h-4" />}
-                  iconPosition="right"
-                  onClick={() => setPortalView('new-appointment')}
-                  className="w-full sm:w-auto"
-                >
-                  Pedir Cita
-                </PremiumButton>
+                {!bonoLoading && (!activeBono || activeBono.sesionesRestantes <= 0) ? (
+                  <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    No tienes sesiones disponibles. Consulta en el gimnasio para adquirir o renovar tu bono.
+                  </div>
+                ) : (
+                  <PremiumButton
+                    variant="cta"
+                    icon={<CalendarPlus className="w-4 h-4" />}
+                    iconPosition="right"
+                    onClick={() => setPortalView('new-appointment')}
+                    className="w-full sm:w-auto"
+                  >
+                    Pedir Cita
+                  </PremiumButton>
+                )}
 
                 {/* Appointments List */}
                 <div className="space-y-6">

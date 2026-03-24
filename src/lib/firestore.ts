@@ -13,6 +13,9 @@ import {
     Timestamp,
     increment,
     runTransaction,
+    writeBatch,
+    arrayUnion,
+    arrayRemove,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import type {
@@ -28,6 +31,8 @@ import type {
     SlotOccupancy,
     Trainer,
     SiteConfig,
+    Bono,
+    BonoHistorialEntry,
 } from '@/types';
 
 // ============================================
@@ -440,6 +445,7 @@ const DEFAULT_SITE_CONFIG: SiteConfig = {
     startHour: 8,
     endHour: 20,
     sessionDuration: 60,
+    bonoExpirationMonths: 1,
 };
 
 /**
@@ -466,4 +472,139 @@ export async function getSiteConfig(): Promise<SiteConfig> {
 
 export async function updateSiteConfig(data: Partial<SiteConfig>): Promise<void> {
     await setDoc(doc(db, 'site_config', 'main'), data, { merge: true });
+}
+
+// ============================================
+// BONOS
+// ============================================
+
+/** Todos los bonos de un usuario, ordenados por fecha de creación descendente */
+export async function getBonosByUser(userId: string): Promise<Bono[]> {
+    const snap = await getDocs(
+        query(collection(db, 'bonos'), where('userId', '==', userId), orderBy('createdAt', 'desc'))
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Bono));
+}
+
+/** Bono activo de un usuario (null si no tiene) */
+export async function getActiveBonoByUser(userId: string): Promise<Bono | null> {
+    const snap = await getDocs(
+        query(collection(db, 'bonos'), where('userId', '==', userId), where('estado', '==', 'activo'))
+    );
+    return snap.empty ? null : ({ id: snap.docs[0].id, ...snap.docs[0].data() } as Bono);
+}
+
+/** Todos los bonos activos (para recalcular expiración masiva) */
+export async function getAllActiveBonos(): Promise<Bono[]> {
+    const snap = await getDocs(
+        query(collection(db, 'bonos'), where('estado', '==', 'activo'))
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Bono));
+}
+
+/** Asignar un nuevo bono */
+export async function assignBono(data: Omit<Bono, 'id' | 'createdAt'>): Promise<string> {
+    const docRef = await addDoc(collection(db, 'bonos'), {
+        ...data,
+        createdAt: new Date().toISOString(),
+    });
+    return docRef.id;
+}
+
+/** Marcar un bono como agotado (cuando se reemplaza por uno nuevo) */
+export async function deactivateBono(bonoId: string): Promise<void> {
+    await updateDoc(doc(db, 'bonos', bonoId), { estado: 'agotado' });
+}
+
+/** Descontar una sesión del bono (transacción atómica) */
+export async function deductBonoSession(bonoId: string, entry: BonoHistorialEntry): Promise<void> {
+    await runTransaction(db, async (transaction) => {
+        const bonoRef = doc(db, 'bonos', bonoId);
+        const bonoSnap = await transaction.get(bonoRef);
+        if (!bonoSnap.exists()) throw new Error('Bono no encontrado');
+
+        const bono = bonoSnap.data() as Omit<Bono, 'id'>;
+        const newRemaining = bono.sesionesRestantes - 1;
+
+        transaction.update(bonoRef, {
+            sesionesRestantes: newRemaining,
+            estado: newRemaining <= 0 ? 'agotado' : 'activo',
+            historial: arrayUnion(entry),
+        });
+    });
+}
+
+/** Devolver una sesión al bono cuando se cancela una cita */
+export async function returnBonoSession(bonoId: string, appointmentId: string): Promise<void> {
+    await runTransaction(db, async (transaction) => {
+        const bonoRef = doc(db, 'bonos', bonoId);
+        const bonoSnap = await transaction.get(bonoRef);
+        if (!bonoSnap.exists()) throw new Error('Bono no encontrado');
+
+        const bono = bonoSnap.data() as Omit<Bono, 'id'>;
+
+        // No devolver sesión si el bono está expirado
+        if (bono.estado === 'expirado') return;
+
+        const entryToRemove = bono.historial.find((h) => h.appointmentId === appointmentId);
+        if (!entryToRemove) return;
+
+        const newRemaining = bono.sesionesRestantes + 1;
+
+        transaction.update(bonoRef, {
+            sesionesRestantes: newRemaining,
+            estado: newRemaining > 0 ? 'activo' : bono.estado,
+            historial: arrayRemove(entryToRemove),
+        });
+    });
+}
+
+/** Deducción manual por parte del admin */
+export async function manualDeductBonoSession(bonoId: string, adminEmail: string): Promise<void> {
+    const entry: BonoHistorialEntry = {
+        fecha: new Date().toISOString(),
+        tipo: 'Deducción manual',
+        duracion: '-',
+        appointmentId: 'manual',
+    };
+    await deductBonoSession(bonoId, entry);
+}
+
+/** Recalcular la fecha de expiración de todos los bonos activos */
+export async function recalculateAllBonoExpirations(newMonths: number): Promise<void> {
+    const activeBonos = await getAllActiveBonos();
+    if (activeBonos.length === 0) return;
+
+    const batch = writeBatch(db);
+    const today = new Date();
+
+    for (const bono of activeBonos) {
+        const assignDate = new Date(bono.fechaAsignacion);
+        const newExpiration = new Date(assignDate);
+        newExpiration.setMonth(newExpiration.getMonth() + newMonths);
+
+        const newEstado = newExpiration < today ? 'expirado' : 'activo';
+
+        batch.update(doc(db, 'bonos', bono.id), {
+            fechaExpiracion: newExpiration.toISOString(),
+            estado: newEstado,
+        });
+    }
+
+    await batch.commit();
+}
+
+/** Expirar bonos cuya fecha de expiración ya pasó */
+export async function expireOverdueBonos(): Promise<void> {
+    const activeBonos = await getAllActiveBonos();
+    const now = new Date();
+    const overdue = activeBonos.filter((b) => new Date(b.fechaExpiracion) < now);
+
+    if (overdue.length === 0) return;
+
+    const batch = writeBatch(db);
+    for (const bono of overdue) {
+        batch.update(doc(db, 'bonos', bono.id), { estado: 'expirado' });
+    }
+    await batch.commit();
 }
