@@ -32,6 +32,9 @@ import {
   KeyRound,
   Ticket,
   History,
+  X,
+  Camera,
+  Settings,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -39,7 +42,10 @@ import { PremiumButton } from '@/components/ui/premium-button';
 import { InteractiveCalendar } from '@/components/ui/interactive-calendar';
 import { useAuth } from '@/contexts/AuthContext';
 import type { TimeSlot, Appointment, Bono } from '@/types';
-import { addAppointment as addAppointmentFS, getAppointmentsByUser, getActiveBonoByUser, getBonosByUser } from '@/lib/firestore';
+import { addAppointment as addAppointmentFS, getAppointmentsByUser, getActiveBonoByUser, getBonosByUser, updateUserProfile } from '@/lib/firestore';
+import { storage } from '@/lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { updatePassword } from 'firebase/auth';
 import { cn } from '@/lib/utils';
 
 // ============================================
@@ -104,7 +110,7 @@ const durations = [
 // ============================================
 
 export default function PortalPage() {
-  const { user, userProfile, loading: authContextLoading, login, register, loginWithGoogle, logout, resetPassword, resendVerification, completeGoogleProfile } = useAuth();
+  const { user, userProfile, loading: authContextLoading, login, register, loginWithGoogle, logout, resetPassword, resendVerification, completeGoogleProfile, refreshUserProfile } = useAuth();
   const isAuthenticated = !!user && !!userProfile?.phone;
 
   const [authMode, setAuthMode] = useState<AuthMode>('login');
@@ -146,6 +152,20 @@ export default function PortalPage() {
   const [bonoLoading, setBonoLoading] = useState(true);
   const [allBonos, setAllBonos] = useState<Bono[]>([]);
 
+  // Estado de drawers/modales del dashboard
+  const [showReservaDrawer, setShowReservaDrawer] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [activeHistoryTab, setActiveHistoryTab] = useState<'citas' | 'bonos'>('citas');
+
+  // Estado del modal de perfil
+  const [profileEditForm, setProfileEditForm] = useState({ name: '', phone: '' });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState('');
+  const [profileSuccess, setProfileSuccess] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
+  const [profilePhotoPreview, setProfilePhotoPreview] = useState('');
+
   // Derivados del bono activo — determinan servicio y duración de la cita
   const bonoServiceLabel = activeBono
     ? activeBono.tipo === 'sesion_personal'
@@ -177,6 +197,23 @@ export default function PortalPage() {
       })();
     }
   }, [user]);
+
+  // Sincronizar form de perfil al cargar userProfile
+  useEffect(() => {
+    if (userProfile) {
+      setProfileEditForm({ name: userProfile.name || '', phone: userProfile.phone || '' });
+    }
+  }, [userProfile]);
+
+  // Computed: sesiones totales históricas y próxima cita
+  const totalSessionsUsed = allBonos.reduce((sum, b) => sum + (b.sesionesTotales - b.sesionesRestantes), 0);
+  const nextAppointment = [...userAppointments]
+    .filter(a => a.status === 'pending' || a.status === 'approved')
+    .sort((a, b) => {
+      const dateA = a.preferredSlots[0]?.date || a.createdAt;
+      const dateB = b.preferredSlots[0]?.date || b.createdAt;
+      return new Date(dateA).getTime() - new Date(dateB).getTime();
+    })[0] || null;
 
   // ============================================
   // MANEJADORES DE AUTENTICACIÓN
@@ -360,10 +397,51 @@ export default function PortalPage() {
           preferredSlot: null,
           reason: '',
         });
-        setPortalView('dashboard');
+        setShowReservaDrawer(false);
       }, 2000);
     } catch (error) {
       console.error('Error al crear cita:', error);
+    }
+  };
+
+  // ============================================
+  // PERFIL HANDLER
+  // ============================================
+
+  const handleSaveProfile = async () => {
+    if (!user || !userProfile) return;
+    if (newPassword.length > 0 && newPassword.length < 6) {
+      setProfileError('La contraseña debe tener al menos 6 caracteres.');
+      return;
+    }
+    setProfileSaving(true);
+    setProfileError('');
+    setProfileSuccess('');
+    try {
+      let photoURL = userProfile.photoURL || '';
+      if (profilePhotoFile) {
+        const storageRef = ref(storage, `user-avatars/${user.uid}`);
+        await uploadBytes(storageRef, profilePhotoFile);
+        photoURL = await getDownloadURL(storageRef);
+      }
+      await updateUserProfile(user.uid, {
+        name: profileEditForm.name,
+        phone: profileEditForm.phone,
+        ...(photoURL ? { photoURL } : {}),
+      });
+      if (newPassword.length >= 6) {
+        await updatePassword(user, newPassword);
+        setNewPassword('');
+      }
+      await refreshUserProfile();
+      setProfilePhotoFile(null);
+      setProfilePhotoPreview('');
+      setProfileSuccess('Perfil actualizado correctamente.');
+    } catch (err) {
+      console.error(err);
+      setProfileError('Error al guardar los cambios. Si usas Google, puede que necesites reautenticarte.');
+    } finally {
+      setProfileSaving(false);
     }
   };
 
@@ -849,20 +927,14 @@ export default function PortalPage() {
       <header className="glass-dark border-b border-border sticky top-0 z-40">
         <div className="container mx-auto px-4">
           <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-4">
-              <Link href="/" className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald to-accent flex items-center justify-center">
-                  <Dumbbell className="w-4 h-4 text-obsidian" />
-                </div>
-                <span className="font-bold text-ivory hidden sm:block">Mi Cuenta</span>
-              </Link>
-            </div>
+            <Link href="/" className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald to-accent flex items-center justify-center">
+                <Dumbbell className="w-4 h-4 text-obsidian" />
+              </div>
+              <span className="font-bold text-ivory hidden sm:block">Focus Club</span>
+            </Link>
 
             <div className="flex items-center gap-2">
-              <div className="text-right hidden sm:block">
-                <p className="text-sm font-medium text-ivory">{userProfile?.name}</p>
-                <p className="text-xs text-muted-foreground">{userProfile?.email}</p>
-              </div>
               <Link href="/">
                 <PremiumButton variant="ghost" size="sm" icon={<ArrowLeft className="w-4 h-4" />}>
                   <span className="hidden sm:inline">Ver web</span>
@@ -881,7 +953,7 @@ export default function PortalPage() {
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto px-4 py-8">
+      <div className="max-w-5xl mx-auto px-4 py-8">
         <AnimatePresence mode="wait">
           {/* ============================================
               DASHBOARD VIEW
@@ -893,23 +965,62 @@ export default function PortalPage() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
             >
-              {/* Welcome Section */}
-              <div className="mb-8 flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald to-accent flex items-center justify-center text-obsidian font-bold text-lg shrink-0">
-                  {userProfile?.name?.charAt(0)}
+              {/* Header bar: avatar + CTA */}
+              <div className="flex items-center justify-between mb-8 gap-4">
+                <div className="flex items-center gap-3">
+                  <button onClick={() => setShowProfileModal(true)} className="relative group shrink-0">
+                    {userProfile?.photoURL ? (
+                      <img src={userProfile.photoURL} alt="" className="w-12 h-12 rounded-full object-cover ring-2 ring-accent/40 group-hover:ring-accent transition-all" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald to-accent flex items-center justify-center text-obsidian font-bold text-lg group-hover:scale-105 transition-transform">
+                        {userProfile?.name?.charAt(0)}
+                      </div>
+                    )}
+                    <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-obsidian border border-border flex items-center justify-center">
+                      <Settings className="w-2.5 h-2.5 text-muted-foreground" />
+                    </span>
+                  </button>
+                  <div>
+                    <p className="font-bold text-ivory leading-tight">{userProfile?.name}</p>
+                    <p className="text-xs text-muted-foreground">{userProfile?.email}</p>
+                  </div>
                 </div>
-                <div>
-                  <h1 className="text-2xl font-bold text-ivory leading-tight">{userProfile?.name}</h1>
-                  <p className="text-sm text-muted-foreground">{userProfile?.email}</p>
-                </div>
+
+                {!bonoLoading && activeBono && activeBono.sesionesRestantes > 0 && (
+                  <PremiumButton
+                    variant="cta"
+                    icon={<CalendarPlus className="w-4 h-4" />}
+                    iconPosition="right"
+                    onClick={() => setShowReservaDrawer(true)}
+                    className="shrink-0"
+                  >
+                    Reservar Sesión
+                  </PremiumButton>
+                )}
               </div>
 
-              <div className="space-y-8">
+              {/* Sin bono activo — aviso */}
+              {!bonoLoading && (!activeBono || activeBono.sesionesRestantes <= 0) && (
+                <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  No tienes sesiones disponibles. Consulta en el gimnasio para adquirir o renovar tu bono.
+                </div>
+              )}
+
+              {/* 3-card summary */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
                 {/* Mi Bono */}
-                <GlassCard className="p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <Ticket className="w-5 h-5 text-emerald" />
-                    <h2 className="text-xl font-semibold text-ivory">Mi Bono</h2>
+                <GlassCard className="p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Ticket className="w-4 h-4 text-accent" />
+                      <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Mi Bono</span>
+                    </div>
+                    {activeBono && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-emerald/10 text-emerald border border-emerald/20 font-medium">
+                        Activo
+                      </span>
+                    )}
                   </div>
                   {bonoLoading ? (
                     <div className="flex items-center gap-2 text-muted-foreground">
@@ -917,360 +1028,195 @@ export default function PortalPage() {
                       <span className="text-sm">Cargando...</span>
                     </div>
                   ) : activeBono ? (
-                    <div className="space-y-4">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <span className="px-2.5 py-1 rounded-lg bg-emerald/10 text-emerald text-xs font-medium border border-emerald/20">
-                          {activeBono.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
-                          {activeBono.modalidad && ` (${activeBono.modalidad === '1h' ? '4×1h' : '8×30min'})`}
-                        </span>
-                      </div>
-                      {/* Progress bar */}
-                      <div>
-                        <div className="flex justify-between text-sm mb-1.5">
-                          <span className="text-muted-foreground">Sesiones restantes</span>
-                          <span className="text-ivory font-medium">{activeBono.sesionesRestantes}/{activeBono.sesionesTotales}</span>
-                        </div>
-                        <div className="h-2 rounded-full bg-muted/30 overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-gradient-to-r from-emerald to-accent transition-all"
-                            style={{ width: `${(activeBono.sesionesRestantes / activeBono.sesionesTotales) * 100}%` }}
-                          />
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Válido hasta</span>
-                        <span className="text-ivory">{new Date(activeBono.fechaExpiracion).toLocaleDateString('es-ES')}</span>
-                      </div>
-                      {/* Session history */}
-                      {activeBono.historial.length > 0 && (
-                        <div className="pt-4 border-t border-white/10">
-                          <h3 className="text-sm font-medium text-ivory mb-2">Sesiones consumidas</h3>
-                          <div className="space-y-1">
-                            {activeBono.historial.map((h, i) => (
-                              <div key={i} className="flex justify-between text-xs text-muted-foreground">
-                                <span>{new Date(h.fecha).toLocaleDateString('es-ES')}</span>
-                                <span>{h.tipo}{h.duracion !== '-' ? ` · ${h.duracion}min` : ''}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-center py-4">
-                      <Ticket className="w-8 h-8 mx-auto mb-2 text-muted-foreground opacity-40" />
-                      <p className="text-muted-foreground text-sm">
-                        No tienes un bono activo. Consulta en el gimnasio para adquirir uno.
+                    <>
+                      <p className="text-ivory font-semibold text-lg mb-1">
+                        {activeBono.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
                       </p>
-                    </div>
+                      <div className="mt-2 mb-1 flex justify-between text-xs text-muted-foreground">
+                        <span>Sesiones</span>
+                        <span className="text-ivory font-medium">{activeBono.sesionesRestantes}/{activeBono.sesionesTotales}</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-muted/30 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-emerald to-accent transition-all"
+                          style={{ width: `${(activeBono.sesionesRestantes / activeBono.sesionesTotales) * 100}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Válido hasta {new Date(activeBono.fechaExpiracion).toLocaleDateString('es-ES')}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground mt-1">Sin bono activo</p>
                   )}
                 </GlassCard>
 
-                {/* Historial de Bonos */}
-                {allBonos.filter(b => b.estado !== 'activo').length > 0 && (
-                  <GlassCard className="p-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <History className="w-5 h-5 text-muted-foreground" />
-                      <h2 className="text-xl font-semibold text-ivory">Historial de Bonos</h2>
+                {/* Próxima Cita */}
+                <GlassCard className="p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Calendar className="w-4 h-4 text-accent" />
+                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Próxima Cita</span>
+                  </div>
+                  {nextAppointment ? (
+                    <>
+                      <p className="text-ivory font-semibold text-lg mb-1">
+                        {nextAppointment.preferredSlots[0]
+                          ? new Date(nextAppointment.preferredSlots[0].date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
+                          : '—'}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {nextAppointment.preferredSlots[0]?.time || ''}
+                      </p>
+                      <span className={cn('inline-flex items-center gap-1 mt-2 text-xs px-2 py-0.5 rounded-full border', statusConfig[nextAppointment.status].color)}>
+                        {nextAppointment.status === 'pending' ? 'Pendiente' : 'Confirmada'}
+                      </span>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground mt-1">Sin citas próximas</p>
+                  )}
+                </GlassCard>
+
+                {/* Sesiones Realizadas */}
+                <GlassCard className="p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Activity className="w-4 h-4 text-accent" />
+                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Sesiones Realizadas</span>
+                  </div>
+                  <p className="text-4xl font-bold text-ivory">{totalSessionsUsed}</p>
+                  <p className="text-xs text-muted-foreground mt-1">sesiones totales completadas</p>
+                </GlassCard>
+              </div>
+
+              {/* Two-column layout */}
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                {/* Left: Mis Citas (pending + approved) */}
+                <div className="lg:col-span-3 space-y-4">
+                  <h2 className="text-lg font-semibold text-ivory">Mis Citas</h2>
+                  {userAppointments.filter(a => a.status === 'pending' || a.status === 'approved').length === 0 ? (
+                    <GlassCard className="p-8 text-center">
+                      <Calendar className="w-10 h-10 mx-auto mb-3 text-muted-foreground opacity-40" />
+                      <p className="text-ivory font-medium mb-1">Sin citas activas</p>
+                      <p className="text-sm text-muted-foreground">Reserva una sesión para empezar</p>
+                    </GlassCard>
+                  ) : (
+                    userAppointments.filter(a => a.status === 'pending' || a.status === 'approved').map((appt) => {
+                      const status = statusConfig[appt.status];
+                      const StatusIcon = status.icon;
+                      return (
+                        <GlassCard
+                          key={appt.id}
+                          className="p-5 cursor-pointer hover:border-accent/40 transition-all"
+                          onClick={() => { setSelectedAppointment(appt.id); setPortalView('appointment-detail'); }}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center', appt.status === 'approved' ? 'bg-emerald/20' : 'bg-muted/30')}>
+                                <Calendar className={cn('w-5 h-5', appt.status === 'approved' ? 'text-accent' : 'text-muted-foreground')} />
+                              </div>
+                              <div>
+                                <p className="font-medium text-ivory text-sm">{serviceLabels[appt.serviceType] || appt.serviceType}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {appt.preferredSlots[0]
+                                    ? `${new Date(appt.preferredSlots[0].date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} · ${appt.preferredSlots[0].time}`
+                                    : '—'}
+                                </p>
+                              </div>
+                            </div>
+                            <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-obsidian/50 shrink-0', status.color)}>
+                              <StatusIcon className="w-3 h-3" />
+                              {status.label}
+                            </span>
+                          </div>
+                        </GlassCard>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Right: Historial con tabs */}
+                <div className="lg:col-span-2 space-y-4">
+                  <div className="flex items-center gap-1 p-1 rounded-xl bg-muted/20 border border-white/5">
+                    {(['citas', 'bonos'] as const).map(tab => (
+                      <button
+                        key={tab}
+                        onClick={() => setActiveHistoryTab(tab)}
+                        className={cn(
+                          'flex-1 py-1.5 rounded-lg text-xs font-medium transition-all',
+                          activeHistoryTab === tab ? 'bg-accent/20 text-accent' : 'text-muted-foreground hover:text-ivory'
+                        )}
+                      >
+                        {tab === 'citas' ? 'Historial Citas' : 'Historial Bonos'}
+                      </button>
+                    ))}
+                  </div>
+
+                  {activeHistoryTab === 'citas' && (
+                    <div className="space-y-2">
+                      {userAppointments.filter(a => a.status === 'rejected').length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-6">Sin historial de citas</p>
+                      ) : userAppointments.filter(a => a.status === 'rejected').map((appt) => {
+                        const status = statusConfig[appt.status];
+                        const StatusIcon = status.icon;
+                        return (
+                          <GlassCard
+                            key={appt.id}
+                            className="p-4 cursor-pointer hover:border-accent/30 transition-all"
+                            onClick={() => { setSelectedAppointment(appt.id); setPortalView('appointment-detail'); }}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <p className="text-ivory text-xs font-medium">{serviceLabels[appt.serviceType] || appt.serviceType}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {appt.preferredSlots[0]
+                                    ? `${new Date(appt.preferredSlots[0].date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} · ${appt.preferredSlots[0].time}`
+                                    : new Date(appt.createdAt).toLocaleDateString('es-ES')}
+                                </p>
+                              </div>
+                              <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border shrink-0', status.color)}>
+                                <StatusIcon className="w-2.5 h-2.5" />
+                                {status.label}
+                              </span>
+                            </div>
+                          </GlassCard>
+                        );
+                      })}
                     </div>
-                    <div className="space-y-3">
-                      {allBonos.filter(b => b.estado !== 'activo').map((bono) => {
+                  )}
+
+                  {activeHistoryTab === 'bonos' && (
+                    <div className="space-y-2">
+                      {allBonos.filter(b => b.estado !== 'activo').length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-6">Sin historial de bonos</p>
+                      ) : allBonos.filter(b => b.estado !== 'activo').map((bono) => {
                         const usadas = bono.sesionesTotales - bono.sesionesRestantes;
                         const estadoBadge =
                           bono.estado === 'agotado' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
                           bono.estado === 'expirado' ? 'bg-muted/20 text-muted-foreground border-muted/20' :
                           'bg-red-500/10 text-red-400 border-red-500/20';
                         return (
-                          <div key={bono.id} className="p-4 rounded-xl bg-muted/10 border border-white/5 space-y-2">
-                            <div className="flex items-center justify-between gap-2 flex-wrap">
-                              <span className="text-ivory text-sm font-medium">
-                                {bono.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
-                                {bono.modalidad && ` · ${bono.modalidad}`}
-                              </span>
-                              <span className={cn('text-xs px-2 py-0.5 rounded-full border font-medium', estadoBadge)}>
+                          <GlassCard key={bono.id} className="p-4">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <p className="text-ivory text-xs font-medium">
+                                  {bono.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
+                                  {bono.modalidad ? ` · ${bono.modalidad}` : ''}
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-0.5">
+                                  {new Date(bono.fechaAsignacion).toLocaleDateString('es-ES')} → {new Date(bono.fechaExpiracion).toLocaleDateString('es-ES')}
+                                </p>
+                                <p className="text-xs text-muted-foreground">{usadas}/{bono.sesionesTotales} sesiones usadas</p>
+                              </div>
+                              <span className={cn('text-xs px-2 py-0.5 rounded-full border font-medium shrink-0', estadoBadge)}>
                                 {bono.estado.charAt(0).toUpperCase() + bono.estado.slice(1)}
                               </span>
                             </div>
-                            <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
-                              <span>Asignado: {new Date(bono.fechaAsignacion).toLocaleDateString('es-ES')}</span>
-                              <span>Expiró: {new Date(bono.fechaExpiracion).toLocaleDateString('es-ES')}</span>
-                              <span>Sesiones usadas: {usadas}/{bono.sesionesTotales}</span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </GlassCard>
-                )}
-
-                {/* Botón principal: Pedir Cita */}
-                {bonoLoading ? (
-                  <PremiumButton
-                    variant="cta"
-                    icon={<CalendarPlus className="w-4 h-4" />}
-                    iconPosition="right"
-                    className="w-full sm:w-auto opacity-60 cursor-not-allowed"
-                    onClick={() => {}}
-                  >
-                    Cargando...
-                  </PremiumButton>
-                ) : (!activeBono || activeBono.sesionesRestantes <= 0) ? (
-                  <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    No tienes sesiones disponibles. Consulta en el gimnasio para adquirir o renovar tu bono.
-                  </div>
-                ) : (
-                  <PremiumButton
-                    variant="cta"
-                    icon={<CalendarPlus className="w-4 h-4" />}
-                    iconPosition="right"
-                    onClick={() => setPortalView('new-appointment')}
-                    className="w-full sm:w-auto"
-                  >
-                    Pedir Cita
-                  </PremiumButton>
-                )}
-
-                {/* Mis Citas — solo pendientes */}
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xl font-semibold text-ivory">Mis Citas</h2>
-                  </div>
-
-                  {userAppointments.filter(a => a.status === 'pending').length === 0 ? (
-                    <GlassCard className="p-12 text-center rounded-2xl border-dashed border-accent/30 bg-muted/5">
-                      <div className="w-20 h-20 rounded-full bg-emerald/10 flex items-center justify-center mx-auto mb-6 shadow-emerald-glow">
-                        <Calendar className="w-10 h-10 text-accent opacity-90" />
-                      </div>
-                      <h3 className="text-2xl font-semibold text-ivory mb-3">No tienes citas pendientes</h3>
-                      <p className="text-muted-foreground mb-8 max-w-sm mx-auto">
-                        Solicita una nueva sesión y Sandra la confirmará en breve.
-                      </p>
-                      <PremiumButton
-                        variant="cta"
-                        icon={<ArrowRight className="w-4 h-4" />}
-                        iconPosition="right"
-                        onClick={() => setPortalView('new-appointment')}
-                      >
-                        Solicitar Cita
-                      </PremiumButton>
-                    </GlassCard>
-                  ) : (
-                    <div className="space-y-4">
-                      {userAppointments.filter(a => a.status === 'pending').map((appointment) => {
-                        const status = statusConfig[appointment.status];
-                        const StatusIcon = status.icon;
-
-                        return (
-                          <motion.div
-                            key={appointment.id}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                          >
-                            <GlassCard className="p-6 cursor-pointer rounded-2xl hover:border-accent/40 group transition-all duration-300 hover:shadow-glow" onClick={() => {
-                              setSelectedAppointment(appointment.id);
-                              setPortalView('appointment-detail');
-                            }}>
-                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                                <div className="flex items-center gap-4">
-                                  <div className="w-12 h-12 rounded-xl bg-emerald/20 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-                                    <Calendar className="w-6 h-6 text-accent" />
-                                  </div>
-                                  <div>
-                                    <h3 className="font-semibold text-ivory text-lg group-hover:text-accent transition-colors">
-                                      {serviceLabels[appointment.serviceType] || appointment.serviceType}
-                                    </h3>
-                                    <p className="text-sm text-muted-foreground mt-1">
-                                      {appointment.preferredSlots[0] && (
-                                        <>
-                                          {new Date(appointment.preferredSlots[0].date).toLocaleDateString('es-ES', {
-                                            day: 'numeric',
-                                            month: 'short',
-                                          })} - {appointment.preferredSlots[0].time}
-                                        </>
-                                      )}
-                                    </p>
-                                  </div>
-                                </div>
-                                <span className={cn('inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border bg-obsidian/50', status.color)}>
-                                  <StatusIcon className="w-3.5 h-3.5" />
-                                  {status.label}
-                                </span>
-                              </div>
-                            </GlassCard>
-                          </motion.div>
+                          </GlassCard>
                         );
                       })}
                     </div>
                   )}
                 </div>
-
-                {/* Historial de Citas — aprobadas y rechazadas */}
-                {userAppointments.filter(a => a.status !== 'pending').length > 0 && (
-                  <div className="space-y-4">
-                    <h2 className="text-xl font-semibold text-ivory">Historial de Citas</h2>
-                    <div className="space-y-3">
-                      {userAppointments.filter(a => a.status !== 'pending').map((appointment) => {
-                        const status = statusConfig[appointment.status];
-                        const StatusIcon = status.icon;
-                        return (
-                          <motion.div
-                            key={appointment.id}
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                          >
-                            <GlassCard
-                              className="p-5 cursor-pointer rounded-2xl hover:border-accent/40 group transition-all duration-300"
-                              onClick={() => {
-                                setSelectedAppointment(appointment.id);
-                                setPortalView('appointment-detail');
-                              }}
-                            >
-                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-10 h-10 rounded-xl bg-muted/20 flex items-center justify-center shrink-0">
-                                    <Calendar className="w-5 h-5 text-muted-foreground" />
-                                  </div>
-                                  <div>
-                                    <p className="font-medium text-ivory text-sm">
-                                      {serviceLabels[appointment.serviceType] || appointment.serviceType}
-                                    </p>
-                                    <p className="text-xs text-muted-foreground mt-0.5">
-                                      {appointment.preferredSlots[0]
-                                        ? `${new Date(appointment.preferredSlots[0].date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} · ${appointment.preferredSlots[0].time}`
-                                        : new Date(appointment.createdAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
-                                    </p>
-                                  </div>
-                                </div>
-                                <span className={cn('inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border bg-obsidian/50 shrink-0', status.color)}>
-                                  <StatusIcon className="w-3 h-3" />
-                                  {status.label}
-                                </span>
-                              </div>
-                            </GlassCard>
-                          </motion.div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
               </div>
-            </motion.div>
-          )}
-
-          {/* ============================================
-              NEW APPOINTMENT VIEW
-              ============================================ */}
-          {portalView === 'new-appointment' && (
-            <motion.div
-              key="new-appointment"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-            >
-              {submitSuccess ? (
-                <GlassCard className="p-12 text-center max-w-md mx-auto">
-                  <div className="w-16 h-16 rounded-full bg-emerald/20 flex items-center justify-center mx-auto mb-4">
-                    <CheckCircle className="w-8 h-8 text-emerald" />
-                  </div>
-                  <h2 className="text-xl font-bold text-ivory mb-2">¡Solicitud Enviada!</h2>
-                  <p className="text-muted-foreground">
-                    Te contactaremos pronto para confirmar tu cita.
-                  </p>
-                </GlassCard>
-              ) : (
-                <>
-                  <button
-                    onClick={() => setPortalView('dashboard')}
-                    className="flex items-center gap-2 text-muted-foreground hover:text-ivory mb-6 transition-colors"
-                  >
-                    <ArrowLeft className="w-4 h-4" />
-                    Volver al dashboard
-                  </button>
-
-                  <h1 className="text-3xl font-bold text-ivory mb-3 text-center">Solicitar Nueva Cita</h1>
-                  <p className="text-muted-foreground text-lg mb-8 max-w-2xl mx-auto text-center">
-                    Completa el formulario para solicitar tu cita. Recuerda que el horario final será confirmado por Sandra.
-                  </p>
-
-                  <div className="max-w-3xl mx-auto space-y-8 mt-8">
-                    {/* Servicio y duración derivados del bono */}
-                    <GlassCard className="p-8 rounded-2xl">
-                      <h3 className="text-xl font-bold text-ivory mb-6 flex items-center gap-3">
-                        <span className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald/20 text-accent text-sm">1</span>
-                        Servicio y Duración
-                      </h3>
-                      <div className="ml-11 flex flex-col sm:flex-row gap-4">
-                        <div className="flex-1 p-4 rounded-xl bg-emerald/10 border border-accent/30">
-                          <p className="text-xs text-muted-foreground mb-1">Servicio</p>
-                          <p className="text-ivory font-semibold">{bonoServiceLabel}</p>
-                        </div>
-                        <div className="p-4 rounded-xl bg-emerald/10 border border-accent/30">
-                          <p className="text-xs text-muted-foreground mb-1">Duración</p>
-                          <p className="text-ivory font-semibold">{bonoDurationValue} min</p>
-                        </div>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-4 ml-11">Determinado por tu bono activo.</p>
-                    </GlassCard>
-
-                    {/* Time Slots — Calendario Interactivo */}
-                    <GlassCard className="p-8 rounded-2xl">
-                      <h3 className="text-xl font-bold text-ivory mb-2 flex items-center gap-3">
-                        <span className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald/20 text-accent text-sm">2</span>
-                        Franja Horaria
-                      </h3>
-                      <p className="text-sm text-muted-foreground mb-6 ml-11">
-                        Elige la franja que prefieras. Sandra confirmará la disponibilidad.
-                      </p>
-
-                      <div className="ml-11">
-                        <InteractiveCalendar
-                          selectedSlot={formData.preferredSlot}
-                          onSelectSlot={handleSelectSlot}
-                          onClearSlot={handleClearSlot}
-                        />
-                      </div>
-                    </GlassCard>
-
-                    {/* Reason */}
-                    <GlassCard className="p-8 rounded-2xl">
-                      <h3 className="text-xl font-bold text-ivory mb-6 flex items-center gap-3">
-                        <span className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald/20 text-accent text-sm">3</span>
-                        Comentario (opcional)
-                      </h3>
-                      <div className="ml-11">
-                        <textarea
-                          value={formData.reason}
-                          onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
-                          rows={4}
-                          className="w-full px-5 py-4 rounded-xl bg-obsidian border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all resize-none"
-                          placeholder="Cuéntanos sobre tus objetivos o cualquier lesión que tengas..."
-                        />
-                      </div>
-                    </GlassCard>
-
-                    {/* Submit */}
-                    <div className="flex gap-4 pt-4">
-                      <PremiumButton
-                        variant="ghost"
-                        onClick={() => setPortalView('dashboard')}
-                        className="flex-1 text-lg py-6"
-                      >
-                        Cancelar
-                      </PremiumButton>
-                      <PremiumButton
-                        variant="cta"
-                        onClick={handleSubmitAppointment}
-                        disabled={!formData.preferredSlot}
-                        icon={<CheckCircle className="w-5 h-5" />}
-                        className="flex-1 text-lg py-6"
-                      >
-                        Enviar Solicitud
-                      </PremiumButton>
-                    </div>
-                  </div>
-                </>
-              )}
             </motion.div>
           )}
 
@@ -1426,6 +1372,234 @@ export default function PortalPage() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* ============================================
+          RESERVA DRAWER
+          ============================================ */}
+      <AnimatePresence>
+        {showReservaDrawer && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowReservaDrawer(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, x: '100%' }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-lg bg-background border-l border-border overflow-y-auto"
+            >
+              <div className="flex items-center justify-between p-6 border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm z-10">
+                <h2 className="text-xl font-bold text-ivory">Reservar Sesión</h2>
+                <button
+                  onClick={() => setShowReservaDrawer(false)}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted/30 transition-colors"
+                >
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-6">
+                {submitSuccess ? (
+                  <div className="text-center py-12">
+                    <div className="w-16 h-16 rounded-full bg-emerald/20 flex items-center justify-center mx-auto mb-4">
+                      <CheckCircle className="w-8 h-8 text-emerald" />
+                    </div>
+                    <h2 className="text-xl font-bold text-ivory mb-2">¡Solicitud Enviada!</h2>
+                    <p className="text-muted-foreground">Te contactaremos pronto para confirmar tu cita.</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Servicio y duración */}
+                    <GlassCard className="p-5">
+                      <h3 className="text-sm font-semibold text-ivory mb-4 flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-emerald/20 text-accent text-xs flex items-center justify-center">1</span>
+                        Servicio y Duración
+                      </h3>
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        <div className="flex-1 p-3 rounded-xl bg-emerald/10 border border-accent/30">
+                          <p className="text-xs text-muted-foreground mb-0.5">Servicio</p>
+                          <p className="text-ivory font-semibold text-sm">{bonoServiceLabel}</p>
+                        </div>
+                        <div className="p-3 rounded-xl bg-emerald/10 border border-accent/30">
+                          <p className="text-xs text-muted-foreground mb-0.5">Duración</p>
+                          <p className="text-ivory font-semibold text-sm">{bonoDurationValue} min</p>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-3">Determinado por tu bono activo.</p>
+                    </GlassCard>
+
+                    {/* Calendario */}
+                    <GlassCard className="p-5">
+                      <h3 className="text-sm font-semibold text-ivory mb-1 flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-emerald/20 text-accent text-xs flex items-center justify-center">2</span>
+                        Franja Horaria
+                      </h3>
+                      <p className="text-xs text-muted-foreground mb-4 ml-8">Elige la franja que prefieras.</p>
+                      <InteractiveCalendar
+                        selectedSlot={formData.preferredSlot}
+                        onSelectSlot={handleSelectSlot}
+                        onClearSlot={handleClearSlot}
+                      />
+                    </GlassCard>
+
+                    {/* Comentario */}
+                    <GlassCard className="p-5">
+                      <h3 className="text-sm font-semibold text-ivory mb-4 flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-emerald/20 text-accent text-xs flex items-center justify-center">3</span>
+                        Comentario (opcional)
+                      </h3>
+                      <textarea
+                        value={formData.reason}
+                        onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
+                        rows={3}
+                        className="w-full px-4 py-3 rounded-xl bg-obsidian border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all resize-none text-sm"
+                        placeholder="Cuéntanos sobre tus objetivos o cualquier lesión..."
+                      />
+                    </GlassCard>
+
+                    {/* Botones */}
+                    <div className="flex gap-3">
+                      <PremiumButton variant="ghost" onClick={() => setShowReservaDrawer(false)} className="flex-1">
+                        Cancelar
+                      </PremiumButton>
+                      <PremiumButton
+                        variant="cta"
+                        onClick={handleSubmitAppointment}
+                        disabled={!formData.preferredSlot}
+                        icon={<CheckCircle className="w-4 h-4" />}
+                        className="flex-1"
+                      >
+                        Enviar Solicitud
+                      </PremiumButton>
+                    </div>
+                  </>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ============================================
+          PERFIL MODAL
+          ============================================ */}
+      <AnimatePresence>
+        {showProfileModal && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowProfileModal(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, x: '100%' }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-md bg-background border-l border-border overflow-y-auto"
+            >
+              <div className="flex items-center justify-between p-6 border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm z-10">
+                <h2 className="text-xl font-bold text-ivory">Mi Perfil</h2>
+                <button
+                  onClick={() => setShowProfileModal(false)}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted/30 transition-colors"
+                >
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-5">
+                {/* Avatar */}
+                <div className="flex flex-col items-center gap-3 pb-2">
+                  <div className="relative">
+                    {profilePhotoPreview || userProfile?.photoURL ? (
+                      <img
+                        src={profilePhotoPreview || userProfile?.photoURL}
+                        alt=""
+                        className="w-20 h-20 rounded-full object-cover ring-2 ring-accent/40"
+                      />
+                    ) : (
+                      <div className="w-20 h-20 rounded-full bg-gradient-to-br from-emerald to-accent flex items-center justify-center text-obsidian font-bold text-3xl">
+                        {userProfile?.name?.charAt(0)}
+                      </div>
+                    )}
+                    <label className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-accent flex items-center justify-center cursor-pointer hover:bg-accent/80 transition-colors">
+                      <Camera className="w-3.5 h-3.5 text-obsidian" />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setProfilePhotoFile(file);
+                            setProfilePhotoPreview(URL.createObjectURL(file));
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {/* Nombre */}
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1.5 block">Nombre visible</label>
+                  <input
+                    type="text"
+                    value={profileEditForm.name}
+                    onChange={e => setProfileEditForm({ ...profileEditForm, name: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-obsidian border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-accent transition-all text-sm"
+                  />
+                </div>
+
+                {/* Teléfono */}
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1.5 block">Teléfono</label>
+                  <input
+                    type="tel"
+                    value={profileEditForm.phone}
+                    onChange={e => setProfileEditForm({ ...profileEditForm, phone: e.target.value })}
+                    className="w-full px-4 py-3 rounded-xl bg-obsidian border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-accent transition-all text-sm"
+                  />
+                </div>
+
+                {/* Contraseña — solo email/password */}
+                {user?.providerData.some(p => p.providerId === 'password') && (
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1.5 block">Nueva contraseña</label>
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={e => setNewPassword(e.target.value)}
+                      placeholder="Dejar vacío para no cambiar"
+                      className="w-full px-4 py-3 rounded-xl bg-obsidian border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-accent transition-all text-sm"
+                    />
+                  </div>
+                )}
+
+                {profileError && <p className="text-red-400 text-sm">{profileError}</p>}
+                {profileSuccess && <p className="text-emerald text-sm">{profileSuccess}</p>}
+
+                <PremiumButton
+                  variant="cta"
+                  onClick={handleSaveProfile}
+                  loading={profileSaving}
+                  className="w-full"
+                >
+                  Guardar cambios
+                </PremiumButton>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

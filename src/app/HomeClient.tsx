@@ -80,13 +80,16 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
       {/* Hero Section */}
       <section className="relative min-h-[90vh] flex items-center justify-center overflow-hidden">
         <div className="absolute inset-0">
-          <Image
-            src="/imagenes/hero.jpeg"
-            alt="Focus Club Vallecas"
-            fill
-            className="object-cover opacity-50"
-            priority
-          />
+          <video
+            autoPlay
+            muted
+            loop
+            playsInline
+            className="object-cover w-full h-full opacity-50"
+            poster="/imagenes/hero.jpeg"
+          >
+            <source src="/imagenes/hero.mp4" type="video/mp4" />
+          </video>
           <div className="absolute inset-0 bg-background/85" />
           <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-background/50" />
         </div>

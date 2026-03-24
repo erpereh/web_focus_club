@@ -9,6 +9,7 @@ export interface UserProfile {
     phone?: string;
     role: 'admin' | 'trainer' | 'user';
     isTrainer?: boolean;
+    photoURL?: string;
     createdAt: string;
 }
 
