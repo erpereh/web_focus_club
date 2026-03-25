@@ -16,12 +16,12 @@ export function PremiumBadge({
   className,
 }: PremiumBadgeProps) {
   const variants = {
-    default: 'bg-muted text-muted-foreground border-border',
-    success: 'bg-primary/20 text-primary border-primary/30',
-    warning: 'bg-accent/20 text-accent border-accent/30',
-    error: 'bg-destructive/20 text-destructive border-destructive/30',
-    info: 'bg-forest-700/30 text-ivory border-forest-500/30',
-    accent: 'bg-gradient-to-r from-accent/20 to-emerald-light/20 text-accent border-accent/30',
+    default: 'bg-[var(--color-bg-card)] text-[var(--color-text-secondary)] border-[var(--color-border-base)]',
+    success: 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border-[var(--color-accent-border)]',
+    warning: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
+    error: 'bg-destructive/10 text-destructive border-destructive/20',
+    info: 'bg-blue-500/10 text-blue-300 border-blue-500/20',
+    accent: 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border-[var(--color-accent-border)]',
   };
 
   const sizes = {

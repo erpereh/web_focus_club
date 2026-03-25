@@ -247,20 +247,20 @@ export function InteractiveCalendar({
             className={cn(
               'w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-200',
               canGoBack
-                ? 'bg-emerald/10 text-ivory hover:bg-emerald/20 hover:shadow-emerald-glow'
-                : 'text-muted-foreground/30 cursor-not-allowed'
+                ? 'bg-[var(--color-accent-dim)] text-[var(--color-text-primary)] hover:bg-[var(--color-accent-dim)] hover:shadow-emerald-glow'
+                : 'text-[var(--color-text-secondary)]/30 cursor-not-allowed'
             )}
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
 
-          <h3 className="text-lg font-bold text-ivory tracking-wide">
+          <h3 className="text-lg font-bold text-[var(--color-text-primary)] tracking-wide">
             {MONTH_NAMES[currentMonth - 1]} {currentYear}
           </h3>
 
           <button
             onClick={goNextMonth}
-            className="w-9 h-9 rounded-xl flex items-center justify-center bg-emerald/10 text-ivory hover:bg-emerald/20 hover:shadow-emerald-glow transition-all duration-200"
+            className="w-9 h-9 rounded-xl flex items-center justify-center bg-[var(--color-accent-dim)] text-[var(--color-text-primary)] hover:bg-[var(--color-accent-dim)] hover:shadow-emerald-glow transition-all duration-200"
           >
             <ChevronRight className="w-5 h-5" />
           </button>
@@ -269,7 +269,7 @@ export function InteractiveCalendar({
         {/* Nombres de días */}
         <div className="grid grid-cols-7 gap-1 mb-2">
           {DAY_NAMES.map((name) => (
-            <div key={name} className="text-center text-xs font-semibold text-muted-foreground py-2 uppercase tracking-wider">
+            <div key={name} className="text-center text-xs font-semibold text-[var(--color-text-secondary)] py-2 uppercase tracking-wider">
               {name}
             </div>
           ))}
@@ -298,11 +298,11 @@ export function InteractiveCalendar({
                 onClick={() => setSelectedDay(isSelected ? null : day)}
                 className={cn(
                   'aspect-square rounded-xl flex flex-col items-center justify-center relative transition-all duration-200 text-sm font-medium',
-                  past && 'opacity-30 cursor-not-allowed text-muted-foreground',
-                  today && !isSelected && !past && 'ring-1 ring-accent/50',
-                  isSelected && 'bg-emerald/30 border border-accent text-ivory shadow-emerald-glow scale-105',
-                  !past && !isSelected && hasAvail && 'text-ivory hover:bg-emerald/15 hover:scale-105 cursor-pointer',
-                  !past && !isSelected && !hasAvail && 'text-muted-foreground/50 cursor-not-allowed',
+                  past && 'opacity-30 cursor-not-allowed text-[var(--color-text-secondary)]',
+                  today && !isSelected && !past && 'ring-1 ring-[var(--color-accent-border)]',
+                  isSelected && 'bg-[var(--color-accent-val)]/20 border border-[var(--color-accent-border)] text-[var(--color-text-primary)] shadow-emerald-glow scale-105',
+                  !past && !isSelected && hasAvail && 'text-[var(--color-text-primary)] hover:bg-[var(--color-accent-val)]/10 hover:scale-105 cursor-pointer',
+                  !past && !isSelected && !hasAvail && 'text-[var(--color-text-secondary)]/50 cursor-not-allowed',
                 )}
               >
                 <span>{day}</span>
@@ -322,9 +322,9 @@ export function InteractiveCalendar({
         </div>
 
         {/* Leyenda */}
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-5 pt-4 border-t border-border/50 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-5 pt-4 border-t border-border/50 text-xs text-[var(--color-text-secondary)]">
           <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald/40 border border-emerald/60" />
+            <span className="w-2.5 h-2.5 rounded-full bg-[var(--color-accent-val)]/40 border border-[var(--color-accent-val)]/60" />
             Disponible
           </span>
           <span className="flex items-center gap-1.5">
@@ -338,8 +338,8 @@ export function InteractiveCalendar({
         </div>
 
         {loading && (
-          <div className="flex items-center justify-center gap-2 mt-4 text-sm text-muted-foreground">
-            <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+          <div className="flex items-center justify-center gap-2 mt-4 text-sm text-[var(--color-text-secondary)]">
+            <div className="w-4 h-4 border-2 border-[var(--color-accent-border)] border-t-[var(--color-accent-val)] rounded-full animate-spin" />
             Cargando disponibilidad...
           </div>
         )}
@@ -372,8 +372,8 @@ export function InteractiveCalendar({
             className="glass-card rounded-2xl p-5 sm:p-6"
           >
             <div className="flex items-center gap-3 mb-5">
-              <Clock className="w-5 h-5 text-accent" />
-              <h4 className="font-bold text-ivory">
+              <Clock className="w-5 h-5 text-[var(--color-accent-val)]" />
+              <h4 className="font-bold text-[var(--color-text-primary)]">
                 {new Date(currentYear, currentMonth - 1, selectedDay).toLocaleDateString('es-ES', {
                   weekday: 'long',
                   day: 'numeric',
@@ -399,9 +399,9 @@ export function InteractiveCalendar({
                     className={cn(
                       'relative py-3 px-2 rounded-xl text-sm font-medium transition-all duration-200 border',
                       // Pasado
-                      past && 'opacity-25 cursor-not-allowed border-transparent text-muted-foreground',
+                      past && 'opacity-25 cursor-not-allowed border-transparent text-[var(--color-text-secondary)]',
                       // Bloqueado por admin
-                      !past && status.isBlocked && 'bg-muted/20 border-border/50 text-muted-foreground/50 cursor-not-allowed',
+                      !past && status.isBlocked && 'bg-muted/20 border-border/50 text-[var(--color-text-secondary)]/50 cursor-not-allowed',
                       // Lleno (2/2) — clicable para mostrar mensaje, pero estilizado como lleno
                       !past && !status.isBlocked && isFull && !selected && 'bg-red-500/10 border-red-500/30 text-red-400/70 cursor-pointer',
                       // Parcial (1/2) — disponible
@@ -409,16 +409,16 @@ export function InteractiveCalendar({
                         'bg-amber-400/10 border-amber-400/30 text-amber-300 hover:bg-amber-400/20 hover:border-amber-400/50 hover:shadow-[0_0_10px_rgba(251,191,36,0.15)]',
                       // Libre (0/2) — disponible
                       !past && !status.isBlocked && !isFull && !isPartial && !selected &&
-                        'bg-emerald/5 border-border/60 text-ivory hover:bg-emerald/15 hover:border-accent/50 hover:shadow-emerald-glow',
+                        'bg-[var(--color-accent-val)]/5 border-[var(--color-border-base)] text-[var(--color-text-primary)] hover:bg-[var(--color-accent-val)]/10 hover:border-[var(--color-accent-border)] hover:shadow-emerald-glow',
                       // Seleccionado por el usuario
-                      selected && 'bg-accent/25 border-accent text-ivory shadow-emerald-glow ring-1 ring-accent/30',
+                      selected && 'bg-[var(--color-accent-val)]/20 border-[var(--color-accent-border)] text-[var(--color-text-primary)] shadow-emerald-glow ring-1 ring-[var(--color-accent-border)]',
                     )}
                   >
                     <span className="block">{time}</span>
 
                     {/* Indicadores de estado */}
                     {!past && status.isBlocked && (
-                      <Lock className="w-3 h-3 mx-auto mt-1 text-muted-foreground/40" />
+                      <Lock className="w-3 h-3 mx-auto mt-1 text-[var(--color-text-secondary)]/40" />
                     )}
                     {!past && !status.isBlocked && isFull && !selected && (
                       <span className="block text-[10px] mt-0.5 text-red-400/60">Completo</span>
@@ -430,7 +430,7 @@ export function InteractiveCalendar({
                       </span>
                     )}
                     {selected && (
-                      <span className="block text-[10px] mt-0.5 text-accent font-semibold">Elegida</span>
+                      <span className="block text-[10px] mt-0.5 text-[var(--color-accent-val)] font-semibold">Elegida</span>
                     )}
                   </button>
                 );
@@ -448,9 +448,9 @@ export function InteractiveCalendar({
             initial={{ opacity: 0, x: -12 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 12 }}
-            className="flex items-center justify-between p-3.5 rounded-xl bg-emerald/10 border border-emerald/20"
+            className="flex items-center justify-between p-3.5 rounded-xl bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)]"
           >
-            <span className="text-ivory font-medium text-sm">
+            <span className="text-[var(--color-text-primary)] font-medium text-sm">
               {new Date(selectedSlot.date + 'T00:00:00').toLocaleDateString('es-ES', {
                 weekday: 'long',
                 day: 'numeric',
@@ -459,7 +459,7 @@ export function InteractiveCalendar({
             </span>
             <button
               onClick={onClearSlot}
-              className="w-7 h-7 flex items-center justify-center rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              className="w-7 h-7 flex items-center justify-center rounded-full text-[var(--color-text-secondary)] hover:text-destructive hover:bg-destructive/10 transition-colors"
             >
               <span className="text-lg leading-none">&times;</span>
             </button>

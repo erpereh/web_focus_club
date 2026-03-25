@@ -56,7 +56,7 @@ export function ContextualImageManager({ currentUrl, defaultFolder, onSelect, on
 
     return (
         <motion.div
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-obsidian/90 backdrop-blur-md"
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[var(--color-bg-base)]/90 backdrop-blur-md"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -70,17 +70,17 @@ export function ContextualImageManager({ currentUrl, defaultFolder, onSelect, on
                 onClick={(e) => e.stopPropagation()}
             >
                 {/* Header */}
-                <div className="flex items-center justify-between p-6 border-b border-border bg-muted/20">
+                <div className="flex items-center justify-between p-6 border-b border-[var(--color-border-base)] bg-[var(--color-bg-surface)]">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 bg-accent/10 rounded-lg">
-                            <ImageIcon className="w-5 h-5 text-accent" />
+                        <div className="p-2 bg-[var(--color-accent-dim)] rounded-lg">
+                            <ImageIcon className="w-5 h-5 text-[var(--color-accent-val)]" />
                         </div>
                         <div>
-                            <h2 className="text-xl font-bold text-ivory">Gestor de Imágenes</h2>
-                            <p className="text-sm text-muted-foreground">Selecciona o sube una imagen para la sección actual</p>
+                            <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Gestor de Imágenes</h2>
+                            <p className="text-sm text-[var(--color-text-secondary)]">Selecciona o sube una imagen para la sección actual</p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 text-muted-foreground hover:text-ivory rounded-full hover:bg-white/5 transition-colors">
+                    <button onClick={onClose} className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] rounded-full hover:bg-white/5 transition-colors">
                         <X className="w-6 h-6" />
                     </button>
                 </div>
@@ -89,14 +89,14 @@ export function ContextualImageManager({ currentUrl, defaultFolder, onSelect, on
                 <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
 
                     {/* Left Column: Upload & Current */}
-                    <div className="w-full md:w-1/3 border-b md:border-b-0 md:border-r border-border p-4 md:p-6 flex flex-col gap-4 md:gap-6 bg-obsidian/30 overflow-y-auto max-h-[40vh] md:max-h-none">
+                    <div className="w-full md:w-1/3 border-b md:border-b-0 md:border-r border-[var(--color-border-base)] p-4 md:p-6 flex flex-col gap-4 md:gap-6 bg-[var(--color-bg-base)]/30 overflow-y-auto max-h-[40vh] md:max-h-none">
                         <div className="space-y-4">
-                            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Imagen Actual</h3>
-                            <div className="aspect-square rounded-2xl border-2 border-dashed border-border flex items-center justify-center overflow-hidden bg-muted/10 relative group">
+                            <h3 className="text-sm font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">Imagen Actual</h3>
+                            <div className="aspect-square rounded-2xl border-2 border-dashed border-[var(--color-border-base)] flex items-center justify-center overflow-hidden bg-white/5 relative group">
                                 {isValidImageUrl(currentUrl) ? (
                                     <img src={currentUrl} alt="Current" className="w-full h-full object-cover" />
                                 ) : (
-                                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                                    <div className="flex flex-col items-center gap-2 text-[var(--color-text-secondary)]">
                                         <ImageIcon className="w-8 h-8 opacity-50" />
                                         <span className="text-sm">{currentUrl ? 'Imagen no disponible' : 'Ninguna imagen'}</span>
                                     </div>
@@ -104,11 +104,11 @@ export function ContextualImageManager({ currentUrl, defaultFolder, onSelect, on
                             </div>
                         </div>
 
-                        <div className="h-px w-full bg-border" />
+                        <div className="h-px w-full bg-[var(--color-border-base)]" />
 
                         <div className="space-y-4">
-                            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Subir Nueva a {activeFolder}</h3>
-                            <p className="text-xs text-muted-foreground mb-4">La imagen se subirá automáticamente a la carpeta seleccionada en la biblioteca.</p>
+                            <h3 className="text-sm font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">Subir Nueva a {activeFolder}</h3>
+                            <p className="text-xs text-[var(--color-text-secondary)] mb-4">La imagen se subirá automáticamente a la carpeta seleccionada en la biblioteca.</p>
 
                             <ImageUpload
                                 folder={activeFolder}
@@ -120,17 +120,17 @@ export function ContextualImageManager({ currentUrl, defaultFolder, onSelect, on
                     </div>
 
                     {/* Right Column: Library */}
-                    <div className="flex-1 flex flex-col bg-muted/5">
+                    <div className="flex-1 flex flex-col bg-white/[0.02]">
                         {/* Tabs / Folders */}
-                        <div className="p-4 border-b border-border flex gap-2 overflow-x-auto custom-scrollbar items-center">
-                            <Folder className="w-4 h-4 text-muted-foreground ml-2 mr-1" />
+                        <div className="p-4 border-b border-[var(--color-border-base)] flex gap-2 overflow-x-auto custom-scrollbar items-center">
+                            <Folder className="w-4 h-4 text-[var(--color-text-secondary)] ml-2 mr-1" />
                             {FOLDERS.map(folder => (
                                 <button
                                     key={folder}
                                     onClick={() => setActiveFolder(folder)}
                                     className={`px-4 py-2 rounded-xl text-sm font-medium transition-all whitespace-nowrap ${activeFolder === folder
-                                            ? 'bg-accent/20 text-accent border border-accent/30'
-                                            : 'bg-transparent text-muted-foreground hover:bg-white/5 hover:text-ivory'
+                                            ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)]'
+                                            : 'bg-transparent text-[var(--color-text-secondary)] hover:bg-white/5 hover:text-[var(--color-text-primary)]'
                                         }`}
                                 >
                                     {folder}
@@ -139,7 +139,7 @@ export function ContextualImageManager({ currentUrl, defaultFolder, onSelect, on
                             <div className="flex-1" />
                             <button
                                 onClick={() => fetchImages(activeFolder)}
-                                className="p-2 text-muted-foreground hover:text-ivory rounded-lg hover:bg-white/5 transition-colors"
+                                className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] rounded-lg hover:bg-white/5 transition-colors"
                                 title="Refrescar imágenes"
                             >
                                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -149,13 +149,13 @@ export function ContextualImageManager({ currentUrl, defaultFolder, onSelect, on
                         {/* Grid */}
                         <div className="flex-1 p-6 overflow-y-auto">
                             {loading ? (
-                                <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-muted-foreground">
-                                    <RefreshCw className="w-8 h-8 animate-spin text-accent/50" />
+                                <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-[var(--color-text-secondary)]">
+                                    <RefreshCw className="w-8 h-8 animate-spin text-[var(--color-accent-val)]/50" />
                                     <p>Cargando biblioteca...</p>
                                 </div>
                             ) : images.length === 0 ? (
-                                <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-muted-foreground">
-                                    <div className="p-4 bg-muted/10 rounded-full">
+                                <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-[var(--color-text-secondary)]">
+                                    <div className="p-4 bg-white/5 rounded-full">
                                         <ImageIcon className="w-8 h-8 opacity-50" />
                                     </div>
                                     <p>No hay imágenes en la carpeta <b>{activeFolder}</b>.</p>
@@ -170,7 +170,7 @@ export function ContextualImageManager({ currentUrl, defaultFolder, onSelect, on
                                                 onSelect(img.url);
                                                 onClose();
                                             }}
-                                            className="group cursor-pointer relative rounded-xl overflow-hidden border border-border hover:border-accent/50 transition-all hover:shadow-[0_0_15px_rgba(209,164,123,0.15)]"
+                                            className="group cursor-pointer relative rounded-xl overflow-hidden border border-[var(--color-border-base)] hover:border-[var(--color-accent-border)] transition-all hover:shadow-[0_0_15px_rgba(82,183,136,0.15)]"
                                         >
                                             <img
                                                 src={img.url}
@@ -178,9 +178,9 @@ export function ContextualImageManager({ currentUrl, defaultFolder, onSelect, on
                                                 className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                                                 loading="lazy"
                                             />
-                                            <div className="absolute inset-0 bg-gradient-to-t from-obsidian/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3">
-                                                <span className="text-xs text-ivory font-medium truncate">{img.public_id.split('/').pop()}</span>
-                                                <span className="text-[10px] text-ivory/70">{new Date(img.created_at).toLocaleDateString()}</span>
+                                            <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-base)]/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3">
+                                                <span className="text-xs text-[var(--color-text-primary)] font-medium truncate">{img.public_id.split('/').pop()}</span>
+                                                <span className="text-[10px] text-[var(--color-text-primary)]/70">{new Date(img.created_at).toLocaleDateString()}</span>
                                             </div>
 
                                             {currentUrl === img.url && (

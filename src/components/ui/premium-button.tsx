@@ -30,25 +30,20 @@ export const PremiumButton = forwardRef<HTMLButtonElement, PremiumButtonProps>(
     ref
   ) => {
     const variants = {
-      // Verde esmeralda
       primary:
-        'bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg',
-      // Verde profundo
+        'btn-primary shadow-lg',
       secondary:
-        'bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border',
-      // Contorno acento
+        'bg-[var(--color-bg-card)] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-card-hover)] border border-[var(--color-border-base)]',
       outline:
-        'border border-accent text-accent hover:bg-accent/10 hover:border-accent',
-      // Transparente
-      ghost: 'text-foreground hover:bg-muted hover:text-foreground',
-      // CTA principal
-      cta: 'bg-accent text-accent-foreground font-semibold hover:bg-accent/90 shadow-lg hover:shadow-emerald',
+        'btn-ghost',
+      ghost: 'text-[var(--color-text-primary)] hover:bg-[var(--color-accent-dim)] hover:text-[var(--color-text-primary)]',
+      cta: 'btn-primary font-semibold shadow-lg',
     };
 
     const sizes = {
-      sm: 'px-4 py-2 text-sm rounded-lg',
-      md: 'px-6 py-3 text-base rounded-xl',
-      lg: 'px-8 py-4 text-lg rounded-2xl',
+      sm: 'px-4 py-2 text-sm rounded-md',
+      md: 'px-6 py-3 text-base rounded-lg',
+      lg: 'px-8 py-4 text-lg rounded-xl',
     };
 
     return (
@@ -97,19 +92,19 @@ export function PremiumLink({
 }: PremiumLinkProps) {
   const variants = {
     primary:
-      'bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg',
+      'btn-primary shadow-lg',
     secondary:
-      'bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border',
+      'bg-[var(--color-bg-card)] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-card-hover)] border border-[var(--color-border-base)]',
     outline:
-      'border border-accent text-accent hover:bg-accent/10 hover:border-accent',
-    ghost: 'text-foreground hover:bg-muted hover:text-foreground',
-    cta: 'bg-accent text-accent-foreground font-semibold hover:bg-accent/90 shadow-lg hover:shadow-emerald',
+      'btn-ghost',
+    ghost: 'text-[var(--color-text-primary)] hover:bg-[var(--color-accent-dim)] hover:text-[var(--color-text-primary)]',
+    cta: 'btn-primary font-semibold shadow-lg',
   };
 
   const sizes = {
-    sm: 'px-4 py-2 text-sm rounded-lg',
-    md: 'px-6 py-3 text-base rounded-xl',
-    lg: 'px-8 py-4 text-lg rounded-2xl',
+    sm: 'px-4 py-2 text-sm rounded-md',
+    md: 'px-6 py-3 text-base rounded-lg',
+    lg: 'px-8 py-4 text-lg rounded-xl',
   };
 
   return (

@@ -58,6 +58,7 @@ import { defaultCMS } from '@/hooks/useFirestore';
 import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono } from '@/types';
 import {
   getAppointments,
+  getAppointmentsByUser,
   updateAppointmentStatus as updateAppointmentStatusFS,
   deleteAppointment as deleteAppointmentFS,
   getServices,
@@ -147,7 +148,7 @@ const statusConfig = {
   },
   approved: {
     label: 'Aprobada',
-    color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+    color: 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border-[var(--color-accent-border)]',
     icon: CheckCircle,
   },
   rejected: {
@@ -277,6 +278,7 @@ export default function AdminPage() {
   const [showBonoHistoryModal, setShowBonoHistoryModal] = useState(false);
   const [bonoHistoryData, setBonoHistoryData] = useState<Bono[]>([]);
   const [bonoHistoryClientName, setBonoHistoryClientName] = useState('');
+  const [clientAppointmentsHistory, setClientAppointmentsHistory] = useState<Appointment[]>([]);
   const [showDeleteBonoModal, setShowDeleteBonoModal] = useState(false);
   const [deleteBonoClient, setDeleteBonoClient] = useState<UserProfile | null>(null);
 
@@ -534,15 +536,15 @@ export default function AdminPage() {
   // Login screen — si no está autenticado o no es admin
   if (authLoading) {
     return (
-      <div className="h-screen -mt-20 flex items-center justify-center bg-obsidian">
-        <div className="text-ivory">Cargando...</div>
+      <div className="h-screen -mt-20 flex items-center justify-center bg-[var(--color-bg-base)]">
+        <div className="text-[var(--color-text-primary)]">Cargando...</div>
       </div>
     );
   }
 
   if (!user || !canAccessAdmin) {
     return (
-      <div className="h-screen -mt-20 flex items-center justify-center px-4 bg-obsidian">
+      <div className="h-screen -mt-20 flex items-center justify-center px-4 bg-[var(--color-bg-base)]">
         <motion.div
           className="max-w-md w-full"
           initial={{ opacity: 0, y: 20 }}
@@ -550,17 +552,17 @@ export default function AdminPage() {
         >
           <GlassCard className="p-8">
             <div className="text-center mb-8">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald to-accent mx-auto mb-4 flex items-center justify-center">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--color-accent-val)] to-emerald-bright mx-auto mb-4 flex items-center justify-center">
                 {adminAuthMode === 'forgot-password' ? (
-                  <KeyRound className="w-8 h-8 text-obsidian" />
+                  <KeyRound className="w-8 h-8 text-[var(--color-bg-base)]" />
                 ) : (
-                  <LayoutDashboard className="w-8 h-8 text-obsidian" />
+                  <LayoutDashboard className="w-8 h-8 text-[var(--color-bg-base)]" />
                 )}
               </div>
-              <h1 className="text-2xl font-bold text-ivory mb-2">
+              <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-2">
                 {adminAuthMode === 'forgot-password' ? 'Recuperar Contraseña' : 'Panel de Administración'}
               </h1>
-              <p className="text-muted-foreground text-sm">
+              <p className="text-[var(--color-text-secondary)] text-sm">
                 {adminAuthMode === 'forgot-password'
                   ? 'Te enviaremos un enlace para restablecer tu contraseña'
                   : 'Focus Club Vallecas'}
@@ -570,14 +572,14 @@ export default function AdminPage() {
             {adminAuthMode === 'forgot-password' ? (
               <form onSubmit={handleAdminForgotPassword} className="space-y-4">
                 <div>
-                  <label className="block text-sm text-muted-foreground mb-2">
+                  <label className="block text-sm text-[var(--color-text-secondary)] mb-2">
                     Email
                   </label>
                   <input
                     type="email"
                     value={loginForm.email}
                     onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
-                    className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                    className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                     placeholder="tu@email.com"
                     required
                   />
@@ -591,7 +593,7 @@ export default function AdminPage() {
                 )}
 
                 {loginSuccess && (
-                  <p className="text-emerald-400 text-sm flex items-center gap-2">
+                  <p className="text-[var(--color-accent-val)] text-sm flex items-center gap-2">
                     <MailCheck className="w-4 h-4" />
                     {loginSuccess}
                   </p>
@@ -604,7 +606,7 @@ export default function AdminPage() {
                 <button
                   type="button"
                   onClick={() => { setAdminAuthMode('login'); setLoginError(''); setLoginSuccess(''); }}
-                  className="w-full text-center text-sm text-muted-foreground hover:text-ivory transition-colors mt-2"
+                  className="w-full text-center text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors mt-2"
                 >
                   Volver al inicio de sesión
                 </button>
@@ -613,26 +615,26 @@ export default function AdminPage() {
               <>
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div>
-                    <label className="block text-sm text-muted-foreground mb-2">
+                    <label className="block text-sm text-[var(--color-text-secondary)] mb-2">
                       Email
                     </label>
                     <input
                       type="email"
                       value={loginForm.email}
                       onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
-                      className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                      className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                       placeholder="admin@focusclub.es"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm text-muted-foreground mb-2">
+                    <label className="block text-sm text-[var(--color-text-secondary)] mb-2">
                       Contraseña
                     </label>
                     <input
                       type="password"
                       value={loginForm.password}
                       onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                      className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                      className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                       placeholder="Introduce la contraseña"
                     />
                   </div>
@@ -642,7 +644,7 @@ export default function AdminPage() {
                     <button
                       type="button"
                       onClick={() => { setAdminAuthMode('forgot-password'); setLoginError(''); setLoginSuccess(''); }}
-                      className="text-xs text-muted-foreground hover:text-accent transition-colors"
+                      className="text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors"
                     >
                       ¿Has olvidado tu contraseña?
                     </button>
@@ -666,7 +668,7 @@ export default function AdminPage() {
                 </form>
 
                 {/* Separator */}
-                <div className="flex items-center gap-3 my-4 text-xs text-muted-foreground">
+                <div className="flex items-center gap-3 my-4 text-xs text-[var(--color-text-secondary)]">
                   <div className="flex-1 border-t border-border" />
                   <span>o</span>
                   <div className="flex-1 border-t border-border" />
@@ -677,7 +679,7 @@ export default function AdminPage() {
                   type="button"
                   onClick={handleGoogleLoginAdmin}
                   disabled={loginLoading}
-                  className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl border border-border bg-input hover:bg-border/50 text-ivory text-sm font-medium transition-all disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl border border-border bg-input hover:bg-border/50 text-[var(--color-text-primary)] text-sm font-medium transition-all disabled:opacity-50"
                 >
                   <svg className="w-5 h-5" viewBox="0 0 24 24">
                     <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
@@ -748,13 +750,13 @@ export default function AdminPage() {
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           <div className="flex-1 space-y-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald to-accent flex items-center justify-center text-obsidian font-bold">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--color-accent-val)] to-emerald-bright flex items-center justify-center text-[var(--color-bg-base)] font-bold">
                 {appt.name.charAt(0)}
               </div>
               <div>
-                <h3 className="font-semibold text-ivory">{appt.name}</h3>
+                <h3 className="font-semibold text-[var(--color-text-primary)]">{appt.name}</h3>
                 {appt.sessionType && (
-                  <span className="px-2 py-0.5 rounded bg-emerald/20 text-emerald-light text-xs font-medium uppercase">
+                  <span className="px-2 py-0.5 rounded bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs font-medium uppercase">
                     {appt.sessionType}
                   </span>
                 )}
@@ -763,9 +765,9 @@ export default function AdminPage() {
 
             <div className="grid sm:grid-cols-2 gap-3 text-sm">
               {appt.approvedSlot && (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Calendar className="w-4 h-4 text-accent" />
-                  <span className="text-ivory">
+                <div className="flex items-center gap-2 text-[var(--color-text-secondary)]">
+                  <Calendar className="w-4 h-4 text-[var(--color-accent-val)]" />
+                  <span className="text-[var(--color-text-primary)]">
                     {new Date(appt.approvedSlot.date).toLocaleDateString('es-ES', {
                       weekday: 'long', day: 'numeric', month: 'long',
                     })}
@@ -773,29 +775,29 @@ export default function AdminPage() {
                 </div>
               )}
               {appt.approvedSlot && (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Clock className="w-4 h-4 text-accent" />
-                  <span className="text-ivory">{appt.approvedSlot.time}</span>
+                <div className="flex items-center gap-2 text-[var(--color-text-secondary)]">
+                  <Clock className="w-4 h-4 text-[var(--color-accent-val)]" />
+                  <span className="text-[var(--color-text-primary)]">{appt.approvedSlot.time}</span>
                 </div>
               )}
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Award className="w-4 h-4 text-accent" />
-                <span className="text-ivory">{serviceLabels[appt.serviceType] || appt.serviceType}</span>
+              <div className="flex items-center gap-2 text-[var(--color-text-secondary)]">
+                <Award className="w-4 h-4 text-[var(--color-accent-val)]" />
+                <span className="text-[var(--color-text-primary)]">{serviceLabels[appt.serviceType] || appt.serviceType}</span>
               </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Clock className="w-4 h-4 text-accent" />
-                <span className="text-ivory">{durationLabels[appt.duration] || appt.duration + ' min'}</span>
+              <div className="flex items-center gap-2 text-[var(--color-text-secondary)]">
+                <Clock className="w-4 h-4 text-[var(--color-accent-val)]" />
+                <span className="text-[var(--color-text-primary)]">{durationLabels[appt.duration] || appt.duration + ' min'}</span>
               </div>
             </div>
 
             {/* Trainer Notes */}
             {editingNotes?.id === appt.id ? (
               <div className="space-y-2">
-                <label className="text-xs text-muted-foreground">Notas del entrenador:</label>
+                <label className="text-xs text-[var(--color-text-secondary)]">Notas del entrenador:</label>
                 <textarea
                   value={editingNotes.notes}
                   onChange={(e) => setEditingNotes({ ...editingNotes, notes: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-input border border-border text-ivory text-sm focus:outline-none focus:border-emerald-light resize-none"
+                  className="w-full px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] text-sm focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
                   rows={3}
                   placeholder="Escribe tus notas sobre esta sesión..."
                 />
@@ -822,15 +824,15 @@ export default function AdminPage() {
               <div className="flex items-start gap-2">
                 {appt.trainerNotes ? (
                   <div className="flex-1 p-2 rounded-lg bg-muted/30">
-                    <p className="text-xs text-muted-foreground mb-1">Tus notas:</p>
-                    <p className="text-ivory text-sm">{appt.trainerNotes}</p>
+                    <p className="text-xs text-[var(--color-text-secondary)] mb-1">Tus notas:</p>
+                    <p className="text-[var(--color-text-primary)] text-sm">{appt.trainerNotes}</p>
                   </div>
                 ) : (
-                  <p className="text-xs text-muted-foreground italic">Sin notas</p>
+                  <p className="text-xs text-[var(--color-text-secondary)] italic">Sin notas</p>
                 )}
                 <button
                   onClick={() => setEditingNotes({ id: appt.id, notes: appt.trainerNotes || '' })}
-                  className="text-accent hover:text-accent/80 transition-colors p-1"
+                  className="text-[var(--color-accent-val)] hover:text-[var(--color-accent-val)]/80 transition-colors p-1"
                   title="Editar notas"
                 >
                   <Edit3 className="w-4 h-4" />
@@ -843,7 +845,7 @@ export default function AdminPage() {
     );
 
     return (
-      <div className="min-h-screen -mt-20 bg-obsidian">
+      <div className="min-h-screen -mt-20 bg-[var(--color-bg-base)]">
         {/* Header */}
         <header className="glass-dark border-b border-border sticky top-0 z-40">
           <div className="container mx-auto px-4">
@@ -853,9 +855,9 @@ export default function AdminPage() {
                   <Image src="/imagenes/logo.jpeg" alt="Focus Club" width={32} height={32} className="w-full h-full object-cover" />
                 </div>
                 <div>
-                  <span className="font-bold text-ivory">Panel Entrenador</span>
+                  <span className="font-bold text-[var(--color-text-primary)]">Panel Entrenador</span>
                   {trainerProfile && (
-                    <span className="text-xs text-muted-foreground ml-2">({trainerProfile.name})</span>
+                    <span className="text-xs text-[var(--color-text-secondary)] ml-2">({trainerProfile.name})</span>
                   )}
                 </div>
               </div>
@@ -885,8 +887,8 @@ export default function AdminPage() {
           {!trainerProfile ? (
             <GlassCard className="p-12 text-center">
               <AlertCircle className="w-12 h-12 mx-auto mb-4 text-yellow-400" />
-              <h2 className="text-xl font-bold text-ivory mb-2">Perfil no encontrado</h2>
-              <p className="text-muted-foreground">
+              <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-2">Perfil no encontrado</h2>
+              <p className="text-[var(--color-text-secondary)]">
                 Tu cuenta tiene rol de entrenador, pero no se ha encontrado un perfil en la colección de trainers.
                 Contacta con la administradora.
               </p>
@@ -895,11 +897,11 @@ export default function AdminPage() {
             <div className="space-y-8">
               {/* Upcoming Appointments */}
               <div>
-                <h2 className="text-xl font-bold text-ivory mb-4 flex items-center gap-2">
-                  <Calendar className="w-5 h-5 text-accent" />
+                <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-[var(--color-accent-val)]" />
                   Próximos entrenamientos
                   {upcomingAppts.length > 0 && (
-                    <span className="text-sm font-normal text-muted-foreground">({upcomingAppts.length})</span>
+                    <span className="text-sm font-normal text-[var(--color-text-secondary)]">({upcomingAppts.length})</span>
                   )}
                 </h2>
                 {upcomingAppts.length > 0 ? (
@@ -908,8 +910,8 @@ export default function AdminPage() {
                   </div>
                 ) : (
                   <GlassCard className="p-8 text-center">
-                    <Calendar className="w-10 h-10 mx-auto mb-3 text-muted-foreground opacity-40" />
-                    <p className="text-muted-foreground">No tienes entrenamientos programados.</p>
+                    <Calendar className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-secondary)] opacity-40" />
+                    <p className="text-[var(--color-text-secondary)]">No tienes entrenamientos programados.</p>
                   </GlassCard>
                 )}
               </div>
@@ -917,10 +919,10 @@ export default function AdminPage() {
               {/* Past Appointments */}
               {pastAppts.length > 0 && (
                 <div>
-                  <h2 className="text-xl font-bold text-ivory mb-4 flex items-center gap-2">
-                    <Clock className="w-5 h-5 text-muted-foreground" />
+                  <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">
+                    <Clock className="w-5 h-5 text-[var(--color-text-secondary)]" />
                     Entrenamientos anteriores
-                    <span className="text-sm font-normal text-muted-foreground">({pastAppts.length})</span>
+                    <span className="text-sm font-normal text-[var(--color-text-secondary)]">({pastAppts.length})</span>
                   </h2>
                   <div className="space-y-4">
                     {pastAppts.map(a => renderTrainerAppointmentCard(a, true))}
@@ -939,7 +941,7 @@ export default function AdminPage() {
   // ============================================
 
   return (
-    <div className="min-h-screen -mt-20 bg-obsidian">
+    <div className="min-h-screen -mt-20 bg-[var(--color-bg-base)]">
       {/* Header */}
       <header className="glass-dark border-b border-border sticky top-0 z-40">
         <div className="container mx-auto px-4">
@@ -947,7 +949,7 @@ export default function AdminPage() {
             <div className="flex items-center gap-4">
               <button
                 onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="lg:hidden p-2 text-muted-foreground hover:text-ivory rounded-lg hover:bg-white/5 transition-colors"
+                className="lg:hidden p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] rounded-lg hover:bg-white/5 transition-colors"
               >
                 {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
               </button>
@@ -955,7 +957,7 @@ export default function AdminPage() {
                 <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0">
                   <Image src="/imagenes/logo.jpeg" alt="Focus Club" width={32} height={32} className="w-full h-full object-cover" />
                 </div>
-                <span className="font-bold text-ivory hidden sm:block">Focus Club Admin</span>
+                <span className="font-bold text-[var(--color-text-primary)] hidden sm:block">Focus Club Admin</span>
               </Link>
             </div>
 
@@ -983,7 +985,7 @@ export default function AdminPage() {
           {/* Mobile sidebar overlay */}
           {sidebarOpen && (
             <div
-              className="fixed inset-0 z-30 bg-obsidian/60 backdrop-blur-sm lg:hidden"
+              className="fixed inset-0 z-30 bg-[var(--color-bg-base)]/60 backdrop-blur-sm lg:hidden"
               onClick={() => setSidebarOpen(false)}
             />
           )}
@@ -995,15 +997,15 @@ export default function AdminPage() {
               ? 'fixed inset-y-0 left-0 z-40 w-64 bg-[#0A110D] border-r border-border p-4 pt-20 overflow-y-auto shadow-2xl lg:static lg:w-auto lg:border-0 lg:p-0 lg:pt-0 lg:shadow-none lg:bg-transparent'
               : 'hidden'
           )}>
-            <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3 px-3">Principal</p>
+            <p className="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider mb-3 px-3">Principal</p>
 
             <button
               onClick={() => switchTab('Inicio')}
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
                 activeTab === 'Inicio'
-                  ? 'bg-emerald/20 text-emerald border border-emerald/30 shadow-lg shadow-emerald/10'
-                  : 'text-muted-foreground hover:bg-muted/50 hover:text-ivory'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
               )}
             >
               <BarChart3 className="w-5 h-5" />
@@ -1015,8 +1017,8 @@ export default function AdminPage() {
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
                 activeTab === 'appointments'
-                  ? 'bg-emerald/20 text-emerald border border-emerald/30 shadow-lg shadow-emerald/10'
-                  : 'text-muted-foreground hover:bg-muted/50 hover:text-ivory'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
               )}
             >
               <Calendar className="w-5 h-5" />
@@ -1033,14 +1035,14 @@ export default function AdminPage() {
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
                 activeTab === 'availability'
-                  ? 'bg-emerald/20 text-emerald border border-emerald/30 shadow-lg shadow-emerald/10'
-                  : 'text-muted-foreground hover:bg-muted/50 hover:text-ivory'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
               )}
             >
               <CalendarOff className="w-5 h-5" />
               <span className="font-medium">Disponibilidad</span>
               {blockedSlots.length > 0 && (
-                <span className="ml-auto text-xs text-muted-foreground">{blockedSlots.length}</span>
+                <span className="ml-auto text-xs text-[var(--color-text-secondary)]">{blockedSlots.length}</span>
               )}
             </button>
 
@@ -1049,8 +1051,8 @@ export default function AdminPage() {
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
                 activeTab === 'clients'
-                  ? 'bg-emerald/20 text-emerald border border-emerald/30 shadow-lg shadow-emerald/10'
-                  : 'text-muted-foreground hover:bg-muted/50 hover:text-ivory'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
               )}
             >
               <Users className="w-5 h-5" />
@@ -1062,31 +1064,31 @@ export default function AdminPage() {
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
                 activeTab === 'team'
-                  ? 'bg-emerald/20 text-emerald border border-emerald/30 shadow-lg shadow-emerald/10'
-                  : 'text-muted-foreground hover:bg-muted/50 hover:text-ivory'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
               )}
             >
               <Dumbbell className="w-5 h-5" />
               <span className="font-medium">Equipo</span>
               {trainers.length > 0 && (
-                <span className="ml-auto text-xs text-muted-foreground">{trainers.length}</span>
+                <span className="ml-auto text-xs text-[var(--color-text-secondary)]">{trainers.length}</span>
               )}
             </button>
 
-            <p className="text-xs text-muted-foreground uppercase tracking-wider mt-6 mb-3 px-3">Gestión</p>
+            <p className="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider mt-6 mb-3 px-3">Gestión</p>
 
             <button
               onClick={() => switchTab('services')}
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
                 activeTab === 'services'
-                  ? 'bg-emerald/20 text-emerald border border-emerald/30 shadow-lg shadow-emerald/10'
-                  : 'text-muted-foreground hover:bg-muted/50 hover:text-ivory'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
               )}
             >
               <Award className="w-5 h-5" />
               <span className="font-medium">Servicios</span>
-              <span className="ml-auto text-xs text-muted-foreground">{stats.services}</span>
+              <span className="ml-auto text-xs text-[var(--color-text-secondary)]">{stats.services}</span>
             </button>
 
             <button
@@ -1094,13 +1096,13 @@ export default function AdminPage() {
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
                 activeTab === 'testimonials'
-                  ? 'bg-emerald/20 text-emerald border border-emerald/30 shadow-lg shadow-emerald/10'
-                  : 'text-muted-foreground hover:bg-muted/50 hover:text-ivory'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
               )}
             >
               <Star className="w-5 h-5" />
               <span className="font-medium">Testimonios</span>
-              <span className="ml-auto text-xs text-muted-foreground">{stats.testimonials}</span>
+              <span className="ml-auto text-xs text-[var(--color-text-secondary)]">{stats.testimonials}</span>
             </button>
 
             <button
@@ -1108,23 +1110,23 @@ export default function AdminPage() {
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
                 activeTab === 'config'
-                  ? 'bg-emerald/20 text-emerald border border-emerald/30 shadow-lg shadow-emerald/10'
-                  : 'text-muted-foreground hover:bg-muted/50 hover:text-ivory'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
               )}
             >
               <Settings className="w-5 h-5" />
               <span className="font-medium">Configuración</span>
             </button>
 
-            <p className="text-xs text-muted-foreground uppercase tracking-wider mt-6 mb-3 px-3">CMS</p>
+            <p className="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider mt-6 mb-3 px-3">CMS</p>
 
             <button
               onClick={() => switchTab('Sandra')}
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
                 activeTab === 'Sandra'
-                  ? 'bg-emerald/20 text-emerald border border-emerald/30 shadow-lg shadow-emerald/10'
-                  : 'text-muted-foreground hover:bg-muted/50 hover:text-ivory'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
               )}
             >
               <User className="w-5 h-5" />
@@ -1136,8 +1138,8 @@ export default function AdminPage() {
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
                 activeTab === 'Centro'
-                  ? 'bg-emerald/20 text-emerald border border-emerald/30 shadow-lg shadow-emerald/10'
-                  : 'text-muted-foreground hover:bg-muted/50 hover:text-ivory'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
               )}
             >
               <MapPin className="w-5 h-5" />
@@ -1149,8 +1151,8 @@ export default function AdminPage() {
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
                 activeTab === 'Galeria'
-                  ? 'bg-emerald/20 text-emerald border border-emerald/30 shadow-lg shadow-emerald/10'
-                  : 'text-muted-foreground hover:bg-muted/50 hover:text-ivory'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
               )}
             >
               <ImageIcon className="w-5 h-5" />
@@ -1162,8 +1164,8 @@ export default function AdminPage() {
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
                 activeTab === 'Contacto'
-                  ? 'bg-emerald/20 text-emerald border border-emerald/30 shadow-lg shadow-emerald/10'
-                  : 'text-muted-foreground hover:bg-muted/50 hover:text-ivory'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
               )}
             >
               <Globe className="w-5 h-5" />
@@ -1184,25 +1186,25 @@ export default function AdminPage() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -20 }}
                 >
-                  <h1 className="text-2xl font-bold text-ivory mb-6">Dashboard</h1>
+                  <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-6">Dashboard</h1>
 
                   {/* Stats Grid */}
                   <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                     {[
-                      { label: 'Total Citas', value: stats.total, icon: Calendar, color: 'from-emerald to-forest-deep' },
+                      { label: 'Total Citas', value: stats.total, icon: Calendar, color: 'from-[var(--color-accent-val)] to-[#2d6a4f]' },
                       { label: 'Pendientes', value: stats.pending, icon: Clock, color: 'from-yellow-600 to-yellow-800' },
                       { label: 'Aprobadas', value: stats.approved, icon: CheckCircle, color: 'from-green-600 to-green-800' },
-                      { label: 'Servicios', value: stats.services, icon: Award, color: 'from-accent-dark to-accent' },
+                      { label: 'Servicios', value: stats.services, icon: Award, color: 'from-[#2d6a4f] to-[var(--color-accent-val)]' },
                     ].map((stat, index) => (
                       <GlassCard key={index} className="p-6">
                         <div className="flex items-center justify-between mb-4">
                           <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${stat.color} flex items-center justify-center`}>
                             <stat.icon className="w-6 h-6 text-white" />
                           </div>
-                          <TrendingUp className="w-5 h-5 text-muted-foreground" />
+                          <TrendingUp className="w-5 h-5 text-[var(--color-text-secondary)]" />
                         </div>
-                        <div className="text-3xl font-bold text-ivory mb-1">{stat.value}</div>
-                        <div className="text-sm text-muted-foreground">{stat.label}</div>
+                        <div className="text-3xl font-bold text-[var(--color-text-primary)] mb-1">{stat.value}</div>
+                        <div className="text-sm text-[var(--color-text-secondary)]">{stat.label}</div>
                       </GlassCard>
                     ))}
                   </div>
@@ -1210,10 +1212,10 @@ export default function AdminPage() {
                   {/* Recent Appointments */}
                   <GlassCard className="p-6">
                     <div className="flex items-center justify-between mb-6">
-                      <h2 className="text-lg font-semibold text-ivory">Citas Recientes</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Citas Recientes</h2>
                       <button
                         onClick={() => setActiveTab('appointments')}
-                        className="text-accent text-sm hover:underline flex items-center gap-1"
+                        className="text-[var(--color-accent-val)] text-sm hover:underline flex items-center gap-1"
                       >
                         Ver todas <ChevronRight className="w-4 h-4" />
                       </button>
@@ -1235,12 +1237,12 @@ export default function AdminPage() {
                             }}
                           >
                             <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-emerald to-accent flex items-center justify-center text-obsidian font-semibold">
+                              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--color-accent-val)] to-emerald-bright flex items-center justify-center text-[var(--color-bg-base)] font-semibold">
                                 {appointment.name.charAt(0)}
                               </div>
                               <div>
-                                <p className="font-medium text-ivory hover:text-accent transition-colors">{appointment.name}</p>
-                                <p className="text-sm text-muted-foreground">
+                                <p className="font-medium text-[var(--color-text-primary)] hover:text-[var(--color-accent-val)] transition-colors">{appointment.name}</p>
+                                <p className="text-sm text-[var(--color-text-secondary)]">
                                   {serviceLabels[appointment.serviceType] || appointment.serviceType} - {durationLabels[appointment.duration]}
                                 </p>
                               </div>
@@ -1252,7 +1254,7 @@ export default function AdminPage() {
                         );
                       })}
                       {appointments.length === 0 && (
-                        <div className="text-center py-8 text-muted-foreground">
+                        <div className="text-center py-8 text-[var(--color-text-secondary)]">
                           <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
                           <p>No hay citas aún</p>
                         </div>
@@ -1273,7 +1275,7 @@ export default function AdminPage() {
                   exit={{ opacity: 0, y: -20 }}
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                    <h1 className="text-2xl font-bold text-ivory">Gestión de Citas</h1>
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Gestión de Citas</h1>
                     <div className="flex flex-wrap gap-2">
                       {(['all', 'pending', 'approved', 'rejected'] as StatusFilter[]).map(
                         (filter) => (
@@ -1283,8 +1285,8 @@ export default function AdminPage() {
                             className={cn(
                               'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
                               statusFilter === filter
-                                ? 'bg-accent text-obsidian'
-                                : 'bg-muted text-muted-foreground hover:text-ivory'
+                                ? 'bg-accent text-[var(--color-bg-base)]'
+                                : 'bg-muted text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
                             )}
                           >
                             {filter === 'all' ? 'Todas' : statusConfig[filter].label}
@@ -1312,11 +1314,11 @@ export default function AdminPage() {
                             <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
                               <div className="flex-1 space-y-4">
                                 <div className="flex items-center gap-3">
-                                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald to-accent flex items-center justify-center text-obsidian font-bold text-lg">
+                                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[var(--color-accent-val)] to-emerald-bright flex items-center justify-center text-[var(--color-bg-base)] font-bold text-lg">
                                     {appointment.name.charAt(0)}
                                   </div>
                                   <div>
-                                    <h3 className="font-semibold text-ivory text-lg">{appointment.name}</h3>
+                                    <h3 className="font-semibold text-[var(--color-text-primary)] text-lg">{appointment.name}</h3>
                                     <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border', statusConfig[appointment.status].color)}>
                                       <StatusIcon className="w-3 h-3" />
                                       {statusConfig[appointment.status].label}
@@ -1325,15 +1327,15 @@ export default function AdminPage() {
                                 </div>
 
                                 <div className="grid sm:grid-cols-2 gap-4">
-                                  <div className="flex items-center gap-2 text-muted-foreground">
-                                    <Mail className="w-4 h-4 text-accent" />
-                                    <a href={`mailto:${appointment.email}`} className="hover:text-accent transition-colors text-sm">
+                                  <div className="flex items-center gap-2 text-[var(--color-text-secondary)]">
+                                    <Mail className="w-4 h-4 text-[var(--color-accent-val)]" />
+                                    <a href={`mailto:${appointment.email}`} className="hover:text-[var(--color-accent-val)] transition-colors text-sm">
                                       {appointment.email}
                                     </a>
                                   </div>
-                                  <div className="flex items-center gap-2 text-muted-foreground">
-                                    <Phone className="w-4 h-4 text-accent" />
-                                    <a href={`tel:${appointment.phone}`} className="hover:text-accent transition-colors text-sm">
+                                  <div className="flex items-center gap-2 text-[var(--color-text-secondary)]">
+                                    <Phone className="w-4 h-4 text-[var(--color-accent-val)]" />
+                                    <a href={`tel:${appointment.phone}`} className="hover:text-[var(--color-accent-val)] transition-colors text-sm">
                                       {appointment.phone}
                                     </a>
                                   </div>
@@ -1341,64 +1343,64 @@ export default function AdminPage() {
 
                                 <div className="flex flex-wrap gap-4 text-sm">
                                   <div className="flex items-center gap-2">
-                                    <Calendar className="w-4 h-4 text-accent" />
-                                    <span className="text-ivory">
+                                    <Calendar className="w-4 h-4 text-[var(--color-accent-val)]" />
+                                    <span className="text-[var(--color-text-primary)]">
                                       {appointment.preferredSlots[0]
                                         ? `${new Date(appointment.preferredSlots[0].date).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })} - ${appointment.preferredSlots[0].time}`
                                         : '—'}
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <Clock className="w-4 h-4 text-accent" />
-                                    <span className="text-ivory">{durationLabels[appointment.duration]}</span>
+                                    <Clock className="w-4 h-4 text-[var(--color-accent-val)]" />
+                                    <span className="text-[var(--color-text-primary)]">{durationLabels[appointment.duration]}</span>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <Dumbbell className="w-4 h-4 text-accent" />
-                                    <span className="text-ivory">{serviceLabels[appointment.serviceType] || appointment.serviceType}</span>
+                                    <Dumbbell className="w-4 h-4 text-[var(--color-accent-val)]" />
+                                    <span className="text-[var(--color-text-primary)]">{serviceLabels[appointment.serviceType] || appointment.serviceType}</span>
                                   </div>
                                 </div>
 
                                 {appointment.reason && (
                                   <div className="p-3 rounded-lg bg-muted/30">
-                                    <p className="text-xs text-muted-foreground mb-1">Comentario:</p>
-                                    <p className="text-ivory text-sm">{appointment.reason}</p>
+                                    <p className="text-xs text-[var(--color-text-secondary)] mb-1">Comentario:</p>
+                                    <p className="text-[var(--color-text-primary)] text-sm">{appointment.reason}</p>
                                   </div>
                                 )}
 
                                 {appointment.status === 'approved' && (appointment.approvedSlot || appointment.assignedTrainer || appointment.sessionType) && (
-                                  <div className="p-3 rounded-lg bg-emerald/10 border border-emerald/20">
-                                    <p className="text-xs text-emerald-light mb-2 font-semibold">Detalles de aprobación:</p>
+                                  <div className="p-3 rounded-lg bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)]">
+                                    <p className="text-xs text-[var(--color-accent-val)] mb-2 font-semibold">Detalles de aprobación:</p>
                                     <div className="flex flex-wrap gap-3 text-sm">
                                       {appointment.approvedSlot && (
-                                        <span className="text-ivory">
+                                        <span className="text-[var(--color-text-primary)]">
                                           Franja: {new Date(appointment.approvedSlot.date).toLocaleDateString('es-ES', {
                                             weekday: 'short', day: 'numeric', month: 'short',
                                           })} - {appointment.approvedSlot.time}
                                         </span>
                                       )}
                                       {appointment.assignedTrainer && (
-                                        <span className="text-ivory">
+                                        <span className="text-[var(--color-text-primary)]">
                                           Entrenador: <strong>{trainers.find(t => t.id === appointment.assignedTrainer)?.name || appointment.assignedTrainer}</strong>
                                         </span>
                                       )}
                                       {appointment.sessionType && (
-                                        <span className="px-2 py-0.5 rounded bg-emerald/20 text-emerald-light text-xs font-medium uppercase">{appointment.sessionType}</span>
+                                        <span className="px-2 py-0.5 rounded bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs font-medium uppercase">{appointment.sessionType}</span>
                                       )}
                                     </div>
                                   </div>
                                 )}
 
                                 {appointment.trainerNotes && (
-                                  <div className="p-3 rounded-lg bg-accent/10 border border-accent/20">
-                                    <p className="text-xs text-accent mb-1 font-semibold flex items-center gap-1">
+                                  <div className="p-3 rounded-lg bg-[var(--color-accent-dim)] border border-accent/20">
+                                    <p className="text-xs text-[var(--color-accent-val)] mb-1 font-semibold flex items-center gap-1">
                                       <FileText className="w-3.5 h-3.5" />
                                       Notas del entrenador:
                                     </p>
-                                    <p className="text-ivory text-sm">{appointment.trainerNotes}</p>
+                                    <p className="text-[var(--color-text-primary)] text-sm">{appointment.trainerNotes}</p>
                                   </div>
                                 )}
 
-                                <p className="text-xs text-muted-foreground">
+                                <p className="text-xs text-[var(--color-text-secondary)]">
                                   Enviado el {new Date(appointment.createdAt).toLocaleDateString('es-ES', {
                                     day: 'numeric',
                                     month: 'long',
@@ -1530,9 +1532,9 @@ export default function AdminPage() {
                     })}
                     {filteredAppointments.length === 0 && (
                       <GlassCard className="p-12 text-center">
-                        <Calendar className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-                        <h3 className="text-lg font-semibold text-ivory mb-2">No hay citas</h3>
-                        <p className="text-muted-foreground">
+                        <Calendar className="w-16 h-16 mx-auto mb-4 text-[var(--color-text-secondary)] opacity-50" />
+                        <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">No hay citas</h3>
+                        <p className="text-[var(--color-text-secondary)]">
                           {statusFilter === 'all'
                             ? 'Aún no se han recibido solicitudes de cita'
                             : `No hay citas ${statusConfig[statusFilter as keyof typeof statusConfig]?.label.toLowerCase()}`}
@@ -1554,21 +1556,21 @@ export default function AdminPage() {
                   exit={{ opacity: 0, y: -20 }}
                 >
                   <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-2xl font-bold text-ivory">Gestión de Clientes</h1>
-                    <div className="flex gap-2 text-sm text-muted-foreground">
-                      Total: <span className="text-ivory font-semibold">{clients.length}</span>
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Gestión de Clientes</h1>
+                    <div className="flex gap-2 text-sm text-[var(--color-text-secondary)]">
+                      Total: <span className="text-[var(--color-text-primary)] font-semibold">{clients.length}</span>
                     </div>
                   </div>
 
                   {/* Search bar */}
                   <div className="relative mb-6">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-secondary)]" />
                     <input
                       type="text"
                       value={clientSearch}
                       onChange={(e) => setClientSearch(e.target.value)}
                       placeholder="Buscar por nombre o email..."
-                      className="w-full pl-11 pr-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light placeholder:text-muted-foreground"
+                      className="w-full pl-11 pr-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] placeholder:text-[var(--color-text-secondary)]"
                     />
                   </div>
 
@@ -1585,23 +1587,23 @@ export default function AdminPage() {
                           <div className="flex items-center gap-4">
                             <div className={cn(
                               "w-12 h-12 rounded-full flex items-center justify-center",
-                              client.role === 'admin' ? "bg-accent/20" : client.isTrainer ? "bg-emerald/20" : "bg-accent/20"
+                              client.role === 'admin' ? "bg-[var(--color-accent-dim)]" : client.isTrainer ? "bg-[var(--color-accent-dim)]" : "bg-[var(--color-accent-dim)]"
                             )}>
                               {client.isTrainer ? (
-                                <Dumbbell className="w-6 h-6 text-emerald" />
+                                <Dumbbell className="w-6 h-6 text-[var(--color-accent-val)]" />
                               ) : (
-                                <User className="w-6 h-6 text-accent" />
+                                <User className="w-6 h-6 text-[var(--color-accent-val)]" />
                               )}
                             </div>
                             <div>
-                              <h3 className="font-semibold text-ivory">{client.name}</h3>
-                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <h3 className="font-semibold text-[var(--color-text-primary)]">{client.name}</h3>
+                              <div className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
                                 <Mail className="w-3.5 h-3.5" />
                                 {client.email}
                               </div>
                             </div>
                           </div>
-                          <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+                          <div className="flex flex-wrap items-center gap-4 text-sm text-[var(--color-text-secondary)]">
                             <div className="flex items-center gap-2">
                               <Phone className="w-4 h-4" />
                               {client.phone}
@@ -1643,12 +1645,12 @@ export default function AdminPage() {
                                 }
                               }}
                               className={cn(
-                                "px-2 py-1 rounded-lg text-xs font-medium uppercase tracking-tight border bg-input focus:outline-none focus:border-emerald-light cursor-pointer",
+                                "px-2 py-1 rounded-lg text-xs font-medium uppercase tracking-tight border bg-input focus:outline-none focus:border-[var(--color-accent-val)] cursor-pointer",
                                 client.role === 'admin'
-                                  ? "text-accent border-accent/30"
+                                  ? "text-[var(--color-accent-val)] border-accent/30"
                                   : client.role === 'trainer'
-                                    ? "text-emerald-light border-emerald/30"
-                                    : "text-ivory border-border"
+                                    ? "text-[var(--color-accent-val)] border-[var(--color-accent-border)]"
+                                    : "text-[var(--color-text-primary)] border-border"
                               )}
                             >
                               <option value="user">Cliente</option>
@@ -1663,22 +1665,22 @@ export default function AdminPage() {
                           {clientBonos[client.uid] ? (
                             <div className="space-y-3">
                               <div className="flex flex-wrap items-center gap-3">
-                                <span className="px-2.5 py-1 rounded-lg bg-emerald/10 text-emerald text-xs font-medium border border-emerald/20">
+                                <span className="px-2.5 py-1 rounded-lg bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs font-medium border border-[var(--color-accent-border)]">
                                   <Ticket className="w-3 h-3 inline mr-1" />
                                   {clientBonos[client.uid]!.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
                                   {clientBonos[client.uid]!.modalidad && ` (${clientBonos[client.uid]!.modalidad === '1h' ? '4×1h' : '8×30min'})`}
                                 </span>
-                                <span className="text-sm text-ivory">
+                                <span className="text-sm text-[var(--color-text-primary)]">
                                   {clientBonos[client.uid]!.sesionesRestantes}/{clientBonos[client.uid]!.sesionesTotales} sesiones
                                 </span>
-                                <span className="text-xs text-muted-foreground">
+                                <span className="text-xs text-[var(--color-text-secondary)]">
                                   Expira: {new Date(clientBonos[client.uid]!.fechaExpiracion).toLocaleDateString('es-ES')}
                                 </span>
                               </div>
                               {/* Progress bar */}
                               <div className="h-1.5 rounded-full bg-muted/30 overflow-hidden max-w-xs">
                                 <div
-                                  className="h-full rounded-full bg-gradient-to-r from-emerald to-accent transition-all"
+                                  className="h-full rounded-full bg-gradient-to-r from-[var(--color-accent-val)] to-emerald-bright transition-all"
                                   style={{ width: `${(clientBonos[client.uid]!.sesionesRestantes / clientBonos[client.uid]!.sesionesTotales) * 100}%` }}
                                 />
                               </div>
@@ -1721,7 +1723,7 @@ export default function AdminPage() {
                                       alert('Error al añadir sesión');
                                     }
                                   }}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald/10 text-emerald border border-emerald/20 hover:bg-emerald/20 transition-colors flex items-center gap-1"
+                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)] transition-colors flex items-center gap-1"
                                 >
                                   <Plus className="w-3 h-3" /> Añadir Sesión
                                 </button>
@@ -1731,40 +1733,48 @@ export default function AdminPage() {
                                 >
                                   <Trash2 className="w-3 h-3" /> Eliminar Bono
                                 </button>
-                                <button
-                                  onClick={async () => {
-                                    const bonos = await getBonosByUser(client.uid);
-                                    setBonoHistoryData(bonos);
-                                    setBonoHistoryClientName(client.name);
-                                    setShowBonoHistoryModal(true);
-                                  }}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-muted/20 text-muted-foreground border border-white/10 hover:text-ivory hover:border-white/20 transition-colors flex items-center gap-1"
-                                >
-                                  <History className="w-3 h-3" /> Historial
-                                </button>
                               </div>
                             </div>
                           ) : (
-                            <p className="text-xs text-muted-foreground mb-2">Sin bono activo</p>
+                            <p className="text-xs text-[var(--color-text-secondary)] mb-2">Sin bono activo</p>
                           )}
-                          <button
-                            onClick={() => {
-                              setAssignBonoClient(client);
-                              setAssignBonoType('bono_mensual');
-                              setAssignBonoModalidad('1h');
-                              setShowAssignBonoModal(true);
-                            }}
-                            className="mt-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald/10 text-emerald border border-emerald/20 hover:bg-emerald/20 transition-colors flex items-center gap-1"
-                          >
-                            <Plus className="w-3 h-3" /> Asignar Bono
-                          </button>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <button
+                              onClick={() => {
+                                setAssignBonoClient(client);
+                                setAssignBonoType('bono_mensual');
+                                setAssignBonoModalidad('1h');
+                                setShowAssignBonoModal(true);
+                              }}
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)] transition-colors flex items-center gap-1"
+                            >
+                              <Plus className="w-3 h-3" /> Asignar Bono
+                            </button>
+                            <button
+                              onClick={async () => {
+                                const [bonos, appts] = await Promise.all([
+                                  getBonosByUser(client.uid),
+                                  getAppointmentsByUser(client.uid),
+                                ]);
+                                setBonoHistoryData(bonos);
+                                setClientAppointmentsHistory(
+                                  appts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                                );
+                                setBonoHistoryClientName(client.name);
+                                setShowBonoHistoryModal(true);
+                              }}
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-muted/20 text-[var(--color-text-secondary)] border border-white/10 hover:text-[var(--color-text-primary)] hover:border-white/20 transition-colors flex items-center gap-1"
+                            >
+                              <History className="w-3 h-3" /> Historial
+                            </button>
+                          </div>
                         </div>
                       </GlassCard>
                     ))}
                     {clients.length === 0 && (
                       <GlassCard className="p-12 text-center">
-                        <Users className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-30" />
-                        <p className="text-muted-foreground">No hay clientes registrados.</p>
+                        <Users className="w-12 h-12 mx-auto mb-4 text-[var(--color-text-secondary)] opacity-30" />
+                        <p className="text-[var(--color-text-secondary)]">No hay clientes registrados.</p>
                       </GlassCard>
                     )}
                   </div>
@@ -1782,9 +1792,9 @@ export default function AdminPage() {
                   exit={{ opacity: 0, y: -20 }}
                 >
                   <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-2xl font-bold text-ivory">Equipo de Entrenadores</h1>
-                    <div className="flex gap-2 text-sm text-muted-foreground">
-                      Total: <span className="text-ivory font-semibold">{trainers.length}</span>
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Equipo de Entrenadores</h1>
+                    <div className="flex gap-2 text-sm text-[var(--color-text-secondary)]">
+                      Total: <span className="text-[var(--color-text-primary)] font-semibold">{trainers.length}</span>
                     </div>
                   </div>
 
@@ -1793,12 +1803,12 @@ export default function AdminPage() {
                     <GlassCard className="p-4 mb-6">
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">
-                            <Award className="w-5 h-5 text-accent" />
+                          <div className="w-10 h-10 rounded-full bg-[var(--color-accent-dim)] flex items-center justify-center">
+                            <Award className="w-5 h-5 text-[var(--color-accent-val)]" />
                           </div>
                           <div>
-                            <p className="text-sm font-medium text-ivory">{userProfile.name}</p>
-                            <p className="text-xs text-muted-foreground">Administradora</p>
+                            <p className="text-sm font-medium text-[var(--color-text-primary)]">{userProfile.name}</p>
+                            <p className="text-xs text-[var(--color-text-secondary)]">Administradora</p>
                           </div>
                         </div>
                         {userProfile.isTrainer ? (
@@ -1858,10 +1868,10 @@ export default function AdminPage() {
                       <GlassCard key={trainer.id} className="p-6">
                         <div className="flex items-center justify-between gap-4">
                           <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 rounded-full bg-emerald/20 flex items-center justify-center">
-                              <Dumbbell className="w-6 h-6 text-emerald" />
+                            <div className="w-12 h-12 rounded-full bg-[var(--color-accent-dim)] flex items-center justify-center">
+                              <Dumbbell className="w-6 h-6 text-[var(--color-accent-val)]" />
                             </div>
-                            <h3 className="font-semibold text-ivory">{trainer.name}</h3>
+                            <h3 className="font-semibold text-[var(--color-text-primary)]">{trainer.name}</h3>
                           </div>
                           <PremiumButton
                             variant="ghost"
@@ -1899,10 +1909,10 @@ export default function AdminPage() {
                     ))}
                     {trainers.length === 0 && (
                       <GlassCard className="p-12 text-center">
-                        <Dumbbell className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-30" />
-                        <p className="text-muted-foreground mb-2">No hay entrenadores registrados.</p>
-                        <p className="text-sm text-muted-foreground">
-                          Ve a la pestaña <button onClick={() => setActiveTab('clients')} className="text-accent underline">Clientes</button> y cambia el rol de un usuario a &ldquo;Entrenador&rdquo;.
+                        <Dumbbell className="w-12 h-12 mx-auto mb-4 text-[var(--color-text-secondary)] opacity-30" />
+                        <p className="text-[var(--color-text-secondary)] mb-2">No hay entrenadores registrados.</p>
+                        <p className="text-sm text-[var(--color-text-secondary)]">
+                          Ve a la pestaña <button onClick={() => setActiveTab('clients')} className="text-[var(--color-accent-val)] underline">Clientes</button> y cambia el rol de un usuario a &ldquo;Entrenador&rdquo;.
                         </p>
                       </GlassCard>
                     )}
@@ -1921,7 +1931,7 @@ export default function AdminPage() {
                   exit={{ opacity: 0, y: -20 }}
                 >
                   <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-2xl font-bold text-ivory">Gestión de Servicios</h1>
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Gestión de Servicios</h1>
                     <PremiumButton
                       variant="cta"
                       icon={<Plus className="w-4 h-4" />}
@@ -1944,16 +1954,16 @@ export default function AdminPage() {
                       <GlassCard key={service.id} className="p-6">
                         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                           <div className="flex-1">
-                            <h3 className="text-lg font-semibold text-ivory mb-1">{service.title}</h3>
-                            <p className="text-muted-foreground text-sm mb-3">{service.description}</p>
+                            <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-1">{service.title}</h3>
+                            <p className="text-[var(--color-text-secondary)] text-sm mb-3">{service.description}</p>
                             <div className="flex flex-wrap gap-4 text-sm">
-                              <span className="text-accent">{service.price}</span>
-                              <span className="text-muted-foreground">Duración: {service.duration}</span>
+                              <span className="text-[var(--color-accent-val)]">{service.price}</span>
+                              <span className="text-[var(--color-text-secondary)]">Duración: {service.duration}</span>
                             </div>
                             {service.features && service.features.length > 0 && (
                               <div className="flex flex-wrap gap-2 mt-3">
                                 {service.features.map((feature, i) => (
-                                  <span key={i} className="px-2 py-1 text-xs bg-emerald/10 text-ivory rounded">
+                                  <span key={i} className="px-2 py-1 text-xs bg-[var(--color-accent-dim)] text-[var(--color-text-primary)] rounded">
                                     {feature}
                                   </span>
                                 ))}
@@ -2000,7 +2010,7 @@ export default function AdminPage() {
                   exit={{ opacity: 0, y: -20 }}
                 >
                   <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-2xl font-bold text-ivory">Gestión de Testimonios</h1>
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Gestión de Testimonios</h1>
                     <PremiumButton
                       variant="cta"
                       icon={<Plus className="w-4 h-4" />}
@@ -2022,12 +2032,12 @@ export default function AdminPage() {
                       <GlassCard key={testimonial.id} className="p-6">
                         <div className="flex items-start justify-between mb-3">
                           <div>
-                            <h3 className="font-semibold text-ivory">{testimonial.name}</h3>
-                            <p className="text-xs text-muted-foreground">{testimonial.role}</p>
+                            <h3 className="font-semibold text-[var(--color-text-primary)]">{testimonial.name}</h3>
+                            <p className="text-xs text-[var(--color-text-secondary)]">{testimonial.role}</p>
                           </div>
                           <span className={cn(
                             'px-2 py-1 text-xs rounded',
-                            testimonial.approved ? 'bg-emerald/20 text-emerald-400' : 'bg-yellow-500/20 text-yellow-400'
+                            testimonial.approved ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)]' : 'bg-yellow-500/20 text-yellow-400'
                           )}>
                             {testimonial.approved ? 'Aprobado' : 'Pendiente'}
                           </span>
@@ -2036,11 +2046,11 @@ export default function AdminPage() {
                           {Array.from({ length: 5 }).map((_, i) => (
                             <Star
                               key={i}
-                              className={cn('w-4 h-4', i < testimonial.rating ? 'text-accent fill-accent' : 'text-muted-foreground')}
+                              className={cn('w-4 h-4', i < testimonial.rating ? 'text-[var(--color-accent-val)] fill-accent' : 'text-[var(--color-text-secondary)]')}
                             />
                           ))}
                         </div>
-                        <p className="text-sm text-muted-foreground italic mb-4">"{testimonial.content}"</p>
+                        <p className="text-sm text-[var(--color-text-secondary)] italic mb-4">"{testimonial.content}"</p>
                         <div className="flex gap-2">
                           {!testimonial.approved && (
                             <PremiumButton
@@ -2089,7 +2099,7 @@ export default function AdminPage() {
                   exit={{ opacity: 0, y: -20 }}
                 >
                   <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-2xl font-bold text-ivory">Editar Sandra Andújar</h1>
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Editar Sandra Andújar</h1>
                     <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveSandra}>
                       Guardar Cambios
                     </PremiumButton>
@@ -2098,14 +2108,14 @@ export default function AdminPage() {
                   <div className="space-y-6">
                     {/* Basic Info */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Información Básica</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Información Básica</h2>
                       <div className="mb-6">
-                        <label className="block text-sm text-muted-foreground mb-2">Foto de Perfil</label>
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Foto de Perfil</label>
                         {isValidImageUrl(editedContent?.sandra?.image) ? (
                           <img src={editedContent!.sandra!.image} alt="Sandra" className="w-32 h-32 object-cover rounded-xl mb-3 border border-border" />
                         ) : (
                           <div className="w-32 h-32 rounded-xl mb-3 border border-border bg-muted/30 flex items-center justify-center">
-                            <ImageIcon className="w-8 h-8 text-muted-foreground opacity-50" />
+                            <ImageIcon className="w-8 h-8 text-[var(--color-text-secondary)] opacity-50" />
                           </div>
                         )}
                         <PremiumButton
@@ -2123,7 +2133,7 @@ export default function AdminPage() {
                       </div>
                       <div className="grid sm:grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Nombre</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Nombre</label>
                           <input
                             type="text"
                             value={editedContent?.sandra?.name || ''}
@@ -2136,11 +2146,11 @@ export default function AdminPage() {
                                 } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Título</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título</label>
                           <input
                             type="text"
                             value={editedContent?.sandra?.title || ''}
@@ -2153,13 +2163,13 @@ export default function AdminPage() {
                                 } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           />
                         </div>
                       </div>
                       <div className="grid sm:grid-cols-2 gap-4 mt-4">
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Subtítulo</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtítulo</label>
                           <input
                             type="text"
                             value={editedContent?.sandra?.subtitle || ''}
@@ -2169,12 +2179,12 @@ export default function AdminPage() {
                                 return { ...prev, sandra: { ...prev.sandra, subtitle: e.target.value } } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                             placeholder="La experta detrás del proyecto"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Años de experiencia</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Años de experiencia</label>
                           <input
                             type="text"
                             value={editedContent?.sandra?.experience || ''}
@@ -2184,13 +2194,13 @@ export default function AdminPage() {
                                 return { ...prev, sandra: { ...prev.sandra, experience: e.target.value } } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                             placeholder="20+ años"
                           />
                         </div>
                       </div>
                       <div className="mt-4">
-                        <label className="block text-sm text-muted-foreground mb-2">Biografía</label>
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Biografía</label>
                         <textarea
                           value={editedContent?.sandra?.bio || ''}
                           onChange={(e) => {
@@ -2203,14 +2213,14 @@ export default function AdminPage() {
                             });
                           }}
                           rows={4}
-                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light resize-none"
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
                         />
                       </div>
                     </GlassCard>
 
                     {/* Achievements */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Logros Destacados</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Logros Destacados</h2>
                       <div className="space-y-3">
                         {(editedContent?.sandra?.achievements || []).map((achievement, index) => (
                           <div key={index} className="flex gap-2">
@@ -2228,7 +2238,7 @@ export default function AdminPage() {
                                   } as CMSContent;
                                 });
                               }}
-                              className="flex-1 px-4 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              className="flex-1 px-4 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                             />
                             <button
                               onClick={() => {
@@ -2266,7 +2276,7 @@ export default function AdminPage() {
 
                     {/* Certifications */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Certificaciones</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Certificaciones</h2>
                       <div className="space-y-3">
                         {(editedContent?.sandra?.certifications || []).map((cert, index) => (
                           <div key={index} className="flex gap-2">
@@ -2284,7 +2294,7 @@ export default function AdminPage() {
                                   } as CMSContent;
                                 });
                               }}
-                              className="flex-1 px-4 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              className="flex-1 px-4 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                             />
                             <button
                               onClick={() => {
@@ -2322,7 +2332,7 @@ export default function AdminPage() {
 
                     {/* Timeline */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Timeline Profesional</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Timeline Profesional</h2>
                       <div className="space-y-4">
                         {(editedContent?.sandra?.timeline || []).map((item, index) => (
                           <div key={index} className="p-4 rounded-xl bg-muted/30 border border-border">
@@ -2342,7 +2352,7 @@ export default function AdminPage() {
                                   });
                                 }}
                                 placeholder="Año"
-                                className="px-3 py-2 rounded-lg bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                className="px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                               />
                               <input
                                 type="text"
@@ -2359,7 +2369,7 @@ export default function AdminPage() {
                                   });
                                 }}
                                 placeholder="Título"
-                                className="sm:col-span-2 px-3 py-2 rounded-lg bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                className="sm:col-span-2 px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                               />
                             </div>
                             <div className="flex gap-2">
@@ -2378,7 +2388,7 @@ export default function AdminPage() {
                                 }}
                                 placeholder="Descripción"
                                 rows={2}
-                                className="flex-1 px-3 py-2 rounded-lg bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light resize-none"
+                                className="flex-1 px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
                               />
                               <button
                                 onClick={() => {
@@ -2432,7 +2442,7 @@ export default function AdminPage() {
                   exit={{ opacity: 0, y: -20 }}
                 >
                   <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-2xl font-bold text-ivory">Editar El Centro</h1>
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Editar El Centro</h1>
                     <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveCentro}>
                       Guardar Cambios
                     </PremiumButton>
@@ -2441,10 +2451,10 @@ export default function AdminPage() {
                   <div className="space-y-6">
                     {/* Basic Info */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Información del Centro</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Información del Centro</h2>
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Título</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título</label>
                           <input
                             type="text"
                             value={editedContent?.centro?.title || ''}
@@ -2457,11 +2467,11 @@ export default function AdminPage() {
                                 } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Subtítulo</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtítulo</label>
                           <input
                             type="text"
                             value={editedContent?.centro?.subtitle || ''}
@@ -2474,11 +2484,11 @@ export default function AdminPage() {
                                 } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Descripción</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Descripción</label>
                           <textarea
                             value={editedContent?.centro?.description || ''}
                             onChange={(e) => {
@@ -2491,7 +2501,7 @@ export default function AdminPage() {
                               });
                             }}
                             rows={3}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light resize-none"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
                           />
                         </div>
                       </div>
@@ -2499,10 +2509,10 @@ export default function AdminPage() {
 
                     {/* Schedule */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Horario</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Horario</h2>
                       <div className="grid sm:grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Lunes a Viernes</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Lunes a Viernes</label>
                           <input
                             type="text"
                             value={editedContent?.centro?.schedule?.weekdays || ''}
@@ -2518,12 +2528,12 @@ export default function AdminPage() {
                                 } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                             placeholder="7:00 - 21:00"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Sábados</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Sábados</label>
                           <input
                             type="text"
                             value={editedContent?.centro?.schedule?.saturday || ''}
@@ -2539,7 +2549,7 @@ export default function AdminPage() {
                                 } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                             placeholder="9:00 - 14:00"
                           />
                         </div>
@@ -2548,7 +2558,7 @@ export default function AdminPage() {
 
                     {/* Features */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Características</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Características</h2>
                       <div className="space-y-4">
                         {(editedContent?.centro?.features || []).map((feature, index) => (
                           <div key={index} className="p-4 rounded-xl bg-muted/30 border border-border">
@@ -2568,7 +2578,7 @@ export default function AdminPage() {
                                   });
                                 }}
                                 placeholder="Icono (Sparkles, Shield, Zap, Users)"
-                                className="px-3 py-2 rounded-lg bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                className="px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                               />
                               <input
                                 type="text"
@@ -2585,7 +2595,7 @@ export default function AdminPage() {
                                   });
                                 }}
                                 placeholder="Título"
-                                className="px-3 py-2 rounded-lg bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                className="px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                               />
                               <div className="flex gap-2">
                                 <input
@@ -2603,7 +2613,7 @@ export default function AdminPage() {
                                     });
                                   }}
                                   placeholder="Descripción"
-                                  className="flex-1 px-3 py-2 rounded-lg bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                  className="flex-1 px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                                 />
                                 <button
                                   onClick={() => {
@@ -2658,7 +2668,7 @@ export default function AdminPage() {
                   exit={{ opacity: 0, y: -20 }}
                 >
                   <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-2xl font-bold text-ivory">CMS Galería</h1>
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">CMS Galería</h1>
                     <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveGaleria}>
                       Guardar Cambios
                     </PremiumButton>
@@ -2667,35 +2677,35 @@ export default function AdminPage() {
                   <div className="space-y-6">
                     {/* Imágenes - informativo */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-3 flex items-center gap-2">
-                        <ImageIcon className="w-5 h-5 text-accent" />
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-3 flex items-center gap-2">
+                        <ImageIcon className="w-5 h-5 text-[var(--color-accent-val)]" />
                         Gestión de Imágenes
                       </h2>
-                      <p className="text-muted-foreground text-sm">
+                      <p className="text-[var(--color-text-secondary)] text-sm">
                         La gestión de imágenes estará disponible próximamente mediante Firebase Storage.
                       </p>
                     </GlassCard>
 
                     {/* Hero */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Hero de Galería</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Hero de Galería</h2>
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Título</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título</label>
                           <input
                             type="text"
                             value={editedContent?.galeria?.heroTitle || ''}
                             onChange={(e) => setEditedContent((prev) => prev ? { ...prev, galeria: { ...prev.galeria, heroTitle: e.target.value } } as CMSContent : prev)}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Subtítulo</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtítulo</label>
                           <input
                             type="text"
                             value={editedContent?.galeria?.heroSubtitle || ''}
                             onChange={(e) => setEditedContent((prev) => prev ? { ...prev, galeria: { ...prev.galeria, heroSubtitle: e.target.value } } as CMSContent : prev)}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           />
                         </div>
                       </div>
@@ -2704,7 +2714,7 @@ export default function AdminPage() {
                     {/* Estadísticas */}
                     <GlassCard className="p-6">
                       <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-lg font-semibold text-ivory">Estadísticas</h2>
+                        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Estadísticas</h2>
                         <PremiumButton
                           variant="outline"
                           size="sm"
@@ -2721,7 +2731,7 @@ export default function AdminPage() {
                         {(editedContent?.galeria?.stats || []).map((stat, i) => (
                           <div key={i} className="grid grid-cols-3 gap-3 items-end">
                             <div>
-                              <label className="block text-xs text-muted-foreground mb-1">Valor</label>
+                              <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Valor</label>
                               <input
                                 type="number"
                                 value={stat.value}
@@ -2731,11 +2741,11 @@ export default function AdminPage() {
                                   stats[i] = { ...stats[i], value: Number(e.target.value) };
                                   return { ...prev, galeria: { ...prev.galeria, stats } } as CMSContent;
                                 })}
-                                className="w-full px-3 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                               />
                             </div>
                             <div>
-                              <label className="block text-xs text-muted-foreground mb-1">Sufijo (ej: +, %)</label>
+                              <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Sufijo (ej: +, %)</label>
                               <input
                                 type="text"
                                 value={stat.suffix}
@@ -2745,12 +2755,12 @@ export default function AdminPage() {
                                   stats[i] = { ...stats[i], suffix: e.target.value };
                                   return { ...prev, galeria: { ...prev.galeria, stats } } as CMSContent;
                                 })}
-                                className="w-full px-3 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                               />
                             </div>
                             <div className="flex gap-2">
                               <div className="flex-1">
-                                <label className="block text-xs text-muted-foreground mb-1">Etiqueta</label>
+                                <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Etiqueta</label>
                                 <input
                                   type="text"
                                   value={stat.label}
@@ -2760,7 +2770,7 @@ export default function AdminPage() {
                                     stats[i] = { ...stats[i], label: e.target.value };
                                     return { ...prev, galeria: { ...prev.galeria, stats } } as CMSContent;
                                   })}
-                                  className="w-full px-3 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                  className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                                 />
                               </div>
                               <button
@@ -2782,7 +2792,7 @@ export default function AdminPage() {
                     {/* Transformaciones */}
                     <GlassCard className="p-6">
                       <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-lg font-semibold text-ivory">Transformaciones</h2>
+                        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Transformaciones</h2>
                         <PremiumButton
                           variant="outline"
                           size="sm"
@@ -2799,7 +2809,7 @@ export default function AdminPage() {
                         {(editedContent?.galeria?.transformaciones || []).map((t, i) => (
                           <div key={i} className="p-4 rounded-xl border border-border bg-muted/10">
                             <div className="flex items-center justify-between mb-3">
-                              <span className="text-sm font-medium text-ivory">Caso {i + 1}</span>
+                              <span className="text-sm font-medium text-[var(--color-text-primary)]">Caso {i + 1}</span>
                               <button
                                 onClick={() => setEditedContent((prev) => {
                                   if (!prev?.galeria) return prev;
@@ -2814,7 +2824,7 @@ export default function AdminPage() {
                             <div className="grid sm:grid-cols-3 gap-3">
                               {(['name', 'periodo', 'resultado'] as const).map((field) => (
                                 <div key={field}>
-                                  <label className="block text-xs text-muted-foreground mb-1 capitalize">{field === 'name' ? 'Nombre' : field === 'periodo' ? 'Período' : 'Resultado'}</label>
+                                  <label className="block text-xs text-[var(--color-text-secondary)] mb-1 capitalize">{field === 'name' ? 'Nombre' : field === 'periodo' ? 'Período' : 'Resultado'}</label>
                                   <input
                                     type="text"
                                     value={t[field]}
@@ -2824,7 +2834,7 @@ export default function AdminPage() {
                                       transformaciones[i] = { ...transformaciones[i], [field]: e.target.value };
                                       return { ...prev, galeria: { ...prev.galeria, transformaciones } } as CMSContent;
                                     })}
-                                    className="w-full px-3 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                    className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                                   />
                                 </div>
                               ))}
@@ -2837,7 +2847,7 @@ export default function AdminPage() {
                     {/* Resultados */}
                     <GlassCard className="p-6">
                       <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-lg font-semibold text-ivory">Resultados (Flip Cards)</h2>
+                        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Resultados (Flip Cards)</h2>
                         <PremiumButton
                           variant="outline"
                           size="sm"
@@ -2854,7 +2864,7 @@ export default function AdminPage() {
                         {(editedContent?.galeria?.resultados || []).map((r, i) => (
                           <div key={i} className="p-4 rounded-xl border border-border bg-muted/10">
                             <div className="flex items-center justify-between mb-3">
-                              <span className="text-sm font-medium text-ivory">Resultado {i + 1}</span>
+                              <span className="text-sm font-medium text-[var(--color-text-primary)]">Resultado {i + 1}</span>
                               <button
                                 onClick={() => setEditedContent((prev) => {
                                   if (!prev?.galeria) return prev;
@@ -2869,7 +2879,7 @@ export default function AdminPage() {
                             <div className="grid sm:grid-cols-2 gap-3 mb-3">
                               {([['name', 'Nombre'], ['stat', 'Stat principal'], ['statLabel', 'Subtítulo stat'], ['tag', 'Categoría']] as [keyof typeof r, string][]).map(([field, label]) => (
                                 <div key={field}>
-                                  <label className="block text-xs text-muted-foreground mb-1">{label}</label>
+                                  <label className="block text-xs text-[var(--color-text-secondary)] mb-1">{label}</label>
                                   <input
                                     type="text"
                                     value={r[field]}
@@ -2879,7 +2889,7 @@ export default function AdminPage() {
                                       resultados[i] = { ...resultados[i], [field]: e.target.value };
                                       return { ...prev, galeria: { ...prev.galeria, resultados } } as CMSContent;
                                     })}
-                                    className="w-full px-3 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                    className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                                   />
                                 </div>
                               ))}
@@ -2887,7 +2897,7 @@ export default function AdminPage() {
                             <div className="space-y-3">
                               {([['story', 'Testimonio (cita)'], ['detail', 'Detalle del logro']] as [keyof typeof r, string][]).map(([field, label]) => (
                                 <div key={field}>
-                                  <label className="block text-xs text-muted-foreground mb-1">{label}</label>
+                                  <label className="block text-xs text-[var(--color-text-secondary)] mb-1">{label}</label>
                                   <textarea
                                     value={r[field]}
                                     onChange={(e) => setEditedContent((prev) => {
@@ -2897,7 +2907,7 @@ export default function AdminPage() {
                                       return { ...prev, galeria: { ...prev.galeria, resultados } } as CMSContent;
                                     })}
                                     rows={2}
-                                    className="w-full px-3 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light resize-none"
+                                    className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
                                   />
                                 </div>
                               ))}
@@ -2921,7 +2931,7 @@ export default function AdminPage() {
                   exit={{ opacity: 0, y: -20 }}
                 >
                   <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-2xl font-bold text-ivory">Contacto & Hero</h1>
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Contacto & Hero</h1>
                     <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveCMS}>
                       Guardar Cambios
                     </PremiumButton>
@@ -2930,18 +2940,18 @@ export default function AdminPage() {
                   <div className="space-y-6">
                     {/* Hero */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4 flex items-center gap-2">
-                        <ImageIcon className="w-5 h-5 text-accent" />
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">
+                        <ImageIcon className="w-5 h-5 text-[var(--color-accent-val)]" />
                         Sección Hero
                       </h2>
                       <div className="space-y-4">
                         <div className="mb-6">
-                          <label className="block text-sm text-muted-foreground mb-2">Imagen de Fondo (Hero)</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Imagen de Fondo (Hero)</label>
                           {isValidImageUrl(editedContent?.heroImage) ? (
                             <img src={editedContent!.heroImage} alt="Hero" className="w-full max-w-sm h-32 object-cover rounded-xl mb-3 border border-border" />
                           ) : (
                             <div className="w-full max-w-sm h-32 rounded-xl mb-3 border border-border bg-muted/30 flex items-center justify-center">
-                              <ImageIcon className="w-8 h-8 text-muted-foreground opacity-50" />
+                              <ImageIcon className="w-8 h-8 text-[var(--color-text-secondary)] opacity-50" />
                             </div>
                           )}
                           <PremiumButton
@@ -2958,7 +2968,7 @@ export default function AdminPage() {
                           </PremiumButton>
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Título Principal</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título Principal</label>
                           <input
                             type="text"
                             value={editedContent?.heroTitle || ''}
@@ -2968,11 +2978,11 @@ export default function AdminPage() {
                                 return { ...prev, heroTitle: e.target.value } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Subtítulo</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtítulo</label>
                           <textarea
                             value={editedContent?.heroSubtitle || ''}
                             onChange={(e) => {
@@ -2982,11 +2992,11 @@ export default function AdminPage() {
                               });
                             }}
                             rows={3}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light resize-none"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Texto Botón CTA</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto Botón CTA</label>
                           <input
                             type="text"
                             value={editedContent?.heroCTA || ''}
@@ -2996,7 +3006,7 @@ export default function AdminPage() {
                                 return { ...prev, heroCTA: e.target.value } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           />
                         </div>
                       </div>
@@ -3004,18 +3014,18 @@ export default function AdminPage() {
 
                     {/* About Section */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4 flex items-center gap-2">
-                        <ImageIcon className="w-5 h-5 text-accent" />
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">
+                        <ImageIcon className="w-5 h-5 text-[var(--color-accent-val)]" />
                         Sección Sobre Nosotros
                       </h2>
                       <div className="space-y-4">
                         <div className="mb-6">
-                          <label className="block text-sm text-muted-foreground mb-2">Imagen Representativa</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Imagen Representativa</label>
                           {isValidImageUrl(editedContent?.aboutImage) ? (
                             <img src={editedContent!.aboutImage} alt="About" className="w-full max-w-sm h-32 object-cover rounded-xl mb-3 border border-border" />
                           ) : (
                             <div className="w-full max-w-sm h-32 rounded-xl mb-3 border border-border bg-muted/30 flex items-center justify-center">
-                              <ImageIcon className="w-8 h-8 text-muted-foreground opacity-50" />
+                              <ImageIcon className="w-8 h-8 text-[var(--color-text-secondary)] opacity-50" />
                             </div>
                           )}
                           <PremiumButton
@@ -3032,7 +3042,7 @@ export default function AdminPage() {
                           </PremiumButton>
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Título Sobre Nosotros</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título Sobre Nosotros</label>
                           <input
                             type="text"
                             value={editedContent?.aboutTitle || ''}
@@ -3042,11 +3052,11 @@ export default function AdminPage() {
                                 return { ...prev, aboutTitle: e.target.value } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Texto Principal</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto Principal</label>
                           <textarea
                             value={editedContent?.aboutText || ''}
                             onChange={(e) => {
@@ -3056,7 +3066,7 @@ export default function AdminPage() {
                               });
                             }}
                             rows={4}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light resize-none"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
                           />
                         </div>
                       </div>
@@ -3064,10 +3074,10 @@ export default function AdminPage() {
 
                     {/* Services Section */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Sección Servicios</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Sección Servicios</h2>
                       <div className="grid sm:grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Título</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título</label>
                           <input
                             type="text"
                             value={editedContent?.servicesTitle || ''}
@@ -3077,11 +3087,11 @@ export default function AdminPage() {
                                 return { ...prev, servicesTitle: e.target.value } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Subtítulo</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtítulo</label>
                           <input
                             type="text"
                             value={editedContent?.servicesSubtitle || ''}
@@ -3091,7 +3101,7 @@ export default function AdminPage() {
                                 return { ...prev, servicesSubtitle: e.target.value } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           />
                         </div>
                       </div>
@@ -3099,10 +3109,10 @@ export default function AdminPage() {
 
                     {/* CTA Section */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Sección CTA Final</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Sección CTA Final</h2>
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Título</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título</label>
                           <input
                             type="text"
                             value={editedContent?.ctaTitle || ''}
@@ -3112,11 +3122,11 @@ export default function AdminPage() {
                                 return { ...prev, ctaTitle: e.target.value } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Texto</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto</label>
                           <textarea
                             value={editedContent?.ctaSubtitle || ''}
                             onChange={(e) => {
@@ -3126,7 +3136,7 @@ export default function AdminPage() {
                               });
                             }}
                             rows={3}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light resize-none"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
                           />
                         </div>
                       </div>
@@ -3134,11 +3144,11 @@ export default function AdminPage() {
 
                     {/* Contact Information */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Información de Contacto</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Información de Contacto</h2>
                       <div className="space-y-4">
                         <div className="grid sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-sm text-muted-foreground mb-2 flex items-center gap-2">
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2 flex items-center gap-2">
                               <Phone className="w-4 h-4" /> Teléfono
                             </label>
                             <input
@@ -3153,11 +3163,11 @@ export default function AdminPage() {
                                   } as CMSContent;
                                 });
                               }}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                             />
                           </div>
                           <div>
-                            <label className="block text-sm text-muted-foreground mb-2 flex items-center gap-2">
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2 flex items-center gap-2">
                               <Mail className="w-4 h-4" /> Email
                             </label>
                             <input
@@ -3172,12 +3182,12 @@ export default function AdminPage() {
                                   } as CMSContent;
                                 });
                               }}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                             />
                           </div>
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2 flex items-center gap-2">
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2 flex items-center gap-2">
                             <MapPin className="w-4 h-4" /> Dirección
                           </label>
                           <textarea
@@ -3192,7 +3202,7 @@ export default function AdminPage() {
                               });
                             }}
                             rows={2}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light resize-none"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
                           />
                         </div>
                       </div>
@@ -3200,10 +3210,10 @@ export default function AdminPage() {
 
                     {/* Testimonials & Footer */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Testimonios y Footer</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Testimonios y Footer</h2>
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Título de la sección Testimonios</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título de la sección Testimonios</label>
                           <input
                             type="text"
                             value={editedContent?.testimonialsTitle || ''}
@@ -3213,11 +3223,11 @@ export default function AdminPage() {
                                 return { ...prev, testimonialsTitle: e.target.value } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Texto del footer</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto del footer</label>
                           <input
                             type="text"
                             value={editedContent?.footerText || ''}
@@ -3227,7 +3237,7 @@ export default function AdminPage() {
                                 return { ...prev, footerText: e.target.value } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           />
                         </div>
                       </div>
@@ -3235,10 +3245,10 @@ export default function AdminPage() {
 
                     {/* Social Media */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Redes Sociales</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Redes Sociales</h2>
                       <div className="grid sm:grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Instagram (URL)</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Instagram (URL)</label>
                           <input
                             type="url"
                             value={editedContent?.socialInstagram || ''}
@@ -3251,12 +3261,12 @@ export default function AdminPage() {
                                 } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                             placeholder="https://instagram.com/tu-usuario"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">WhatsApp (Número)</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">WhatsApp (Número)</label>
                           <input
                             type="text"
                             value={editedContent?.whatsapp || ''}
@@ -3269,7 +3279,7 @@ export default function AdminPage() {
                                 } as CMSContent;
                               });
                             }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                             placeholder="+34600000000"
                           />
                         </div>
@@ -3290,8 +3300,8 @@ export default function AdminPage() {
                   exit={{ opacity: 0, y: -20 }}
                 >
                   <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-2xl font-bold text-ivory">Gestión de Disponibilidad</h1>
-                    <p className="text-sm text-muted-foreground">
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Gestión de Disponibilidad</h1>
+                    <p className="text-sm text-[var(--color-text-secondary)]">
                       {blockedSlots.length} franja{blockedSlots.length !== 1 ? 's' : ''} bloqueada{blockedSlots.length !== 1 ? 's' : ''}
                     </p>
                   </div>
@@ -3313,14 +3323,14 @@ export default function AdminPage() {
                           className={cn(
                             'w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-200',
                             (calYear > nowCal.getFullYear() || (calYear === nowCal.getFullYear() && calMonth > nowCal.getMonth() + 1))
-                              ? 'bg-emerald/10 text-ivory hover:bg-emerald/20 hover:shadow-emerald-glow'
-                              : 'text-muted-foreground/30 cursor-not-allowed'
+                              ? 'bg-[var(--color-accent-dim)] text-[var(--color-text-primary)] hover:bg-[var(--color-accent-dim)] hover:shadow-emerald-glow'
+                              : 'text-[var(--color-text-secondary)]/30 cursor-not-allowed'
                           )}
                         >
                           <ChevronLeft className="w-5 h-5" />
                         </button>
 
-                        <h3 className="text-lg font-bold text-ivory tracking-wide">
+                        <h3 className="text-lg font-bold text-[var(--color-text-primary)] tracking-wide">
                           {['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][calMonth - 1]} {calYear}
                         </h3>
 
@@ -3329,7 +3339,7 @@ export default function AdminPage() {
                             if (calMonth === 12) { setCalMonth(1); setCalYear(calYear + 1); }
                             else { setCalMonth(calMonth + 1); }
                           }}
-                          className="w-9 h-9 rounded-xl flex items-center justify-center bg-emerald/10 text-ivory hover:bg-emerald/20 hover:shadow-emerald-glow transition-all duration-200"
+                          className="w-9 h-9 rounded-xl flex items-center justify-center bg-[var(--color-accent-dim)] text-[var(--color-text-primary)] hover:bg-[var(--color-accent-dim)] hover:shadow-emerald-glow transition-all duration-200"
                         >
                           <ChevronRight className="w-5 h-5" />
                         </button>
@@ -3338,7 +3348,7 @@ export default function AdminPage() {
                       {/* Day names */}
                       <div className="grid grid-cols-7 gap-1 mb-2">
                         {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map((name) => (
-                          <div key={name} className="text-center text-xs font-semibold text-muted-foreground py-2 uppercase tracking-wider">
+                          <div key={name} className="text-center text-xs font-semibold text-[var(--color-text-secondary)] py-2 uppercase tracking-wider">
                             {name}
                           </div>
                         ))}
@@ -3382,10 +3392,10 @@ export default function AdminPage() {
                                   }}
                                   className={cn(
                                     'aspect-square rounded-xl flex flex-col items-center justify-center relative transition-all duration-200 text-sm font-medium',
-                                    isPast && 'opacity-30 cursor-not-allowed text-muted-foreground',
-                                    isToday && !isSelected && !isPast && 'ring-1 ring-accent/50',
-                                    isSelected && 'bg-emerald/30 border border-accent text-ivory shadow-emerald-glow scale-105',
-                                    !isPast && !isSelected && 'text-ivory hover:bg-emerald/15 hover:scale-105 cursor-pointer',
+                                    isPast && 'opacity-30 cursor-not-allowed text-[var(--color-text-secondary)]',
+                                    isToday && !isSelected && !isPast && 'ring-1 ring-[var(--color-accent-border)]/50',
+                                    isSelected && 'bg-[var(--color-accent-dim)] border border-accent text-[var(--color-text-primary)] shadow-emerald-glow scale-105',
+                                    !isPast && !isSelected && 'text-[var(--color-text-primary)] hover:bg-[var(--color-accent-dim)] hover:scale-105 cursor-pointer',
                                   )}
                                 >
                                   <span>{day}</span>
@@ -3406,9 +3416,9 @@ export default function AdminPage() {
                       })()}
 
                       {/* Legend */}
-                      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-5 pt-4 border-t border-border/50 text-xs text-muted-foreground">
+                      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-5 pt-4 border-t border-border/50 text-xs text-[var(--color-text-secondary)]">
                         <span className="flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full bg-emerald/40 border border-emerald/60" />
+                          <span className="w-2.5 h-2.5 rounded-full bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)]" />
                           Sin bloqueos
                         </span>
                         <span className="flex items-center gap-1.5">
@@ -3447,8 +3457,8 @@ export default function AdminPage() {
                               <>
                                 <div className="flex items-center justify-between mb-5">
                                   <div className="flex items-center gap-3">
-                                    <Clock className="w-5 h-5 text-accent" />
-                                    <h4 className="font-bold text-ivory">
+                                    <Clock className="w-5 h-5 text-[var(--color-accent-val)]" />
+                                    <h4 className="font-bold text-[var(--color-text-primary)]">
                                       {new Date(calYear, calMonth - 1, calSelectedDay).toLocaleDateString('es-ES', {
                                         weekday: 'long',
                                         day: 'numeric',
@@ -3475,9 +3485,9 @@ export default function AdminPage() {
                                     className={cn(
                                       'px-3 py-1.5 rounded-lg text-xs font-medium transition-all border',
                                       allSlotsBlocked
-                                        ? 'opacity-40 cursor-not-allowed border-border/30 text-muted-foreground'
+                                        ? 'opacity-40 cursor-not-allowed border-border/30 text-[var(--color-text-secondary)]'
                                         : allPendingOrBlocked
-                                          ? 'bg-muted/20 border-border/50 text-muted-foreground hover:bg-muted/30'
+                                          ? 'bg-muted/20 border-border/50 text-[var(--color-text-secondary)] hover:bg-muted/30'
                                           : 'bg-red-500/15 border-red-500/30 text-red-400 hover:bg-red-500/25'
                                     )}
                                   >
@@ -3487,7 +3497,7 @@ export default function AdminPage() {
 
                                 {/* Tip */}
                                 {pendingBlocks.size === 0 && !allSlotsBlocked && (
-                                  <p className="text-xs text-muted-foreground mb-4 flex items-center gap-1.5">
+                                  <p className="text-xs text-[var(--color-text-secondary)] mb-4 flex items-center gap-1.5">
                                     <AlertCircle className="w-3.5 h-3.5" />
                                     Haz clic en una franja para seleccionarla. Haz clic en dos para seleccionar el rango.
                                   </p>
@@ -3550,7 +3560,7 @@ export default function AdminPage() {
                                           // Range start highlight
                                           !isBlocked && isRangeStart && 'bg-orange-500/30 border-orange-400/60 text-orange-200 shadow-[0_0_14px_rgba(251,146,60,0.25)] ring-2 ring-orange-400/40',
                                           // Available (not blocked, not pending)
-                                          !isBlocked && !isPending && 'bg-emerald/5 border-border/60 text-ivory hover:bg-emerald/15 hover:border-accent/50 hover:shadow-emerald-glow',
+                                          !isBlocked && !isPending && 'bg-[var(--color-accent-dim)] border-border/60 text-[var(--color-text-primary)] hover:bg-[var(--color-accent-dim)] hover:border-accent/50 hover:shadow-emerald-glow',
                                         )}
                                       >
                                         <span className="block">{time}</span>
@@ -3585,13 +3595,13 @@ export default function AdminPage() {
                                     </div>
 
                                     <div>
-                                      <label className="block text-sm text-muted-foreground mb-2">Motivo (opcional)</label>
+                                      <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Motivo (opcional)</label>
                                       <input
                                         type="text"
                                         value={blockReasonInput}
                                         onChange={(e) => setBlockReasonInput(e.target.value)}
                                         placeholder="Ej: Vacaciones, evento privado..."
-                                        className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                        className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                                       />
                                     </div>
 
@@ -3604,8 +3614,8 @@ export default function AdminPage() {
                                         className="w-4 h-4 rounded border-border accent-red-500"
                                       />
                                       <div>
-                                        <span className="text-sm text-ivory font-medium">Eliminar citas existentes al bloquear</span>
-                                        <p className="text-xs text-muted-foreground mt-0.5">
+                                        <span className="text-sm text-[var(--color-text-primary)] font-medium">Eliminar citas existentes al bloquear</span>
+                                        <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
                                           Si está activo, las citas (pendientes y aprobadas) en estas franjas se eliminarán permanentemente.
                                         </p>
                                       </div>
@@ -3721,7 +3731,7 @@ export default function AdminPage() {
                                           setPendingBlocks(new Set());
                                           setRangeStart(null);
                                         }}
-                                        className="text-muted-foreground"
+                                        className="text-[var(--color-text-secondary)]"
                                       >
                                         Cancelar
                                       </PremiumButton>
@@ -3740,9 +3750,9 @@ export default function AdminPage() {
                   <div className="space-y-3 mt-6">
                     {blockedSlots.length === 0 ? (
                       <GlassCard className="p-12 text-center">
-                        <CalendarOff className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-                        <h3 className="text-lg font-semibold text-ivory mb-2">Sin franjas bloqueadas</h3>
-                        <p className="text-muted-foreground">
+                        <CalendarOff className="w-16 h-16 mx-auto mb-4 text-[var(--color-text-secondary)] opacity-50" />
+                        <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">Sin franjas bloqueadas</h3>
+                        <p className="text-[var(--color-text-secondary)]">
                           Todas las franjas horarias están disponibles para reservar.
                         </p>
                       </GlassCard>
@@ -3766,15 +3776,15 @@ export default function AdminPage() {
                                     'w-10 h-10 rounded-lg flex items-center justify-center',
                                     isPast ? 'bg-muted/30' : 'bg-red-500/20'
                                   )}>
-                                    <Lock className={cn('w-5 h-5', isPast ? 'text-muted-foreground' : 'text-red-400')} />
+                                    <Lock className={cn('w-5 h-5', isPast ? 'text-[var(--color-text-secondary)]' : 'text-red-400')} />
                                   </div>
                                   <div>
-                                    <p className="text-ivory font-medium">
+                                    <p className="text-[var(--color-text-primary)] font-medium">
                                       {slotDate.toLocaleDateString('es-ES', {
                                         weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
                                       })}
                                     </p>
-                                    <p className="text-xs text-muted-foreground">{slots.length} franja{slots.length !== 1 ? 's' : ''} bloqueada{slots.length !== 1 ? 's' : ''}</p>
+                                    <p className="text-xs text-[var(--color-text-secondary)]">{slots.length} franja{slots.length !== 1 ? 's' : ''} bloqueada{slots.length !== 1 ? 's' : ''}</p>
                                   </div>
                                 </div>
                                 <PremiumButton
@@ -3823,7 +3833,7 @@ export default function AdminPage() {
                                 ))}
                               </div>
                               {slots[0]?.reason && (
-                                <p className="text-xs text-muted-foreground mt-2">Motivo: {slots[0].reason}</p>
+                                <p className="text-xs text-[var(--color-text-secondary)] mt-2">Motivo: {slots[0].reason}</p>
                               )}
                             </GlassCard>
                           );
@@ -3845,20 +3855,20 @@ export default function AdminPage() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -20 }}
                 >
-                  <h1 className="text-2xl font-bold text-ivory mb-6">Configuración Global</h1>
+                  <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-6">Configuración Global</h1>
 
                   <div className="grid lg:grid-cols-2 gap-6">
                     {/* Config Form */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Horario y Duración de Sesiones</h2>
-                      <p className="text-sm text-muted-foreground mb-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Horario y Duración de Sesiones</h2>
+                      <p className="text-sm text-[var(--color-text-secondary)] mb-6">
                         Estos valores controlan las franjas horarias de todos los calendarios (portal de clientes y panel de administración).
                       </p>
 
                       <div className="space-y-5">
                         {/* Start Hour */}
                         <div>
-                          <label className="block text-sm font-medium text-ivory mb-1.5">Hora de Inicio</label>
+                          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Hora de Inicio</label>
                           <div className="flex items-center gap-3">
                             <input
                               type="number"
@@ -3866,15 +3876,15 @@ export default function AdminPage() {
                               max={23}
                               value={editConfig.startHour}
                               onChange={(e) => setEditConfig(prev => ({ ...prev, startHour: Math.max(0, Math.min(23, parseInt(e.target.value) || 0)) }))}
-                              className="w-24 px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-ivory focus:border-emerald/50 focus:outline-none"
+                              className="w-24 px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-[var(--color-text-primary)] focus:border-[var(--color-accent-val)] focus:outline-none"
                             />
-                            <span className="text-sm text-muted-foreground">:00 h</span>
+                            <span className="text-sm text-[var(--color-text-secondary)]">:00 h</span>
                           </div>
                         </div>
 
                         {/* End Hour */}
                         <div>
-                          <label className="block text-sm font-medium text-ivory mb-1.5">Hora de Fin</label>
+                          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Hora de Fin</label>
                           <div className="flex items-center gap-3">
                             <input
                               type="number"
@@ -3882,19 +3892,19 @@ export default function AdminPage() {
                               max={23}
                               value={editConfig.endHour}
                               onChange={(e) => setEditConfig(prev => ({ ...prev, endHour: Math.max(0, Math.min(23, parseInt(e.target.value) || 0)) }))}
-                              className="w-24 px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-ivory focus:border-emerald/50 focus:outline-none"
+                              className="w-24 px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-[var(--color-text-primary)] focus:border-[var(--color-accent-val)] focus:outline-none"
                             />
-                            <span className="text-sm text-muted-foreground">:00 h</span>
+                            <span className="text-sm text-[var(--color-text-secondary)]">:00 h</span>
                           </div>
                         </div>
 
                         {/* Session Duration */}
                         <div>
-                          <label className="block text-sm font-medium text-ivory mb-1.5">Duración de Sesión</label>
+                          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Duración de Sesión</label>
                           <select
                             value={editConfig.sessionDuration}
                             onChange={(e) => setEditConfig(prev => ({ ...prev, sessionDuration: parseInt(e.target.value) }))}
-                            className="w-48 px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-ivory focus:border-emerald/50 focus:outline-none"
+                            className="w-48 px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-[var(--color-text-primary)] focus:border-[var(--color-accent-val)] focus:outline-none"
                           >
                             <option value={30}>30 minutos</option>
                             <option value={45}>45 minutos</option>
@@ -3934,7 +3944,7 @@ export default function AdminPage() {
                               setSavingConfig(false);
                             }
                           }}
-                          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald to-accent text-obsidian font-semibold hover:shadow-lg hover:shadow-emerald/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[var(--color-accent-val)] to-emerald-bright text-[var(--color-bg-base)] font-semibold hover:shadow-lg hover:shadow-emerald/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                         >
                           {savingConfig ? (
                             <RefreshCw className="w-4 h-4 animate-spin" />
@@ -3948,7 +3958,7 @@ export default function AdminPage() {
                         {(editConfig.startHour !== siteConfig.startHour || editConfig.endHour !== siteConfig.endHour || editConfig.sessionDuration !== siteConfig.sessionDuration) && (
                           <button
                             onClick={() => setEditConfig({ ...siteConfig })}
-                            className="px-4 py-2.5 rounded-xl border border-white/10 text-muted-foreground hover:text-ivory hover:border-white/20 transition-colors text-sm"
+                            className="px-4 py-2.5 rounded-xl border border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-white/20 transition-colors text-sm"
                           >
                             Descartar cambios
                           </button>
@@ -3958,8 +3968,8 @@ export default function AdminPage() {
 
                     {/* Preview */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-ivory mb-4">Vista Previa de Franjas</h2>
-                      <p className="text-sm text-muted-foreground mb-4">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Vista Previa de Franjas</h2>
+                      <p className="text-sm text-[var(--color-text-secondary)] mb-4">
                         Estas son las franjas que se generarán con la configuración actual:
                       </p>
 
@@ -3969,28 +3979,28 @@ export default function AdminPage() {
                             {generateTimeSlots(editConfig).map((slot) => (
                               <span
                                 key={slot}
-                                className="px-3 py-1.5 rounded-lg bg-emerald/10 text-emerald border border-emerald/20 text-sm font-mono"
+                                className="px-3 py-1.5 rounded-lg bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] text-sm font-mono"
                               >
                                 {slot}
                               </span>
                             ))}
                           </div>
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xs text-[var(--color-text-secondary)]">
                             Total: {generateTimeSlots(editConfig).length} franjas &middot; Cada {editConfig.sessionDuration} min &middot; De {String(editConfig.startHour).padStart(2, '0')}:00 a {String(editConfig.endHour).padStart(2, '0')}:00
                           </p>
                         </>
                       ) : (
-                        <p className="text-sm text-muted-foreground italic">Corrige el horario para ver la vista previa.</p>
+                        <p className="text-sm text-[var(--color-text-secondary)] italic">Corrige el horario para ver la vista previa.</p>
                       )}
 
                       {/* Current saved config */}
                       <div className="mt-6 pt-4 border-t border-white/10">
-                        <h3 className="text-sm font-medium text-ivory mb-2">Configuración Guardada Actual</h3>
-                        <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted-foreground">
-                          <span>Inicio: <strong className="text-ivory">{String(siteConfig.startHour).padStart(2, '0')}:00</strong></span>
-                          <span>Fin: <strong className="text-ivory">{String(siteConfig.endHour).padStart(2, '0')}:00</strong></span>
-                          <span>Duración: <strong className="text-ivory">{siteConfig.sessionDuration} min</strong></span>
-                          <span>Franjas: <strong className="text-ivory">{timeSlots.length}</strong></span>
+                        <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-2">Configuración Guardada Actual</h3>
+                        <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-[var(--color-text-secondary)]">
+                          <span>Inicio: <strong className="text-[var(--color-text-primary)]">{String(siteConfig.startHour).padStart(2, '0')}:00</strong></span>
+                          <span>Fin: <strong className="text-[var(--color-text-primary)]">{String(siteConfig.endHour).padStart(2, '0')}:00</strong></span>
+                          <span>Duración: <strong className="text-[var(--color-text-primary)]">{siteConfig.sessionDuration} min</strong></span>
+                          <span>Franjas: <strong className="text-[var(--color-text-primary)]">{timeSlots.length}</strong></span>
                         </div>
                       </div>
                     </GlassCard>
@@ -3998,24 +4008,24 @@ export default function AdminPage() {
                     {/* Configuración de Bonos */}
                     <GlassCard className="p-6 lg:col-span-2">
                       <div className="flex items-center gap-3 mb-4">
-                        <Ticket className="w-5 h-5 text-emerald" />
-                        <h2 className="text-lg font-semibold text-ivory">Configuración de Bonos</h2>
+                        <Ticket className="w-5 h-5 text-[var(--color-accent-val)]" />
+                        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Configuración de Bonos</h2>
                       </div>
-                      <p className="text-sm text-muted-foreground mb-6">
+                      <p className="text-sm text-[var(--color-text-secondary)] mb-6">
                         Define la duración de validez para todos los bonos asignados. Al cambiar este valor se recalculará la fecha de expiración de todos los bonos activos.
                       </p>
 
                       <div>
-                        <label className="block text-sm font-medium text-ivory mb-1.5">Duración de Expiración</label>
+                        <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Duración de Expiración</label>
                         <div className="flex items-center gap-3">
                           <input
                             type="number"
                             min={1}
                             value={editBonoConfig}
                             onChange={(e) => setEditBonoConfig(Math.max(1, parseInt(e.target.value) || 1))}
-                            className="w-24 px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-ivory focus:border-emerald/50 focus:outline-none"
+                            className="w-24 px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-[var(--color-text-primary)] focus:border-[var(--color-accent-val)] focus:outline-none"
                           />
-                          <span className="text-sm text-muted-foreground">mes(es)</span>
+                          <span className="text-sm text-[var(--color-text-secondary)]">mes(es)</span>
                         </div>
                       </div>
 
@@ -4045,7 +4055,7 @@ export default function AdminPage() {
                               setSavingBonoConfig(false);
                             }
                           }}
-                          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald to-accent text-obsidian font-semibold hover:shadow-lg hover:shadow-emerald/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[var(--color-accent-val)] to-emerald-bright text-[var(--color-bg-base)] font-semibold hover:shadow-lg hover:shadow-emerald/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                         >
                           {savingBonoConfig ? (
                             <RefreshCw className="w-4 h-4 animate-spin" />
@@ -4058,7 +4068,7 @@ export default function AdminPage() {
                         {editBonoConfig !== (siteConfig.bonoExpirationMonths || 1) && (
                           <button
                             onClick={() => setEditBonoConfig(siteConfig.bonoExpirationMonths || 1)}
-                            className="px-4 py-2.5 rounded-xl border border-white/10 text-muted-foreground hover:text-ivory hover:border-white/20 transition-colors text-sm"
+                            className="px-4 py-2.5 rounded-xl border border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-white/20 transition-colors text-sm"
                           >
                             Descartar cambios
                           </button>
@@ -4067,9 +4077,9 @@ export default function AdminPage() {
 
                       {/* Current saved bono config */}
                       <div className="mt-6 pt-4 border-t border-white/10">
-                        <h3 className="text-sm font-medium text-ivory mb-2">Configuración Actual</h3>
-                        <div className="text-sm text-muted-foreground">
-                          Expiración: <strong className="text-ivory">{siteConfig.bonoExpirationMonths || 1} mes(es)</strong>
+                        <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-2">Configuración Actual</h3>
+                        <div className="text-sm text-[var(--color-text-secondary)]">
+                          Expiración: <strong className="text-[var(--color-text-primary)]">{siteConfig.bonoExpirationMonths || 1} mes(es)</strong>
                         </div>
                       </div>
                     </GlassCard>
@@ -4112,9 +4122,9 @@ export default function AdminPage() {
                     className="w-full max-w-lg"
                   >
                     <GlassCard className="p-6">
-                      <h2 className="text-xl font-bold text-ivory mb-1">Asignar Bono</h2>
-                      <p className="text-sm text-muted-foreground mb-6">
-                        Asigna un bono a <strong className="text-ivory">{assignBonoClient.name}</strong>
+                      <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-1">Asignar Bono</h2>
+                      <p className="text-sm text-[var(--color-text-secondary)] mb-6">
+                        Asigna un bono a <strong className="text-[var(--color-text-primary)]">{assignBonoClient.name}</strong>
                       </p>
 
                       {/* Warning if client already has active bono */}
@@ -4128,11 +4138,11 @@ export default function AdminPage() {
                       <div className="space-y-5">
                         {/* Bono Type */}
                         <div>
-                          <label className="block text-sm font-medium text-ivory mb-1.5">Tipo de Bono</label>
+                          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Tipo de Bono</label>
                           <select
                             value={assignBonoType}
                             onChange={(e) => setAssignBonoType(e.target.value as 'sesion_personal' | 'bono_mensual')}
-                            className="w-full px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-ivory focus:border-emerald/50 focus:outline-none"
+                            className="w-full px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-[var(--color-text-primary)] focus:border-[var(--color-accent-val)] focus:outline-none"
                           >
                             <option value="sesion_personal">Sesión de Entrenamiento Personal (1 sesión)</option>
                             <option value="bono_mensual">Bono Mensual de Entrenamiento</option>
@@ -4142,15 +4152,15 @@ export default function AdminPage() {
                         {/* Modalidad (only for bono_mensual) */}
                         {assignBonoType === 'bono_mensual' && (
                           <div>
-                            <label className="block text-sm font-medium text-ivory mb-1.5">Modalidad</label>
+                            <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Modalidad</label>
                             <div className="flex gap-3">
                               <button
                                 onClick={() => setAssignBonoModalidad('1h')}
                                 className={cn(
                                   "flex-1 px-4 py-3 rounded-xl border text-sm font-medium transition-all",
                                   assignBonoModalidad === '1h'
-                                    ? "bg-emerald/10 border-emerald/30 text-emerald"
-                                    : "bg-muted/20 border-white/10 text-muted-foreground hover:text-ivory"
+                                    ? "bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)]"
+                                    : "bg-muted/20 border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
                                 )}
                               >
                                 4 sesiones × 1h/semana
@@ -4160,8 +4170,8 @@ export default function AdminPage() {
                                 className={cn(
                                   "flex-1 px-4 py-3 rounded-xl border text-sm font-medium transition-all",
                                   assignBonoModalidad === '30min'
-                                    ? "bg-emerald/10 border-emerald/30 text-emerald"
-                                    : "bg-muted/20 border-white/10 text-muted-foreground hover:text-ivory"
+                                    ? "bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)]"
+                                    : "bg-muted/20 border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
                                 )}
                               >
                                 8 sesiones × 30min
@@ -4172,27 +4182,27 @@ export default function AdminPage() {
 
                         {/* Summary */}
                         <div className="p-4 rounded-xl bg-muted/10 border border-white/5">
-                          <h3 className="text-sm font-medium text-ivory mb-3">Resumen del Bono</h3>
+                          <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-3">Resumen del Bono</h3>
                           <div className="space-y-2 text-sm">
                             <div className="flex justify-between">
-                              <span className="text-muted-foreground">Cliente</span>
-                              <span className="text-ivory">{assignBonoClient.name}</span>
+                              <span className="text-[var(--color-text-secondary)]">Cliente</span>
+                              <span className="text-[var(--color-text-primary)]">{assignBonoClient.name}</span>
                             </div>
                             <div className="flex justify-between">
-                              <span className="text-muted-foreground">Tipo</span>
-                              <span className="text-ivory">
+                              <span className="text-[var(--color-text-secondary)]">Tipo</span>
+                              <span className="text-[var(--color-text-primary)]">
                                 {assignBonoType === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
                               </span>
                             </div>
                             <div className="flex justify-between">
-                              <span className="text-muted-foreground">Sesiones</span>
-                              <span className="text-ivory">
+                              <span className="text-[var(--color-text-secondary)]">Sesiones</span>
+                              <span className="text-[var(--color-text-primary)]">
                                 {assignBonoType === 'sesion_personal' ? '1' : assignBonoModalidad === '1h' ? '4' : '8'}
                               </span>
                             </div>
                             <div className="flex justify-between">
-                              <span className="text-muted-foreground">Expira</span>
-                              <span className="text-ivory">
+                              <span className="text-[var(--color-text-secondary)]">Expira</span>
+                              <span className="text-[var(--color-text-primary)]">
                                 {(() => {
                                   const exp = new Date();
                                   exp.setMonth(exp.getMonth() + (siteConfig.bonoExpirationMonths || 1));
@@ -4208,7 +4218,7 @@ export default function AdminPage() {
                       <div className="flex gap-3 justify-end mt-6">
                         <button
                           onClick={() => setShowAssignBonoModal(false)}
-                          className="px-4 py-2.5 rounded-xl border border-white/10 text-muted-foreground hover:text-ivory transition-colors"
+                          className="px-4 py-2.5 rounded-xl border border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
                         >
                           Cancelar
                         </button>
@@ -4258,7 +4268,7 @@ export default function AdminPage() {
                               setSavingBono(false);
                             }
                           }}
-                          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald to-accent text-obsidian font-semibold hover:shadow-lg hover:shadow-emerald/25 transition-all disabled:opacity-50 flex items-center gap-2"
+                          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[var(--color-accent-val)] to-emerald-bright text-[var(--color-bg-base)] font-semibold hover:shadow-lg hover:shadow-emerald/25 transition-all disabled:opacity-50 flex items-center gap-2"
                         >
                           {savingBono ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Ticket className="w-4 h-4" />}
                           {savingBono ? 'Asignando...' : 'Asignar Bono'}
@@ -4293,45 +4303,46 @@ export default function AdminPage() {
                     <GlassCard className="p-6">
                       <div className="flex items-center justify-between mb-6">
                         <div>
-                          <h2 className="text-xl font-bold text-ivory">Historial de Bonos</h2>
-                          <p className="text-sm text-muted-foreground">{bonoHistoryClientName}</p>
+                          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Historial — {bonoHistoryClientName}</h2>
                         </div>
-                        <button onClick={() => setShowBonoHistoryModal(false)} className="text-muted-foreground hover:text-ivory">
+                        <button onClick={() => setShowBonoHistoryModal(false)} className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]">
                           <X className="w-5 h-5" />
                         </button>
                       </div>
 
+                      {/* ── Bonos ── */}
+                      <h3 className="text-sm font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider mb-3">Bonos</h3>
                       {bonoHistoryData.length === 0 ? (
-                        <p className="text-sm text-muted-foreground text-center py-8">No hay historial de bonos.</p>
+                        <p className="text-sm text-[var(--color-text-secondary)] text-center py-4 mb-4">Sin historial de bonos.</p>
                       ) : (
-                        <div className="space-y-4">
+                        <div className="space-y-4 mb-6">
                           {bonoHistoryData.map((bono) => (
                             <div key={bono.id} className="p-4 rounded-xl bg-muted/10 border border-white/5">
                               <div className="flex items-center justify-between mb-2">
                                 <span className={cn(
                                   "px-2 py-0.5 rounded text-xs font-medium",
-                                  bono.estado === 'activo' ? "bg-emerald/10 text-emerald" :
+                                  bono.estado === 'activo' ? "bg-[var(--color-accent-dim)] text-[var(--color-accent-val)]" :
                                   bono.estado === 'agotado' ? "bg-amber-500/10 text-amber-400" :
                                   bono.estado === 'eliminado' ? "bg-red-500/10 text-red-400" :
-                                  "bg-muted/20 text-muted-foreground"
+                                  "bg-muted/20 text-[var(--color-text-secondary)]"
                                 )}>
                                   {bono.estado.charAt(0).toUpperCase() + bono.estado.slice(1)}
                                 </span>
-                                <span className="text-xs text-muted-foreground">
+                                <span className="text-xs text-[var(--color-text-secondary)]">
                                   {new Date(bono.fechaAsignacion).toLocaleDateString('es-ES')}
                                 </span>
                               </div>
-                              <div className="text-sm text-ivory mb-1">
+                              <div className="text-sm text-[var(--color-text-primary)] mb-1">
                                 {bono.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
                                 {bono.modalidad && ` (${bono.modalidad === '1h' ? '4×1h' : '8×30min'})`}
                               </div>
-                              <div className="text-xs text-muted-foreground mb-2">
+                              <div className="text-xs text-[var(--color-text-secondary)] mb-2">
                                 {bono.sesionesRestantes}/{bono.sesionesTotales} sesiones restantes · Expira: {new Date(bono.fechaExpiracion).toLocaleDateString('es-ES')}
                               </div>
                               {(bono.historial?.length ?? 0) > 0 && (
                                 <div className="mt-2 pt-2 border-t border-white/5 space-y-1">
                                   {bono.historial.map((h, i) => (
-                                    <div key={i} className="flex justify-between text-xs text-muted-foreground">
+                                    <div key={i} className="flex justify-between text-xs text-[var(--color-text-secondary)]">
                                       <span>{new Date(h.fecha).toLocaleDateString('es-ES')}</span>
                                       <span>{h.tipo}{h.duracion !== '-' ? ` · ${h.duracion}min` : ''}</span>
                                     </div>
@@ -4342,6 +4353,43 @@ export default function AdminPage() {
                           ))}
                         </div>
                       )}
+
+                      {/* ── Citas ── */}
+                      <div className="pt-4 border-t border-white/5">
+                        <h3 className="text-sm font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider mb-3">Citas</h3>
+                        {clientAppointmentsHistory.length === 0 ? (
+                          <p className="text-sm text-[var(--color-text-secondary)] text-center py-4">Sin historial de citas.</p>
+                        ) : (
+                          <div className="space-y-3">
+                            {clientAppointmentsHistory.map((appt) => {
+                              const slot = appt.approvedSlot || appt.preferredSlots?.[0];
+                              const apptStatus = statusConfig[appt.status];
+                              return (
+                                <div key={appt.id} className="p-3 rounded-xl bg-muted/10 border border-white/5">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-sm text-[var(--color-text-primary)] font-medium">
+                                      {serviceLabels[appt.serviceType] || appt.serviceType}
+                                    </span>
+                                    <span className={cn(
+                                      "px-2 py-0.5 rounded text-xs font-medium border",
+                                      apptStatus.color
+                                    )}>
+                                      {apptStatus.label}
+                                    </span>
+                                  </div>
+                                  <div className="text-xs text-[var(--color-text-secondary)]">
+                                    {slot
+                                      ? `${new Date(slot.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })} · ${slot.time}`
+                                      : '—'
+                                    }
+                                    {appt.duration && ` · ${appt.duration} min`}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </GlassCard>
                   </motion.div>
                 </motion.div>
@@ -4369,8 +4417,8 @@ export default function AdminPage() {
                     className="w-full max-w-lg"
                   >
                     <GlassCard className="p-6">
-                      <h2 className="text-xl font-bold text-ivory mb-1">Aprobar Cita</h2>
-                       <p className="text-sm text-muted-foreground mb-6">
+                      <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-1">Aprobar Cita</h2>
+                       <p className="text-sm text-[var(--color-text-secondary)] mb-6">
                         Asigna un entrenador antes de confirmar. El campo es opcional.
                       </p>
 
@@ -4380,7 +4428,7 @@ export default function AdminPage() {
                         if (!appt) return null;
                         return (
                           <div className="mb-4">
-                            <label className="block text-sm text-muted-foreground mb-2">Franja confirmada</label>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Franja confirmada</label>
                             <div className="flex flex-wrap gap-2">
                               {appt.preferredSlots.map((slot, idx) => {
                                 const isSelected = approvalData.assignedTrainer === '__slot__' + idx.toString();
@@ -4396,7 +4444,7 @@ export default function AdminPage() {
                                     }))}
                                     className={cn(
                                       'px-3 py-1.5 rounded-lg text-sm transition-colors',
-                                      'bg-emerald/20 text-ivory'
+                                      'bg-[var(--color-accent-dim)] text-[var(--color-text-primary)]'
                                     )}
                                   >
                                     {new Date(slot.date).toLocaleDateString('es-ES', {
@@ -4414,11 +4462,11 @@ export default function AdminPage() {
 
                       <div className="space-y-4 mb-6">
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Entrenador asignado</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Entrenador asignado</label>
                           <select
                             value={approvalData.assignedTrainer}
                             onChange={(e) => setApprovalData({ ...approvalData, assignedTrainer: e.target.value })}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           >
                             <option value="">Sin asignar</option>
                             {trainers.filter(t => t.active).map((t) => (
@@ -4427,16 +4475,16 @@ export default function AdminPage() {
                           </select>
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Tipo de sesión</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Tipo de sesión</label>
                           {(() => {
                             const appt = appointments.find(a => a.id === selectedAppointmentId);
                             const raw = appt?.serviceType || '';
                             return raw ? (
-                              <span className="inline-block px-3 py-1.5 rounded-lg bg-emerald/20 text-emerald-light text-sm font-medium">
+                              <span className="inline-block px-3 py-1.5 rounded-lg bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-sm font-medium">
                                 {serviceLabels[raw] || raw}
                               </span>
                             ) : (
-                              <span className="text-sm text-muted-foreground italic">No especificado por el cliente</span>
+                              <span className="text-sm text-[var(--color-text-secondary)] italic">No especificado por el cliente</span>
                             );
                           })()}
                         </div>
@@ -4537,8 +4585,8 @@ export default function AdminPage() {
 
                         return (
                           <>
-                            <h2 className="text-xl font-bold text-ivory mb-1">Modificar</h2>
-                            <p className="text-sm text-muted-foreground mb-6">
+                            <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-1">Modificar</h2>
+                            <p className="text-sm text-[var(--color-text-secondary)] mb-6">
                               {isApproved
                                 ? 'Cambia la franja aprobada de esta cita. Se actualizará directamente.'
                                 : 'Cambia la franja preferida de esta cita. Se actualizará directamente.'}
@@ -4546,21 +4594,21 @@ export default function AdminPage() {
 
                             <div className="space-y-4 mb-6">
                               <div>
-                                <label className="block text-sm text-muted-foreground mb-2">Fecha</label>
+                                <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Fecha</label>
                                 <input
                                   type="date"
                                   value={editSlotData.date}
                                   onChange={(e) => setEditSlotData({ date: e.target.value, time: '' })}
                                   min={new Date().toISOString().split('T')[0]}
-                                  className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                  className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                                 />
                               </div>
                               <div>
-                                <label className="block text-sm text-muted-foreground mb-2">Hora</label>
+                                <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Hora</label>
                                 <select
                                   value={editSlotData.time}
                                   onChange={(e) => setEditSlotData(prev => ({ ...prev, time: e.target.value }))}
-                                  className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                  className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                                 >
                                   <option value="">Seleccionar hora</option>
                                   {timeSlots.map((t) => {
@@ -4656,74 +4704,74 @@ export default function AdminPage() {
                     className="w-full max-w-2xl max-h-[90vh] overflow-y-auto"
                   >
                     <GlassCard className="p-6">
-                      <h2 className="text-xl font-bold text-ivory mb-1">
+                      <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-1">
                         {editingService.id.startsWith('new-') ? 'Nuevo Servicio' : 'Editar Servicio'}
                       </h2>
-                      <p className="text-sm text-muted-foreground mb-6">
+                      <p className="text-sm text-[var(--color-text-secondary)] mb-6">
                         {editingService.id.startsWith('new-') ? 'Crea un nuevo servicio' : `Editando: ${editingService.title}`}
                       </p>
 
                       <div className="space-y-4">
                         <div className="grid sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-sm text-muted-foreground mb-2">Título *</label>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título *</label>
                             <input
                               type="text"
                               value={editingService.title}
                               onChange={(e) => setEditingService({ ...editingService, title: e.target.value })}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                               placeholder="Entrenamiento Personal"
                             />
                           </div>
                           <div>
-                            <label className="block text-sm text-muted-foreground mb-2">Duración *</label>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Duración *</label>
                             <input
                               type="text"
                               value={editingService.duration}
                               onChange={(e) => setEditingService({ ...editingService, duration: e.target.value })}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                               placeholder="60 min"
                             />
                           </div>
                         </div>
                         <div className="grid sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-sm text-muted-foreground mb-2">Precio</label>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Precio</label>
                             <input
                               type="text"
                               value={editingService.price || ''}
                               onChange={(e) => setEditingService({ ...editingService, price: e.target.value })}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                               placeholder="Desde 50€"
                             />
                           </div>
                           <div>
-                            <label className="block text-sm text-muted-foreground mb-2">Icono (nombre Lucide)</label>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Icono (nombre Lucide)</label>
                             <input
                               type="text"
                               value={editingService.icon || ''}
                               onChange={(e) => setEditingService({ ...editingService, icon: e.target.value })}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                               placeholder="Dumbbell, Trophy, Apple…"
                             />
                           </div>
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Descripción</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Descripción</label>
                           <textarea
                             value={editingService.description}
                             onChange={(e) => setEditingService({ ...editingService, description: e.target.value })}
                             rows={3}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light resize-none"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
                             placeholder="Descripción del servicio…"
                           />
                         </div>
                         <div>
                           <div className="flex items-center justify-between mb-2">
-                            <label className="block text-sm text-muted-foreground">Características</label>
+                            <label className="block text-sm text-[var(--color-text-secondary)]">Características</label>
                             <button
                               onClick={() => setEditingService({ ...editingService, features: [...(editingService.features || []), ''] })}
-                              className="text-xs text-accent hover:underline flex items-center gap-1"
+                              className="text-xs text-[var(--color-accent-val)] hover:underline flex items-center gap-1"
                             >
                               <Plus className="w-3 h-3" /> Añadir
                             </button>
@@ -4739,7 +4787,7 @@ export default function AdminPage() {
                                     feats[i] = e.target.value;
                                     setEditingService({ ...editingService, features: feats });
                                   }}
-                                  className="flex-1 px-3 py-2 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                                  className="flex-1 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                                   placeholder="Característica…"
                                 />
                                 <button
@@ -4753,12 +4801,12 @@ export default function AdminPage() {
                           </div>
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Orden</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Orden</label>
                           <input
                             type="number"
                             value={editingService.order ?? 0}
                             onChange={(e) => setEditingService({ ...editingService, order: Number(e.target.value) })}
-                            className="w-32 px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                            className="w-32 px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                             min={0}
                           />
                         </div>
@@ -4799,48 +4847,48 @@ export default function AdminPage() {
                     className="w-full max-w-lg"
                   >
                     <GlassCard className="p-6">
-                      <h2 className="text-xl font-bold text-ivory mb-1">
+                      <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-1">
                         {editingTestimonial.id.startsWith('new-') ? 'Nuevo Testimonio' : 'Editar Testimonio'}
                       </h2>
-                      <p className="text-sm text-muted-foreground mb-6">
+                      <p className="text-sm text-[var(--color-text-secondary)] mb-6">
                         {editingTestimonial.id.startsWith('new-') ? 'Crea un nuevo testimonio' : `Editando: ${editingTestimonial.name}`}
                       </p>
 
                       <div className="space-y-4">
                         <div className="grid sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-sm text-muted-foreground mb-2">Nombre *</label>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Nombre *</label>
                             <input
                               type="text"
                               value={editingTestimonial.name}
                               onChange={(e) => setEditingTestimonial({ ...editingTestimonial, name: e.target.value })}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                               placeholder="María García"
                             />
                           </div>
                           <div>
-                            <label className="block text-sm text-muted-foreground mb-2">Cargo / Rol</label>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Cargo / Rol</label>
                             <input
                               type="text"
                               value={editingTestimonial.role}
                               onChange={(e) => setEditingTestimonial({ ...editingTestimonial, role: e.target.value })}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light"
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                               placeholder="Cliente, Atleta, …"
                             />
                           </div>
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">Testimonio *</label>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Testimonio *</label>
                           <textarea
                             value={editingTestimonial.content}
                             onChange={(e) => setEditingTestimonial({ ...editingTestimonial, content: e.target.value })}
                             rows={4}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light resize-none"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
                             placeholder="Texto del testimonio…"
                           />
                         </div>
                         <div>
-                          <label className="block text-sm text-muted-foreground mb-2">
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">
                             Valoración: {editingTestimonial.rating} estrella{editingTestimonial.rating !== 1 ? 's' : ''}
                           </label>
                           <div className="flex gap-2">
@@ -4850,7 +4898,7 @@ export default function AdminPage() {
                                 onClick={() => setEditingTestimonial({ ...editingTestimonial, rating: star })}
                                 className="focus:outline-none"
                               >
-                                <Star className={cn('w-6 h-6 transition-colors', star <= editingTestimonial.rating ? 'text-accent fill-accent' : 'text-muted-foreground')} />
+                                <Star className={cn('w-6 h-6 transition-colors', star <= editingTestimonial.rating ? 'text-[var(--color-accent-val)] fill-accent' : 'text-[var(--color-text-secondary)]')} />
                               </button>
                             ))}
                           </div>
@@ -4897,13 +4945,13 @@ export default function AdminPage() {
                           <Trash2 className="w-5 h-5 text-red-400" />
                         </div>
                         <div>
-                          <h2 className="text-xl font-bold text-ivory">Eliminar Bono</h2>
-                          <p className="text-sm text-muted-foreground">{deleteBonoClient.name}</p>
+                          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Eliminar Bono</h2>
+                          <p className="text-sm text-[var(--color-text-secondary)]">{deleteBonoClient.name}</p>
                         </div>
                       </div>
-                      <p className="text-sm text-muted-foreground mb-6">
+                      <p className="text-sm text-[var(--color-text-secondary)] mb-6">
                         ¿Seguro que quieres eliminar el bono activo de{' '}
-                        <strong className="text-ivory">{deleteBonoClient.name}</strong>?
+                        <strong className="text-[var(--color-text-primary)]">{deleteBonoClient.name}</strong>?
                         El historial de sesiones se conservará. Esta acción no se puede deshacer.
                       </p>
                       <div className="flex gap-3 justify-end">

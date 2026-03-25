@@ -52,7 +52,7 @@ export default function ContactoPage() {
     <div className="min-h-screen">
       {/* Hero Section */}
       <section className="relative py-20 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-primary/10 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-accent-dim)] to-transparent" />
         <div className="container mx-auto px-4">
           <motion.div
             className="text-center max-w-3xl mx-auto"
@@ -60,13 +60,13 @@ export default function ContactoPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
           >
-            <span className="text-accent text-sm font-medium uppercase tracking-wider">
+            <span className="eyebrow">
               Contacto
             </span>
-            <h1 className="text-4xl md:text-5xl font-bold text-ivory mt-3 mb-6">
+            <h1 className="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mt-3 mb-6">
               ¿Hablamos?
             </h1>
-            <p className="text-muted-foreground text-lg">
+            <p className="text-[var(--color-text-secondary)] text-lg">
               Estamos aquí para responder tus preguntas y ayudarte a comenzar tu transformación.
             </p>
           </motion.div>
@@ -112,20 +112,20 @@ export default function ContactoPage() {
               ].map((item, index) => (
                 <motion.div key={index} variants={itemVariants}>
                   <GlassCard className="flex items-start gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center flex-shrink-0">
-                      <item.icon className="w-6 h-6 text-accent" />
+                    <div className="w-12 h-12 rounded-xl bg-[var(--color-accent-dim)] flex items-center justify-center flex-shrink-0">
+                      <item.icon className="w-6 h-6 text-[var(--color-accent-val)]" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-ivory mb-1">{item.title}</h3>
+                      <h3 className="font-semibold text-[var(--color-text-primary)] mb-1">{item.title}</h3>
                       {item.action ? (
                         <a
                           href={item.action}
-                          className="text-muted-foreground hover:text-accent transition-colors text-sm"
+                          className="text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors text-sm"
                         >
                           {item.content}
                         </a>
                       ) : (
-                        <p className="text-muted-foreground text-sm">{item.content}</p>
+                        <p className="text-[var(--color-text-secondary)] text-sm">{item.content}</p>
                       )}
                     </div>
                   </GlassCard>
@@ -140,7 +140,7 @@ export default function ContactoPage() {
                       <MessageCircle className="w-6 h-6 text-green-400" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-ivory mb-1">WhatsApp</h3>
+                      <h3 className="font-semibold text-[var(--color-text-primary)] mb-1">WhatsApp</h3>
                       <a
                         href={`https://wa.me/${cmsContent.whatsapp.replace(/\D/g, '')}`}
                         target="_blank"
@@ -169,13 +169,13 @@ export default function ContactoPage() {
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
                   >
-                    <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-4">
-                      <CheckCircle className="w-8 h-8 text-primary" />
+                    <div className="w-16 h-16 rounded-full bg-[var(--color-accent-dim)] flex items-center justify-center mx-auto mb-4">
+                      <CheckCircle className="w-8 h-8 text-[var(--color-accent-val)]" />
                     </div>
-                    <h3 className="text-xl font-semibold text-ivory mb-2">
+                    <h3 className="text-xl font-semibold text-[var(--color-text-primary)] mb-2">
                       ¡Mensaje enviado!
                     </h3>
-                    <p className="text-muted-foreground">
+                    <p className="text-[var(--color-text-secondary)]">
                       Te responderemos lo antes posible.
                     </p>
                   </motion.div>
@@ -183,7 +183,7 @@ export default function ContactoPage() {
                   <form onSubmit={handleSubmit} className="space-y-6">
                     <div className="grid sm:grid-cols-2 gap-6">
                       <div>
-                        <label className="block text-sm font-medium text-ivory mb-2">
+                        <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
                           Nombre completo
                         </label>
                         <input
@@ -192,12 +192,12 @@ export default function ContactoPage() {
                           value={formData.name}
                           onChange={handleChange}
                           required
-                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-emerald-light transition-colors"
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)] transition-colors"
                           placeholder="Tu nombre"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-ivory mb-2">
+                        <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
                           Email
                         </label>
                         <input
@@ -206,7 +206,7 @@ export default function ContactoPage() {
                           value={formData.email}
                           onChange={handleChange}
                           required
-                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-emerald-light transition-colors"
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)] transition-colors"
                           placeholder="tu@email.com"
                         />
                       </div>
@@ -214,7 +214,7 @@ export default function ContactoPage() {
 
                     <div className="grid sm:grid-cols-2 gap-6">
                       <div>
-                        <label className="block text-sm font-medium text-ivory mb-2">
+                        <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
                           Teléfono
                         </label>
                         <input
@@ -222,12 +222,12 @@ export default function ContactoPage() {
                           name="phone"
                           value={formData.phone}
                           onChange={handleChange}
-                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-emerald-light transition-colors"
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)] transition-colors"
                           placeholder="+34 600 000 000"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-ivory mb-2">
+                        <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
                           Asunto
                         </label>
                         <select
@@ -235,7 +235,7 @@ export default function ContactoPage() {
                           value={formData.subject}
                           onChange={handleChange}
                           required
-                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory focus:outline-none focus:border-emerald-light transition-colors"
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] transition-colors"
                         >
                           <option value="">Selecciona un asunto</option>
                           <option value="info">Información general</option>
@@ -249,7 +249,7 @@ export default function ContactoPage() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-ivory mb-2">
+                      <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
                         Mensaje
                       </label>
                       <textarea
@@ -258,7 +258,7 @@ export default function ContactoPage() {
                         onChange={handleChange}
                         required
                         rows={5}
-                        className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-emerald-light transition-colors resize-none"
+                        className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)] transition-colors resize-none"
                         placeholder="¿En qué podemos ayudarte?"
                       />
                     </div>
@@ -285,7 +285,7 @@ export default function ContactoPage() {
       <section className="py-12">
         <div className="container mx-auto px-4">
           <motion.div
-            className="rounded-3xl overflow-hidden glass-card p-2"
+            className="rounded-3xl overflow-hidden card-glass p-2"
             initial={{ opacity: 0, y: 30 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}

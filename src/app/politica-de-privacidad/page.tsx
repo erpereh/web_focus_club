@@ -20,25 +20,25 @@ export default function PoliticaDePrivacidadPage() {
 
                 <GlassCard className="p-8 md:p-12">
                     <div className="flex items-center gap-3 mb-8">
-                        <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center">
-                            <Shield className="w-6 h-6 text-primary" />
+                        <div className="w-12 h-12 rounded-xl bg-[var(--color-accent-dim)] flex items-center justify-center">
+                            <Shield className="w-6 h-6 text-[var(--color-accent-val)]" />
                         </div>
-                        <h1 className="text-3xl font-bold text-ivory">Política de Privacidad</h1>
+                        <h1 className="text-3xl font-bold text-[var(--color-text-primary)]">Política de Privacidad</h1>
                     </div>
 
-                    <div className="prose prose-invert prose-sm max-w-none space-y-6 text-muted-foreground">
-                        <p className="text-ivory/80">
+                    <div className="prose prose-invert prose-sm max-w-none space-y-6 text-[var(--color-text-secondary)]">
+                        <p className="text-[var(--color-text-primary)]/80">
                             <strong>Última actualización:</strong> Febrero 2026
                         </p>
 
-                        <h2 className="text-xl font-semibold text-ivory mt-8">1. Responsable del Tratamiento</h2>
+                        <h2 className="text-xl font-semibold text-[var(--color-text-primary)] mt-8">1. Responsable del Tratamiento</h2>
                         <p>
                             <strong>Focus Club Vallecas</strong><br />
                             Dirección: Vallecas, Madrid, España<br />
                             Email: info@focusclubvallecas.com
                         </p>
 
-                        <h2 className="text-xl font-semibold text-ivory mt-8">2. Datos que Recopilamos</h2>
+                        <h2 className="text-xl font-semibold text-[var(--color-text-primary)] mt-8">2. Datos que Recopilamos</h2>
                         <p>
                             Recopilamos los datos personales que nos proporcionas voluntariamente al registrarte en nuestra plataforma,
                             solicitar una cita o contactarnos a través de nuestros formularios. Estos datos pueden incluir:
@@ -50,7 +50,7 @@ export default function PoliticaDePrivacidadPage() {
                             <li>Información relativa a tus objetivos deportivos y estado de salud (cuando la proporcionas voluntariamente)</li>
                         </ul>
 
-                        <h2 className="text-xl font-semibold text-ivory mt-8">3. Finalidad del Tratamiento</h2>
+                        <h2 className="text-xl font-semibold text-[var(--color-text-primary)] mt-8">3. Finalidad del Tratamiento</h2>
                         <p>Tus datos personales serán tratados con las siguientes finalidades:</p>
                         <ul className="list-disc pl-6 space-y-1">
                             <li>Gestionar tu cuenta de usuario y ofrecerte acceso a nuestros servicios</li>
@@ -59,20 +59,20 @@ export default function PoliticaDePrivacidadPage() {
                             <li>Mejorar nuestros servicios y la experiencia de usuario</li>
                         </ul>
 
-                        <h2 className="text-xl font-semibold text-ivory mt-8">4. Base Legal</h2>
+                        <h2 className="text-xl font-semibold text-[var(--color-text-primary)] mt-8">4. Base Legal</h2>
                         <p>
                             El tratamiento de tus datos se basa en tu consentimiento expreso, otorgado al aceptar esta política
                             durante el proceso de registro o solicitud de cita, conforme al artículo 6.1.a) del Reglamento
                             General de Protección de Datos (RGPD).
                         </p>
 
-                        <h2 className="text-xl font-semibold text-ivory mt-8">5. Conservación de los Datos</h2>
+                        <h2 className="text-xl font-semibold text-[var(--color-text-primary)] mt-8">5. Conservación de los Datos</h2>
                         <p>
                             Tus datos serán conservados mientras mantengas tu relación con Focus Club Vallecas y durante el
                             tiempo necesario para cumplir con las obligaciones legales aplicables.
                         </p>
 
-                        <h2 className="text-xl font-semibold text-ivory mt-8">6. Derechos del Interesado</h2>
+                        <h2 className="text-xl font-semibold text-[var(--color-text-primary)] mt-8">6. Derechos del Interesado</h2>
                         <p>Puedes ejercer los siguientes derechos en cualquier momento:</p>
                         <ul className="list-disc pl-6 space-y-1">
                             <li><strong>Acceso:</strong> Conocer qué datos tuyos tratamos</li>
@@ -83,12 +83,12 @@ export default function PoliticaDePrivacidadPage() {
                         </ul>
                         <p>
                             Para ejercer tus derechos, contacta con nosotros en{' '}
-                            <a href="mailto:infofocusclub2026@gmail.com" className="text-accent hover:underline">
+                            <a href="mailto:infofocusclub2026@gmail.com" className="text-[var(--color-accent-val)] hover:underline">
                                 infofocusclub2026@gmail.com
                             </a>.
                         </p>
 
-                        <h2 className="text-xl font-semibold text-ivory mt-8">7. Seguridad de los Datos</h2>
+                        <h2 className="text-xl font-semibold text-[var(--color-text-primary)] mt-8">7. Seguridad de los Datos</h2>
                         <p>
                             Implementamos medidas de seguridad técnicas y organizativas apropiadas para proteger tus datos
                             personales contra acceso no autorizado, pérdida o destrucción. Utilizamos Firebase Authentication

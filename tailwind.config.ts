@@ -11,87 +11,90 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Paleta Focus Club Vallecas
+        // Paleta Focus Club Vallecas — Dark Premium
 
-        // Fondo principal - Negro obsidiana verdoso
-        obsidian: '#0A110D',
+        // Fondos
+        obsidian: '#080808',
+        carbon: '#080808',
+        surface: '#0d0d0d',
 
-        // Verde bosque profundo - Marca
+        // Verdes
         'forest-deep': '#1B4332',
-
-        // Verde esmeralda - Acentos primarios
+        'forest-700': '#1B4332',
+        'forest-500': '#2D6A4F',
         emerald: {
           DEFAULT: '#2D6A4F',
-          light: '#40916C',
+          light: '#52b788',
+          bright: '#74c69d',
           dark: '#1B4332',
         },
 
-        // Blanco hueso - Textos
+        // Texto
         ivory: {
-          DEFAULT: '#F8F9FA',
-          dark: '#E8E9EA',
+          DEFAULT: '#f0f0f0',
+          dark: '#d0d0d0',
         },
 
-        // Colores glassmorphism
+        // Glass
         glass: {
-          bg: 'rgba(27, 67, 50, 0.08)',
-          border: 'rgba(27, 67, 50, 0.25)',
-          hover: 'rgba(45, 106, 79, 0.15)',
+          bg: 'rgba(255, 255, 255, 0.03)',
+          border: 'rgba(255, 255, 255, 0.07)',
+          hover: 'rgba(82, 183, 136, 0.04)',
         },
 
-        // Compatibilidad shadcn/ui
-        background: 'hsl(var(--background))',
-        foreground: 'hsl(var(--foreground))',
+        // Shadcn/ui bridge — sin hsl() wrapper (los vars contienen hex/rgba directos)
+        background: 'var(--background)',
+        foreground: 'var(--foreground)',
 
         card: {
-          DEFAULT: 'hsl(var(--card))',
-          foreground: 'hsl(var(--card-foreground))'
+          DEFAULT: 'var(--card)',
+          foreground: 'var(--card-foreground)'
         },
         popover: {
-          DEFAULT: 'hsl(var(--popover))',
-          foreground: 'hsl(var(--popover-foreground))'
+          DEFAULT: 'var(--popover)',
+          foreground: 'var(--popover-foreground)'
         },
         primary: {
-          DEFAULT: 'hsl(var(--primary))',
-          foreground: 'hsl(var(--primary-foreground))'
+          DEFAULT: 'var(--primary)',
+          foreground: 'var(--primary-foreground)'
         },
         secondary: {
-          DEFAULT: 'hsl(var(--secondary))',
-          foreground: 'hsl(var(--secondary-foreground))'
+          DEFAULT: 'var(--secondary)',
+          foreground: 'var(--secondary-foreground)'
         },
         muted: {
-          DEFAULT: 'hsl(var(--muted))',
-          foreground: 'hsl(var(--muted-foreground))'
+          DEFAULT: 'var(--muted)',
+          foreground: 'var(--muted-foreground)'
         },
         accent: {
-          DEFAULT: 'hsl(var(--accent))',
-          foreground: 'hsl(var(--accent-foreground))'
+          DEFAULT: 'var(--accent)',
+          foreground: 'var(--accent-foreground)'
         },
         destructive: {
-          DEFAULT: 'hsl(var(--destructive))',
-          foreground: 'hsl(var(--destructive-foreground))'
+          DEFAULT: 'var(--destructive)',
+          foreground: 'var(--destructive-foreground)'
         },
-        border: 'hsl(var(--border))',
-        input: 'hsl(var(--input))',
-        ring: 'hsl(var(--ring))',
+        border: 'var(--border)',
+        input: 'var(--input)',
+        ring: 'var(--ring)',
 
         chart: {
-          '1': 'hsl(var(--chart-1))',
-          '2': 'hsl(var(--chart-2))',
-          '3': 'hsl(var(--chart-3))',
-          '4': 'hsl(var(--chart-4))',
-          '5': 'hsl(var(--chart-5))'
+          '1': 'var(--chart-1)',
+          '2': 'var(--chart-2)',
+          '3': 'var(--chart-3)',
+          '4': 'var(--chart-4)',
+          '5': 'var(--chart-5)'
         },
 
         sidebar: {
-          DEFAULT: 'hsl(var(--sidebar))',
-          foreground: 'hsl(var(--sidebar-foreground))',
-          primary: 'hsl(var(--sidebar-primary))',
-          'primary-foreground': 'hsl(var(--sidebar-primary-foreground))',
-          accent: 'hsl(var(--sidebar-accent))',
-          'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
-          border: 'hsl(var(--sidebar-border))',
-          ring: 'hsl(var(--sidebar-ring))',
+          DEFAULT: 'var(--sidebar)',
+          foreground: 'var(--sidebar-foreground)',
+          primary: 'var(--sidebar-primary)',
+          'primary-foreground': 'var(--sidebar-primary-foreground)',
+          accent: 'var(--sidebar-accent)',
+          'accent-foreground': 'var(--sidebar-accent-foreground)',
+          border: 'var(--sidebar-border)',
+          ring: 'var(--sidebar-ring)',
         },
       },
 
@@ -105,29 +108,31 @@ const config: Config = {
       },
 
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        display: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-geist-sans)', 'system-ui', 'sans-serif'],
+        display: ['var(--font-geist-sans)', 'system-ui', 'sans-serif'],
       },
 
       boxShadow: {
-        'glow': '0 0 40px rgba(45, 106, 79, 0.25), 0 0 80px rgba(45, 106, 79, 0.1)',
-        'glow-lg': '0 0 60px rgba(45, 106, 79, 0.35), 0 0 120px rgba(45, 106, 79, 0.15)',
-        'emerald-glow': '0 0 40px rgba(64, 145, 108, 0.3), 0 0 80px rgba(64, 145, 108, 0.15)',
-        'emerald-glow-lg': '0 0 60px rgba(64, 145, 108, 0.4), 0 0 120px rgba(64, 145, 108, 0.2)',
-        'card': '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(248, 249, 250, 0.05)',
-        'card-hover': '0 12px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(248, 249, 250, 0.08)',
+        'glow': '0 0 40px rgba(82, 183, 136, 0.15), 0 0 80px rgba(82, 183, 136, 0.05)',
+        'glow-lg': '0 0 60px rgba(82, 183, 136, 0.25), 0 0 120px rgba(82, 183, 136, 0.1)',
+        'emerald-glow': '0 0 40px rgba(82, 183, 136, 0.2), 0 0 80px rgba(82, 183, 136, 0.08)',
+        'emerald-glow-lg': '0 0 60px rgba(82, 183, 136, 0.3), 0 0 120px rgba(82, 183, 136, 0.12)',
+        'card': '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.03)',
+        'card-hover': '0 12px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05)',
       },
 
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
         'gradient-conic': 'conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))',
-        'glass-gradient': 'linear-gradient(135deg, rgba(27, 67, 50, 0.1) 0%, rgba(45, 106, 79, 0.05) 50%, rgba(27, 67, 50, 0.08) 100%)',
+        'glass-gradient': 'linear-gradient(135deg, rgba(82, 183, 136, 0.04) 0%, rgba(82, 183, 136, 0.02) 50%, rgba(82, 183, 136, 0.03) 100%)',
       },
 
       animation: {
         'fade-in': 'fadeIn 0.5s ease-out forwards',
+        'fade-up': 'fade-up 0.6s var(--easing-smooth) both',
+        'scale-in': 'scale-in 0.5s var(--easing-smooth) both',
         'slide-in-right': 'slideInRight 0.5s ease-out forwards',
-        'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
+        'pulse-glow': 'glow-pulse 2s ease-in-out infinite',
         'shimmer': 'shimmer 2s linear infinite',
       },
 
@@ -136,13 +141,21 @@ const config: Config = {
           '0%': { opacity: '0', transform: 'translateY(10px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
+        'fade-up': {
+          '0%': { opacity: '0', transform: 'translateY(24px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        'scale-in': {
+          '0%': { opacity: '0', transform: 'scale(0.96)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
         slideInRight: {
           '0%': { opacity: '0', transform: 'translateX(20px)' },
           '100%': { opacity: '1', transform: 'translateX(0)' },
         },
-        'pulse-glow': {
-          '0%, 100%': { boxShadow: '0 0 20px rgba(45, 106, 79, 0.3)' },
-          '50%': { boxShadow: '0 0 40px rgba(45, 106, 79, 0.5)' },
+        'glow-pulse': {
+          '0%, 100%': { boxShadow: '0 0 8px rgba(82, 183, 136, 0.4)' },
+          '50%': { boxShadow: '0 0 20px rgba(82, 183, 136, 0.6), 0 0 40px rgba(82, 183, 136, 0.2)' },
         },
         shimmer: {
           '0%': { backgroundPosition: '-200% 0' },
@@ -152,6 +165,7 @@ const config: Config = {
 
       transitionTimingFunction: {
         'premium': 'cubic-bezier(0.4, 0, 0.2, 1)',
+        'smooth': 'cubic-bezier(0.16, 1, 0.3, 1)',
       },
     }
   },

@@ -165,7 +165,7 @@ function BeforeAfterCard({ item }: { item: (typeof TRANSFORMACIONES_FALLBACK)[0]
           ANTES
         </div>
       </div>
-      <div className="absolute top-4 right-4 text-white text-xs font-bold px-3 py-1 rounded-full backdrop-blur-sm border border-emerald-400/40"
+      <div className="absolute top-4 right-4 text-white text-xs font-bold px-3 py-1 rounded-full backdrop-blur-sm border border-[var(--color-accent-border)]"
         style={{ background: 'rgba(45,106,79,0.75)' }}>
         DESPUÉS
       </div>
@@ -178,7 +178,7 @@ function BeforeAfterCard({ item }: { item: (typeof TRANSFORMACIONES_FALLBACK)[0]
       </div>
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent pointer-events-none">
         <p className="text-white font-bold text-sm">{item.name}</p>
-        <p className="text-emerald-400 text-xs">{item.resultado} · {item.periodo}</p>
+        <p className="text-[var(--color-accent-val)] text-xs">{item.resultado} · {item.periodo}</p>
       </div>
     </div>
   );
@@ -278,13 +278,13 @@ function ImageCarousel({
         {/* Prev / Next arrows */}
         <button
           onClick={prev}
-          className="absolute left-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/50 backdrop-blur-sm border border-white/20 flex items-center justify-center text-white hover:bg-emerald-500/70 transition-colors"
+          className="absolute left-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/50 backdrop-blur-sm border border-white/20 flex items-center justify-center text-white hover:bg-[var(--color-accent-val)]/70 transition-colors"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
         <button
           onClick={next}
-          className="absolute right-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/50 backdrop-blur-sm border border-white/20 flex items-center justify-center text-white hover:bg-emerald-500/70 transition-colors"
+          className="absolute right-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/50 backdrop-blur-sm border border-white/20 flex items-center justify-center text-white hover:bg-[var(--color-accent-val)]/70 transition-colors"
         >
           <ChevronRight className="w-4 h-4" />
         </button>
@@ -296,7 +296,7 @@ function ImageCarousel({
           <button
             key={i}
             onClick={() => go(i)}
-            className={`h-1.5 rounded-full transition-all duration-300 ${i === current ? 'w-6 bg-emerald-400' : 'w-1.5 bg-white/20 hover:bg-white/40'}`}
+            className={`h-1.5 rounded-full transition-all duration-300 ${i === current ? 'w-6 bg-[var(--color-accent-val)]' : 'w-1.5 bg-white/20 hover:bg-white/40'}`}
             aria-label={`Ir a imagen ${i + 1}`}
           />
         ))}
@@ -339,7 +339,7 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
 
       {/* ═══ SECCIÓN 1 · HERO ═══════════════════════════════════════════ */}
       <section className="relative py-20 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-primary/10 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-accent-dim)] to-transparent" />
         <div className="container mx-auto px-4">
           <motion.div
             className="text-center max-w-3xl mx-auto"
@@ -347,13 +347,14 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
           >
-            <span className="text-accent text-sm font-medium uppercase tracking-wider">
+            <span className="eyebrow">
               Nuestra Galería
             </span>
-            <h1 className="text-4xl md:text-5xl font-bold text-ivory mt-3 mb-6">
+            <h1 className="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mt-3 mb-6">
               {galeriaContent?.heroTitle ?? 'Resultados Reales'}
             </h1>
-            <p className="text-muted-foreground text-lg">
+            <div className="line-accent mx-auto mb-6" />
+            <p className="text-[var(--color-text-secondary)] text-lg">
               {galeriaContent?.heroSubtitle ?? 'Cada imagen cuenta una historia de esfuerzo, constancia y transformación.'}
             </p>
           </motion.div>
@@ -367,10 +368,10 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 + i * 0.1, duration: 0.5 }}
               >
-                <div className="text-3xl md:text-4xl font-black text-accent tabular-nums">
+                <div className="text-3xl md:text-4xl font-black text-[var(--color-accent-val)] tabular-nums">
                   <AnimatedCounter value={stat.value} suffix={stat.suffix} />
                 </div>
-                <div className="text-muted-foreground text-xs md:text-sm mt-1">{stat.label}</div>
+                <div className="text-[var(--color-text-secondary)] text-xs md:text-sm mt-1">{stat.label}</div>
               </motion.div>
             ))}
           </div>
@@ -389,11 +390,12 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
             viewport={{ once: true }}
             transition={{ duration: 0.7 }}
           >
-            <span className="text-emerald-400 text-sm font-semibold tracking-widest uppercase mb-3 block">
+            <span className="eyebrow">
               Antes &amp; Después
             </span>
-            <h2 className="text-4xl md:text-5xl font-black text-white mb-4">Transformaciones</h2>
-            <p className="text-white/50 max-w-xl mx-auto">
+            <h2 className="text-4xl md:text-5xl font-black text-[var(--color-text-primary)] mb-4">Transformaciones</h2>
+            <div className="line-accent mx-auto mb-4" />
+            <p className="text-[var(--color-text-secondary)] max-w-xl mx-auto">
               Arrastra el slider sobre cada imagen para ver el cambio.
             </p>
           </motion.div>
@@ -419,7 +421,7 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
 
       {/* ═══ SECCIÓN 3 · ENTRENAMIENTOS (2 Carruseles) ══════════════════ */}
       <section className="py-24 relative">
-        <div className="absolute inset-0 bg-secondary/30" />
+        <div className="absolute inset-0 bg-[var(--color-bg-surface)]/40" />
         <div className="container mx-auto px-4 relative">
           <motion.div
             className="text-center mb-16"
@@ -428,11 +430,12 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
             viewport={{ once: true }}
             transition={{ duration: 0.7 }}
           >
-            <span className="text-emerald-400 text-sm font-semibold tracking-widest uppercase mb-3 block">
+            <span className="eyebrow">
               En Acción
             </span>
-            <h2 className="text-4xl md:text-5xl font-black text-white mb-4">Entrenamientos</h2>
-            <p className="text-white/50 max-w-xl mx-auto">
+            <h2 className="text-4xl md:text-5xl font-black text-[var(--color-text-primary)] mb-4">Entrenamientos</h2>
+            <div className="line-accent mx-auto mb-4" />
+            <p className="text-[var(--color-text-secondary)] max-w-xl mx-auto">
               Imágenes de las sesiones. Pasan automáticamente o navega con las flechas. Haz click para ampliar.
             </p>
           </motion.div>
@@ -465,11 +468,12 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
             viewport={{ once: true }}
             transition={{ duration: 0.7 }}
           >
-            <span className="text-emerald-400 text-sm font-semibold tracking-widest uppercase mb-3 block">
+            <span className="eyebrow">
               Historias Reales
             </span>
-            <h2 className="text-4xl md:text-5xl font-black text-white mb-4">Resultados</h2>
-            <p className="text-white/50 max-w-xl mx-auto">
+            <h2 className="text-4xl md:text-5xl font-black text-[var(--color-text-primary)] mb-4">Resultados</h2>
+            <div className="line-accent mx-auto mb-4" />
+            <p className="text-[var(--color-text-secondary)] max-w-xl mx-auto">
               Pasa el cursor sobre cada tarjeta para descubrir la historia detrás del resultado.
             </p>
           </motion.div>
@@ -487,13 +491,13 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
                 <div className="flip-card-inner w-full h-full">
                   {/* FRONT */}
                   <div className="flip-card-front glass-card flex flex-col items-center justify-center p-6 text-center">
-                    <div className="w-16 h-16 rounded-2xl overflow-hidden mb-4 border border-emerald-500/30">
+                    <div className="w-16 h-16 rounded-2xl overflow-hidden mb-4 border border-[var(--color-accent-border)]">
                       <Image src={r.image} alt={r.name} width={64} height={64} unoptimized className="w-full h-full object-cover" />
                     </div>
-                    <div className="text-4xl font-black text-emerald-400 mb-1">{r.stat}</div>
-                    <div className="text-white/50 text-sm mb-3">{r.statLabel}</div>
-                    <div className="text-white font-bold text-base mb-1">{r.name}</div>
-                    <span className="inline-block px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-medium border border-emerald-500/30">
+                    <div className="text-4xl font-black text-[var(--color-accent-val)] mb-1">{r.stat}</div>
+                    <div className="text-[var(--color-text-secondary)] text-sm mb-3">{r.statLabel}</div>
+                    <div className="text-[var(--color-text-primary)] font-bold text-base mb-1">{r.name}</div>
+                    <span className="inline-block px-3 py-1 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs font-medium border border-[var(--color-accent-border)]">
                       {r.tag}
                     </span>
                     <p className="text-white/30 text-xs mt-4">Pasa el cursor →</p>
@@ -501,11 +505,11 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
 
                   {/* BACK */}
                   <div className="flip-card-back flex flex-col justify-between p-6"
-                    style={{ background: 'linear-gradient(135deg, rgba(27,67,50,0.9) 0%, rgba(10,10,10,0.95) 100%)', border: '1px solid rgba(64,145,108,0.3)' }}>
-                    <Quote className="w-8 h-8 text-emerald-400/60 mb-3" />
+                    style={{ background: 'linear-gradient(135deg, rgba(13,13,13,0.95) 0%, rgba(8,8,8,0.98) 100%)', border: '1px solid var(--color-accent-border)' }}>
+                    <Quote className="w-8 h-8 text-[var(--color-accent-val)]/60 mb-3" />
                     <p className="text-white/85 text-sm leading-relaxed italic flex-1">{r.story}</p>
-                    <div className="mt-4 pt-4 border-t border-emerald-500/20">
-                      <p className="text-white font-bold text-sm">{r.name}</p>
+                    <div className="mt-4 pt-4 border-t border-[var(--color-accent-border)]">
+                      <p className="text-[var(--color-text-primary)] font-bold text-sm">{r.name}</p>
                       <p className="text-white/40 text-xs mt-1">{r.detail}</p>
                     </div>
                   </div>

@@ -7,6 +7,8 @@ import { Footer } from "@/components/layout/Footer";
 import { FloatingWhatsApp } from "@/components/layout/FloatingWhatsApp";
 import { CookieConsent } from "@/components/layout/CookieConsent";
 import { Providers } from "./providers";
+import { AmbientBackground } from "@/components/layout/AmbientBackground";
+import { ScrollProgressBar } from "@/components/layout/ScrollProgressBar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -59,6 +61,8 @@ export default function RootLayout({
         className={`${geistSans.variable} antialiased bg-background text-foreground min-h-screen flex flex-col`}
       >
         <Providers>
+          <AmbientBackground />
+          <ScrollProgressBar />
           <Navbar />
           <main className="flex-1 pt-20">
             {children}

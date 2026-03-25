@@ -19,7 +19,7 @@ const containerVariants = {
 
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] } },
 };
 
 const ICON_MAP: Record<string, LucideIcon> = { Dumbbell, Trophy, Apple, Activity, Users, Heart };
@@ -28,9 +28,9 @@ const ICON_MAP: Record<string, LucideIcon> = { Dumbbell, Trophy, Apple, Activity
 
 function ServiceSkeleton() {
   return (
-    <div className="h-48 rounded-2xl glass-card animate-pulse">
+    <div className="h-48 rounded-[var(--radius-card)] card-glass animate-pulse">
       <div className="p-6 space-y-3">
-        <div className="w-10 h-10 rounded-xl bg-white/5" />
+        <div className="w-10 h-10 rounded-lg bg-[var(--color-accent-dim)]" />
         <div className="h-4 w-2/3 rounded bg-white/5" />
         <div className="h-3 w-full rounded bg-white/5" />
         <div className="h-3 w-4/5 rounded bg-white/5" />
@@ -41,7 +41,7 @@ function ServiceSkeleton() {
 
 function TestimonialSkeleton() {
   return (
-    <div className="h-44 rounded-2xl glass-card animate-pulse">
+    <div className="h-44 rounded-[var(--radius-card)] card-glass animate-pulse">
       <div className="p-6 space-y-3">
         <div className="flex gap-1">
           {Array.from({ length: 5 }).map((_, i) => (
@@ -77,53 +77,57 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
   return (
     <div className="min-h-screen">
 
-      {/* Hero Section */}
-      <section className="relative min-h-[90vh] flex items-center justify-center overflow-hidden">
+      {/* ═══════════════════════════════════════════════════════════════════
+          HERO SECTION
+          ═══════════════════════════════════════════════════════════════════ */}
+      <section className="relative min-h-screen flex items-center justify-center overflow-hidden -mt-20">
+        {/* Video Background */}
         <div className="absolute inset-0">
           <video
             autoPlay
             muted
             loop
             playsInline
-            className="object-cover w-full h-full opacity-50"
+            className="object-cover w-full h-full opacity-40"
             poster="/imagenes/hero.jpeg"
           >
             <source src="/imagenes/hero.mp4" type="video/mp4" />
           </video>
-          <div className="absolute inset-0 bg-background/85" />
-          <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-background/50" />
+          <div className="absolute inset-0 bg-[var(--color-bg-base)]/85" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-base)] via-transparent to-[var(--color-bg-base)]/50" />
         </div>
-
-        <div className="absolute top-20 left-10 w-72 h-72 bg-primary/10 rounded-full blur-3xl hidden md:block" />
-        <div className="absolute bottom-20 right-10 w-96 h-96 bg-accent/5 rounded-full blur-3xl hidden md:block" />
 
         <div className="container mx-auto px-4 py-20 relative z-10">
           <motion.div
-            className="max-w-4xl mx-auto text-center"
+            className="max-w-5xl mx-auto text-center"
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8 }}
+            transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
           >
+            {/* Eyebrow Badge */}
             <motion.span
-              className="inline-block px-4 py-2 rounded-full text-sm font-medium bg-primary/20 text-primary border border-primary/30 mb-6"
+              className="eyebrow mb-8 justify-center"
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.2 }}
+              transition={{ delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
             >
               Bienvenido a Focus Club Vallecas
             </motion.span>
 
+            {/* Hero Title */}
             <motion.h1
-              className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight text-foreground mb-6 leading-tight"
-              initial={{ opacity: 0, y: 20 }}
+              className="glow-text font-extrabold mb-6 leading-[1.1]"
+              style={{ fontSize: 'clamp(32px, 4.5vw, 58px)', letterSpacing: '-2px' }}
+              initial={{ opacity: 0, y: 24 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3, duration: 0.6 }}
+              transition={{ delay: 0.3, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
             >
               {cmsContent.heroTitle}
             </motion.h1>
 
+            {/* Hero Subtitle */}
             <motion.p
-              className="text-lg md:text-xl text-muted-foreground mb-10 max-w-2xl mx-auto leading-relaxed"
+              className="text-lg md:text-xl text-[var(--color-text-secondary)] mb-10 max-w-2xl mx-auto leading-relaxed"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.4, duration: 0.6 }}
@@ -131,6 +135,7 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
               {cmsContent.heroSubtitle}
             </motion.p>
 
+            {/* CTA Buttons */}
             <motion.div
               className="flex flex-col sm:flex-row items-center justify-center gap-4"
               initial={{ opacity: 0, y: 20 }}
@@ -149,8 +154,9 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
               </Link>
             </motion.div>
 
+            {/* Stats Row */}
             <motion.div
-              className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-16"
+              className="flex flex-wrap justify-center items-center gap-8 md:gap-12 mt-16"
               variants={containerVariants}
               initial="hidden"
               animate="visible"
@@ -161,26 +167,36 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
                 { value: '4', label: 'Servicios Premium', icon: Dumbbell },
                 { value: '100%', label: 'Compromiso', icon: Heart },
               ].map((stat, i) => (
-                <motion.div key={i} className="text-center" variants={itemVariants}>
-                  <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mx-auto mb-3">
-                    <stat.icon className="w-6 h-6 text-primary" />
+                <motion.div
+                  key={i}
+                  className="flex items-center gap-4"
+                  variants={itemVariants}
+                >
+                  {i > 0 && (
+                    <div className="hidden md:block w-px h-10 bg-[rgba(255,255,255,0.08)] -ml-6 mr-2" />
+                  )}
+                  <div className="w-10 h-10 rounded-lg bg-[var(--color-accent-dim)] flex items-center justify-center flex-shrink-0">
+                    <stat.icon className="w-5 h-5 text-[var(--color-accent-val)]" />
                   </div>
-                  <div className="text-2xl md:text-3xl font-bold text-foreground">{stat.value}</div>
-                  <div className="text-sm text-muted-foreground">{stat.label}</div>
+                  <div className="text-left">
+                    <div className="text-2xl md:text-3xl font-bold text-[var(--color-text-primary)]">{stat.value}</div>
+                    <div className="text-xs text-[var(--color-text-secondary)]">{stat.label}</div>
+                  </div>
                 </motion.div>
               ))}
             </motion.div>
           </motion.div>
         </div>
 
+        {/* Scroll Indicator */}
         <motion.div
           className="absolute bottom-8 left-1/2 -translate-x-1/2"
           animate={{ y: [0, 10, 0] }}
           transition={{ repeat: Infinity, duration: 2 }}
         >
-          <div className="w-6 h-10 rounded-full border-2 border-muted-foreground/50 flex items-start justify-center p-2">
+          <div className="w-6 h-10 rounded-full border-2 border-[var(--color-text-muted)] flex items-start justify-center p-2">
             <motion.div
-              className="w-1.5 h-1.5 rounded-full bg-primary"
+              className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent-val)]"
               animate={{ y: [0, 12, 0] }}
               transition={{ repeat: Infinity, duration: 1.5 }}
             />
@@ -188,7 +204,9 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
         </motion.div>
       </section>
 
-      {/* About Section */}
+      {/* ═══════════════════════════════════════════════════════════════════
+          ABOUT SECTION
+          ═══════════════════════════════════════════════════════════════════ */}
       <section className="py-14 relative">
         <div className="container mx-auto px-4">
           <div className="grid lg:grid-cols-2 gap-10 items-center max-w-5xl mx-auto">
@@ -196,29 +214,30 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
               initial={{ opacity: 0, x: -30 }}
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true }}
-              transition={{ duration: 0.6 }}
+              transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
             >
-              <span className="text-primary text-sm font-medium uppercase tracking-wider">
+              <span className="eyebrow">
                 Conoce a tu entrenadora
               </span>
-              <h2 className="text-2xl md:text-3xl font-bold text-foreground mt-2 mb-4">
+              <h2 className="text-2xl md:text-3xl font-bold text-[var(--color-text-primary)] mt-3 mb-4">
                 {cmsContent.aboutTitle}
               </h2>
-              <p className="text-muted-foreground leading-relaxed mb-5">
+              <div className="line-accent mb-6" />
+              <p className="text-[var(--color-text-secondary)] leading-relaxed mb-5">
                 {cmsContent.aboutText}
               </p>
               <div className="flex flex-wrap gap-3">
                 <div className="flex items-center gap-2">
-                  <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <Award className="w-4 h-4 text-primary" />
+                  <div className="w-9 h-9 rounded-lg bg-[var(--color-accent-dim)] flex items-center justify-center">
+                    <Award className="w-4 h-4 text-[var(--color-accent-val)]" />
                   </div>
-                  <span className="text-sm text-muted-foreground">Certificación Internacional</span>
+                  <span className="text-sm text-[var(--color-text-secondary)]">Certificación Internacional</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <Heart className="w-4 h-4 text-primary" />
+                  <div className="w-9 h-9 rounded-lg bg-[var(--color-accent-dim)] flex items-center justify-center">
+                    <Heart className="w-4 h-4 text-[var(--color-accent-val)]" />
                   </div>
-                  <span className="text-sm text-muted-foreground">Atención Personalizada</span>
+                  <span className="text-sm text-[var(--color-text-secondary)]">Atención Personalizada</span>
                 </div>
               </div>
               <Link href="/sandra" className="inline-block mt-6">
@@ -233,9 +252,9 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
               initial={{ opacity: 0, x: 30 }}
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true }}
-              transition={{ duration: 0.6 }}
+              transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
             >
-              <div className="rounded-3xl overflow-hidden glass-card p-2">
+              <div className="rounded-3xl overflow-hidden card-glass p-2">
                 <div className="relative rounded-2xl overflow-hidden">
                   <Image
                     src="/imagenes/sandra.jpg"
@@ -244,23 +263,25 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
                     height={800}
                     className="w-full h-auto object-cover object-top"
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-base)]/80 via-transparent to-transparent" />
                   <div className="absolute bottom-0 left-0 right-0 p-4 text-center">
-                    <p className="text-foreground font-semibold">Sandra Andújar</p>
-                    <p className="text-primary text-sm">Fundadora & Coach Principal</p>
+                    <p className="text-[var(--color-text-primary)] font-semibold">Sandra Andújar</p>
+                    <p className="text-[var(--color-accent-val)] text-sm">Fundadora & Coach Principal</p>
                   </div>
                 </div>
               </div>
-              <div className="absolute -top-4 -right-4 w-20 h-20 bg-primary/20 rounded-full blur-2xl" />
-              <div className="absolute -bottom-4 -left-4 w-24 h-24 bg-accent/20 rounded-full blur-2xl" />
+              <div className="absolute -top-4 -right-4 w-20 h-20 bg-[var(--color-accent-val)]/15 rounded-full blur-2xl" />
+              <div className="absolute -bottom-4 -left-4 w-24 h-24 bg-[var(--color-accent-val)]/10 rounded-full blur-2xl" />
             </motion.div>
           </div>
         </div>
       </section>
 
-      {/* Services Section */}
+      {/* ═══════════════════════════════════════════════════════════════════
+          SERVICES SECTION
+          ═══════════════════════════════════════════════════════════════════ */}
       <section className="py-24 relative">
-        <div className="absolute inset-0 bg-secondary/30" />
+        <div className="absolute inset-0 bg-[var(--color-bg-surface)]" />
         <div className="container mx-auto px-4 relative">
           <motion.div
             className="text-center max-w-2xl mx-auto mb-16"
@@ -268,15 +289,16 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
           >
-            <span className="text-primary text-sm font-medium uppercase tracking-wider">
+            <span className="eyebrow justify-center">
               Nuestros Servicios
             </span>
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground mt-3 mb-4">
+            <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)] mt-3 mb-4">
               {cmsContent.servicesTitle}
             </h2>
-            <p className="text-muted-foreground">
+            <p className="text-[var(--color-text-secondary)]">
               {cmsContent.servicesSubtitle}
             </p>
+            <div className="line-accent mx-auto mt-4" />
           </motion.div>
 
           <motion.div
@@ -292,18 +314,20 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
                   return (
                     <motion.div key={service.id} variants={itemVariants}>
                       <Link href={`/servicios#${service.id}`}>
-                        <GlassCard className="h-full group cursor-pointer">
-                          <div className="w-12 h-12 rounded-xl bg-primary/10 group-hover:bg-primary/20 transition-colors flex items-center justify-center mb-4">
-                            <Icon className="w-6 h-6 text-primary transition-colors" />
+                        <GlassCard className="h-full group cursor-pointer relative overflow-hidden">
+                          {/* Top accent bar on hover */}
+                          <div className="absolute top-0 left-0 right-0 h-0.5 bg-[var(--color-accent-val)] scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left" />
+                          <div className="w-10 h-10 rounded-lg bg-[var(--color-accent-dim)] group-hover:bg-[var(--color-accent-val)]/15 transition-colors duration-300 flex items-center justify-center mb-4">
+                            <Icon className="w-5 h-5 text-[var(--color-accent-val)] transition-colors" />
                           </div>
-                          <h3 className="text-lg font-semibold text-foreground mb-2 group-hover:text-primary transition-colors">
+                          <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2 group-hover:text-[var(--color-accent-val)] transition-colors duration-300">
                             {service.title}
                           </h3>
-                          <p className="text-muted-foreground text-sm mb-4 line-clamp-2">
+                          <p className="text-[var(--color-text-secondary)] text-sm mb-4 line-clamp-2">
                             {service.description}
                           </p>
                           <div className="flex items-center">
-                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                            <span className="text-xs text-[var(--color-text-muted)] flex items-center gap-1">
                               <Clock className="w-3 h-3" />
                               {service.duration}
                             </span>
@@ -330,7 +354,9 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
         </div>
       </section>
 
-      {/* Testimonials Section */}
+      {/* ═══════════════════════════════════════════════════════════════════
+          TESTIMONIALS SECTION
+          ═══════════════════════════════════════════════════════════════════ */}
       <section className="py-24 relative">
         <div className="container mx-auto px-4">
           <motion.div
@@ -339,12 +365,13 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
           >
-            <span className="text-primary text-sm font-medium uppercase tracking-wider">
+            <span className="eyebrow justify-center">
               Testimonios
             </span>
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground mt-3 mb-4">
+            <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)] mt-3 mb-4">
               {cmsContent.testimonialsTitle}
             </h2>
+            <div className="line-accent mx-auto mt-4" />
           </motion.div>
 
           <motion.div
@@ -362,20 +389,20 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
                         {Array.from({ length: 5 }).map((_, i) => (
                           <Star
                             key={i}
-                            className={`w-4 h-4 ${i < testimonial.rating ? 'text-primary fill-primary' : 'text-muted-foreground'}`}
+                            className={`w-4 h-4 ${i < testimonial.rating ? 'text-[var(--color-accent-val)] fill-[var(--color-accent-val)]' : 'text-[var(--color-text-muted)]'}`}
                           />
                         ))}
                       </div>
-                      <p className="text-muted-foreground text-sm mb-6 italic">
+                      <p className="text-[var(--color-text-secondary)] text-sm mb-6 italic leading-relaxed">
                         &ldquo;{testimonial.content}&rdquo;
                       </p>
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-semibold">
+                        <div className="w-10 h-10 rounded-full bg-[var(--color-accent-dim)] flex items-center justify-center text-[var(--color-accent-val)] font-semibold text-sm">
                           {testimonial.name.charAt(0)}
                         </div>
                         <div>
-                          <p className="text-foreground font-medium text-sm">{testimonial.name}</p>
-                          <p className="text-muted-foreground text-xs">{testimonial.role}</p>
+                          <p className="text-[var(--color-text-primary)] font-medium text-sm">{testimonial.name}</p>
+                          <p className="text-[var(--color-text-muted)] text-xs">{testimonial.role}</p>
                         </div>
                       </div>
                     </GlassCard>
@@ -390,20 +417,24 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
         </div>
       </section>
 
-      {/* CTA Section */}
+      {/* ═══════════════════════════════════════════════════════════════════
+          CTA SECTION
+          ═══════════════════════════════════════════════════════════════════ */}
       <section className="py-24 relative overflow-hidden">
-        <div className="absolute inset-0 bg-accent/5" />
+        <div className="absolute inset-0 bg-[var(--color-accent-dim)]" />
+        {/* Glow effect */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] rounded-full bg-[var(--color-accent-val)]/5 blur-3xl pointer-events-none" />
         <div className="container mx-auto px-4 relative">
           <motion.div
-            className="max-w-3xl mx-auto text-center glass-card rounded-3xl p-6 md:p-12"
+            className="max-w-3xl mx-auto text-center card-glass rounded-3xl p-6 md:p-12"
             initial={{ opacity: 0, y: 30 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
           >
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
+            <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)] mb-4">
               {cmsContent.ctaTitle}
             </h2>
-            <p className="text-muted-foreground text-lg mb-8">
+            <p className="text-[var(--color-text-secondary)] text-lg mb-8">
               {cmsContent.ctaSubtitle}
             </p>
             <Link href="/portal">

@@ -3,7 +3,6 @@
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import Image from 'next/image';
 import { Mail, Phone, MapPin, Instagram } from 'lucide-react';
 import { useCMS } from '@/hooks/useFirestore';
 
@@ -26,31 +25,26 @@ export function Footer() {
   if (hideFooter) return null;
 
   return (
-    <footer className="relative bg-carbon border-t border-border mt-auto">
-      {/* Gradient Overlay */}
-      <div className="absolute inset-0 bg-gradient-to-t from-primary/5 to-transparent pointer-events-none" />
+    <footer className="relative bg-[#050505] mt-auto">
+      {/* Gradient top line */}
+      <div className="h-px bg-gradient-to-r from-transparent via-[var(--color-accent-val)] to-transparent" />
 
       <div className="container mx-auto px-4 py-12 relative">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-12">
           {/* Brand */}
           <div className="space-y-4">
-            <Link href="/" className="flex items-center gap-2">
-              <motion.div
-                className="w-10 h-10 rounded-xl overflow-hidden shrink-0"
-                whileHover={{ scale: 1.05 }}
+            <Link href="/" className="flex flex-col group">
+              <motion.span
+                className="text-lg font-bold tracking-tight text-[var(--color-text-primary)] group-hover:text-[var(--color-accent-val)] transition-colors duration-300"
+                whileHover={{ scale: 1.02 }}
               >
-                <Image src="/imagenes/logo.jpeg" alt="Focus Club Vallecas" width={40} height={40} className="w-full h-full object-cover" />
-              </motion.div>
-              <div className="flex flex-col">
-                <span className="text-lg font-bold tracking-tight text-ivory">
-                  Focus Club
-                </span>
-                <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
-                  Vallecas
-                </span>
-              </div>
+                Focus Club
+              </motion.span>
+              <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--color-accent-val)]">
+                Vallecas
+              </span>
             </Link>
-            <p className="text-muted-foreground text-sm leading-relaxed">
+            <p className="text-[var(--color-text-secondary)] text-sm leading-relaxed">
               {cmsContent.footerText}
             </p>
             <div className="flex items-center gap-3">
@@ -58,7 +52,7 @@ export function Footer() {
                 href={cmsContent.socialInstagram}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-accent hover:bg-muted/80 transition-colors"
+                className="w-9 h-9 rounded-lg bg-[var(--color-bg-card)] flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] hover:bg-[var(--color-bg-card-hover)] transition-all duration-300"
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
               >
@@ -68,7 +62,7 @@ export function Footer() {
                 href={`https://wa.me/${cmsContent.whatsapp.replace(/\D/g, '')}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:text-accent hover:bg-muted/80 transition-colors"
+                className="w-9 h-9 rounded-lg bg-[var(--color-bg-card)] flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] hover:bg-[var(--color-bg-card-hover)] transition-all duration-300"
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
               >
@@ -81,7 +75,7 @@ export function Footer() {
 
           {/* Quick Links */}
           <div>
-            <h3 className="text-sm font-semibold text-ivory uppercase tracking-wider mb-4">
+            <h3 className="text-sm font-semibold text-[var(--color-text-primary)] uppercase tracking-wider mb-4">
               Enlaces Rápidos
             </h3>
             <ul className="space-y-3">
@@ -89,7 +83,7 @@ export function Footer() {
                 <li key={link.href}>
                   <Link
                     href={link.href}
-                    className="text-muted-foreground hover:text-accent transition-colors text-sm"
+                    className="text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors duration-300 text-sm"
                   >
                     {link.label}
                   </Link>
@@ -100,27 +94,27 @@ export function Footer() {
 
           {/* Services */}
           <div>
-            <h3 className="text-sm font-semibold text-ivory uppercase tracking-wider mb-4">
+            <h3 className="text-sm font-semibold text-[var(--color-text-primary)] uppercase tracking-wider mb-4">
               Servicios
             </h3>
             <ul className="space-y-3">
               <li>
-                <Link href="/servicios" className="text-muted-foreground hover:text-accent transition-colors text-sm">
+                <Link href="/servicios" className="text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors duration-300 text-sm">
                   Entrenamiento Personal
                 </Link>
               </li>
               <li>
-                <Link href="/servicios" className="text-muted-foreground hover:text-accent transition-colors text-sm">
+                <Link href="/servicios" className="text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors duration-300 text-sm">
                   Fisioterapia Deportiva
                 </Link>
               </li>
               <li>
-                <Link href="/servicios" className="text-muted-foreground hover:text-accent transition-colors text-sm">
+                <Link href="/servicios" className="text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors duration-300 text-sm">
                   Pilates Premium
                 </Link>
               </li>
               <li>
-                <Link href="/servicios" className="text-muted-foreground hover:text-accent transition-colors text-sm">
+                <Link href="/servicios" className="text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors duration-300 text-sm">
                   Consulta Nutricional
                 </Link>
               </li>
@@ -129,35 +123,35 @@ export function Footer() {
 
           {/* Contact */}
           <div>
-            <h3 className="text-sm font-semibold text-ivory uppercase tracking-wider mb-4">
+            <h3 className="text-sm font-semibold text-[var(--color-text-primary)] uppercase tracking-wider mb-4">
               Contacto
             </h3>
             <ul className="space-y-3">
               <li className="flex items-start gap-3">
-                <MapPin className="w-4 h-4 text-accent mt-0.5 flex-shrink-0" />
+                <MapPin className="w-4 h-4 text-[var(--color-accent-val)] mt-0.5 flex-shrink-0" />
                 <a
                   href="https://maps.app.goo.gl/EHFk2xEh9xwHBaDKA"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-muted-foreground hover:text-accent transition-colors text-sm"
+                  className="text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors duration-300 text-sm"
                 >
                   {cmsContent.address}
                 </a>
               </li>
               <li className="flex items-center gap-3">
-                <Phone className="w-4 h-4 text-accent flex-shrink-0" />
+                <Phone className="w-4 h-4 text-[var(--color-accent-val)] flex-shrink-0" />
                 <a
                   href={`tel:${cmsContent.phone}`}
-                  className="text-muted-foreground hover:text-accent transition-colors text-sm"
+                  className="text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors duration-300 text-sm"
                 >
                   {cmsContent.phone}
                 </a>
               </li>
               <li className="flex items-center gap-3">
-                <Mail className="w-4 h-4 text-accent flex-shrink-0" />
+                <Mail className="w-4 h-4 text-[var(--color-accent-val)] flex-shrink-0" />
                 <a
                   href={`mailto:${cmsContent.email}`}
-                  className="text-muted-foreground hover:text-accent transition-colors text-sm"
+                  className="text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors duration-300 text-sm"
                 >
                   {cmsContent.email}
                 </a>
@@ -167,15 +161,15 @@ export function Footer() {
         </div>
 
         {/* Bottom */}
-        <div className="border-t border-border mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-muted-foreground text-sm">
+        <div className="border-t border-[var(--color-border-base)] mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
+          <p className="text-[var(--color-text-muted)] text-sm">
             © {new Date().getFullYear()} Focus Club Vallecas. Todos los derechos reservados.
           </p>
           <div className="flex items-center gap-6">
-            <Link href="/politica-de-privacidad" className="text-muted-foreground hover:text-accent text-sm transition-colors">
+            <Link href="/politica-de-privacidad" className="text-[var(--color-text-muted)] hover:text-[var(--color-accent-val)] text-sm transition-colors duration-300">
               Política de Privacidad
             </Link>
-            <Link href="/cookies" className="text-muted-foreground hover:text-accent text-sm transition-colors">
+            <Link href="/cookies" className="text-[var(--color-text-muted)] hover:text-[var(--color-accent-val)] text-sm transition-colors duration-300">
               Política de Cookies
             </Link>
           </div>

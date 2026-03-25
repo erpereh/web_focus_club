@@ -33,7 +33,7 @@ export default function ServiciosPage() {
     <div className="min-h-screen">
       {/* Hero Section */}
       <section className="relative py-20 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-primary/10 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-accent-dim)] to-transparent" />
         <div className="container mx-auto px-4">
           <motion.div
             className="text-center max-w-3xl mx-auto"
@@ -41,13 +41,14 @@ export default function ServiciosPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
           >
-            <span className="text-accent text-sm font-medium uppercase tracking-wider">
+            <span className="eyebrow">
               Nuestros Servicios
             </span>
-            <h1 className="text-4xl md:text-5xl font-bold text-ivory mt-3 mb-6">
+            <h1 className="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mt-3 mb-6">
               {cmsContent.servicesTitle}
             </h1>
-            <p className="text-muted-foreground text-lg">
+            <div className="line-accent mx-auto mb-4" />
+            <p className="text-[var(--color-text-secondary)] text-lg">
               {cmsContent.servicesSubtitle}
             </p>
           </motion.div>
@@ -70,27 +71,27 @@ export default function ServiciosPage() {
                   <GlassCard className="h-full group">
                     <div className="flex flex-col md:flex-row gap-6">
                       <div className="flex-shrink-0">
-                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary/30 to-accent/10 flex items-center justify-center group-hover:shadow-glow transition-shadow">
-                          <Icon className="w-8 h-8 text-accent" />
+                        <div className="w-16 h-16 rounded-2xl bg-[var(--color-accent-dim)] flex items-center justify-center group-hover:shadow-glow transition-shadow">
+                          <Icon className="w-8 h-8 text-[var(--color-accent-val)]" />
                         </div>
                       </div>
                       <div className="flex-1">
-                        <h2 className="text-2xl font-bold text-ivory group-hover:text-accent transition-colors mb-3">
+                        <h2 className="text-2xl font-bold text-[var(--color-text-primary)] group-hover:text-[var(--color-accent-val)] transition-colors mb-3">
                           {service.title}
                         </h2>
-                        <p className="text-muted-foreground mb-4">
+                        <p className="text-[var(--color-text-secondary)] mb-4">
                           {service.description}
                         </p>
-                        <div className="flex items-center gap-2 text-muted-foreground text-sm mb-4">
-                          <Clock className="w-4 h-4 text-accent" />
+                        <div className="flex items-center gap-2 text-[var(--color-text-secondary)] text-sm mb-4">
+                          <Clock className="w-4 h-4 text-[var(--color-accent-val)]" />
                           <span>Duración: {service.duration}</span>
                         </div>
                         {service.features && service.features.length > 0 && (
                           <div className="space-y-2 mb-6">
                             {service.features.map((feature, i) => (
                               <div key={i} className="flex items-center gap-2">
-                                <CheckCircle className="w-4 h-4 text-primary flex-shrink-0" />
-                                <span className="text-ivory text-sm">{feature}</span>
+                                <CheckCircle className="w-4 h-4 text-[var(--color-accent-val)] flex-shrink-0" />
+                                <span className="text-[var(--color-text-primary)] text-sm">{feature}</span>
                               </div>
                             ))}
                           </div>
@@ -124,7 +125,8 @@ export default function ServiciosPage() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
           >
-            <h2 className="text-3xl font-bold text-ivory">Preguntas Frecuentes</h2>
+            <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)]">Preguntas Frecuentes</h2>
+            <div className="line-accent mx-auto mt-3" />
           </motion.div>
 
           <div className="max-w-2xl mx-auto space-y-4">
@@ -154,8 +156,8 @@ export default function ServiciosPage() {
                 transition={{ delay: index * 0.1 }}
               >
                 <GlassCard className="p-6">
-                  <h3 className="text-lg font-semibold text-ivory mb-2">{faq.q}</h3>
-                  <p className="text-muted-foreground text-sm">{faq.a}</p>
+                  <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">{faq.q}</h3>
+                  <p className="text-[var(--color-text-secondary)] text-sm">{faq.a}</p>
                 </GlassCard>
               </motion.div>
             ))}

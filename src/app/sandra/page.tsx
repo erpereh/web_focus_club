@@ -113,7 +113,7 @@ export default function SandraPage() {
     <div className="min-h-screen">
       {/* Hero Section */}
       <section className="relative py-20 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-primary/10 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-accent-dim)] to-transparent" />
         <div className="container mx-auto px-4">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <motion.div
@@ -121,13 +121,14 @@ export default function SandraPage() {
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.6 }}
             >
-              <span className="text-accent text-sm font-medium uppercase tracking-wider">
+              <span className="eyebrow">
                 La experta detrás del proyecto
               </span>
-              <h1 className="text-4xl md:text-5xl font-bold text-ivory mt-3 mb-6">
+              <h1 className="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mt-3 mb-6">
                 {cmsContent?.sandra?.name || 'Sandra Andújar'}
               </h1>
-              <div className="text-muted-foreground text-lg leading-relaxed mb-4 space-y-4">
+              <div className="line-accent mb-4" />
+              <div className="text-[var(--color-text-secondary)] text-lg leading-relaxed mb-4 space-y-4">
                 {cmsContent?.sandra?.bio ? (
                   cmsContent.sandra.bio.split('\n').map((para, i) => (
                     <p key={i}>{para}</p>
@@ -135,10 +136,10 @@ export default function SandraPage() {
                 ) : (
                   <>
                     <p>
-                      Con más de <span className="text-accent font-semibold">20 años de experiencia</span> en el mundo del fitness de competición, Sandra Andújar es una referencia en entrenamiento de hipertrofia y preparación física de élite.
+                      Con más de <span className="text-[var(--color-accent-val)] font-semibold">20 años de experiencia</span> en el mundo del fitness de competición, Sandra Andújar es una referencia en entrenamiento de hipertrofia y preparación física de élite.
                     </p>
                     <p>
-                      <span className="text-accent font-semibold">Jueza internacional certificada</span> y preparadora de campeones, su metodología combina la ciencia más avanzada con una pasión inquebrantable por la excelencia.
+                      <span className="text-[var(--color-accent-val)] font-semibold">Jueza internacional certificada</span> y preparadora de campeones, su metodología combina la ciencia más avanzada con una pasión inquebrantable por la excelencia.
                     </p>
                   </>
                 )}
@@ -152,13 +153,13 @@ export default function SandraPage() {
                   return (
                     <motion.div
                       key={index}
-                      className="text-center p-4 rounded-xl bg-primary/10 border border-primary/20"
+                      className="text-center p-4 rounded-xl bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)]"
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.1 }}
                     >
-                      <Icon className="w-6 h-6 text-accent mx-auto mb-2" />
-                      <div className="text-sm font-bold text-ivory">{text}</div>
+                      <Icon className="w-6 h-6 text-[var(--color-accent-val)] mx-auto mb-2" />
+                      <div className="text-sm font-bold text-[var(--color-text-primary)]">{text}</div>
                     </motion.div>
                   );
                 })}
@@ -181,13 +182,13 @@ export default function SandraPage() {
                     className="w-full h-auto object-cover object-top"
                     priority
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-carbon/80 via-transparent to-transparent" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-base)]/80 via-transparent to-transparent" />
                   <div className="absolute bottom-0 left-0 right-0 p-6">
                     <div className="flex flex-wrap gap-2">
-                      <span className="px-3 py-1 rounded-full bg-accent/20 text-accent text-xs font-medium">
+                      <span className="px-3 py-1 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs font-medium">
                         Jueza Internacional
                       </span>
-                      <span className="px-3 py-1 rounded-full bg-primary/20 text-ivory text-xs font-medium">
+                      <span className="px-3 py-1 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-text-primary)] text-xs font-medium">
                         +20 Años Experiencia
                       </span>
                     </div>
@@ -195,8 +196,8 @@ export default function SandraPage() {
                 </div>
               </div>
               {/* Decorative elements */}
-              <div className="absolute -top-8 -right-8 w-32 h-32 bg-accent/20 rounded-full blur-3xl" />
-              <div className="absolute -bottom-8 -left-8 w-40 h-40 bg-primary/20 rounded-full blur-3xl" />
+              <div className="absolute -top-8 -right-8 w-32 h-32 bg-[var(--color-accent-val)]/15 rounded-full blur-3xl" />
+              <div className="absolute -bottom-8 -left-8 w-40 h-40 bg-[var(--color-accent-val)]/15 rounded-full blur-3xl" />
             </motion.div>
           </div>
         </div>
@@ -211,12 +212,13 @@ export default function SandraPage() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
           >
-            <span className="text-accent text-sm font-medium uppercase tracking-wider">
+            <span className="eyebrow">
               Filosofía de trabajo
             </span>
-            <h2 className="text-3xl md:text-4xl font-bold text-ivory mt-3">
+            <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)] mt-3">
               Valores que nos definen
             </h2>
+            <div className="line-accent mx-auto mt-3" />
           </motion.div>
 
           <motion.div
@@ -229,11 +231,11 @@ export default function SandraPage() {
             {values.map((value, index) => (
               <motion.div key={index} variants={itemVariants}>
                 <GlassCard className="text-center h-full">
-                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary/30 to-accent/10 flex items-center justify-center mx-auto mb-4">
-                    <value.icon className="w-8 h-8 text-accent" />
+                  <div className="w-16 h-16 rounded-2xl bg-[var(--color-accent-dim)] flex items-center justify-center mx-auto mb-4">
+                    <value.icon className="w-8 h-8 text-[var(--color-accent-val)]" />
                   </div>
-                  <h3 className="text-xl font-semibold text-ivory mb-2">{value.title}</h3>
-                  <p className="text-muted-foreground text-sm">{value.description}</p>
+                  <h3 className="text-xl font-semibold text-[var(--color-text-primary)] mb-2">{value.title}</h3>
+                  <p className="text-[var(--color-text-secondary)] text-sm">{value.description}</p>
                 </GlassCard>
               </motion.div>
             ))}
@@ -242,7 +244,7 @@ export default function SandraPage() {
       </section>
 
       {/* Timeline Section */}
-      <section className="py-20 bg-gradient-to-b from-transparent via-primary/5 to-transparent">
+      <section className="py-20 bg-gradient-to-b from-transparent via-[var(--color-accent-dim)] to-transparent">
         <div className="container mx-auto px-4">
           <motion.div
             className="text-center mb-16"
@@ -250,12 +252,13 @@ export default function SandraPage() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
           >
-            <span className="text-accent text-sm font-medium uppercase tracking-wider">
+            <span className="eyebrow">
               Trayectoria profesional
             </span>
-            <h2 className="text-3xl md:text-4xl font-bold text-ivory mt-3">
+            <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)] mt-3">
               Un camino de dedicación
             </h2>
+            <div className="line-accent mx-auto mt-3" />
           </motion.div>
 
           <div className="max-w-3xl mx-auto">
@@ -269,15 +272,15 @@ export default function SandraPage() {
                 transition={{ delay: index * 0.1 }}
               >
                 {/* Timeline line */}
-                <div className="absolute left-0 top-2 bottom-0 w-px bg-gradient-to-b from-accent via-primary to-transparent" />
+                <div className="absolute left-0 top-2 bottom-0 w-px bg-gradient-to-b from-[var(--color-accent-val)] via-[var(--color-accent-val)] to-transparent" />
 
                 {/* Timeline dot */}
-                <div className="absolute left-0 top-2 -translate-x-1/2 w-4 h-4 rounded-full bg-accent shadow-emerald-glow" />
+                <div className="absolute left-0 top-2 -translate-x-1/2 w-4 h-4 rounded-full bg-[var(--color-accent-val)] shadow-emerald-glow" />
 
                 <GlassCard className="ml-4">
-                  <span className="text-accent font-semibold text-sm">{item.year}</span>
-                  <h3 className="text-lg font-semibold text-ivory mt-1 mb-2">{item.title}</h3>
-                  <p className="text-muted-foreground text-sm">{item.description}</p>
+                  <span className="text-[var(--color-accent-val)] font-semibold text-sm">{item.year}</span>
+                  <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mt-1 mb-2">{item.title}</h3>
+                  <p className="text-[var(--color-text-secondary)] text-sm">{item.description}</p>
                 </GlassCard>
               </motion.div>
             ))}
@@ -294,13 +297,14 @@ export default function SandraPage() {
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true }}
             >
-              <span className="text-accent text-sm font-medium uppercase tracking-wider">
+              <span className="eyebrow">
                 Formación académica
               </span>
-              <h2 className="text-3xl md:text-4xl font-bold text-ivory mt-3 mb-6">
+              <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)] mt-3 mb-3">
                 Certificaciones y títulos
               </h2>
-              <p className="text-muted-foreground mb-8">
+              <div className="line-accent mb-6" />
+              <p className="text-[var(--color-text-secondary)] mb-8">
                 Una formación continua y rigurosa que garantiza la máxima calidad en cada sesión.
               </p>
               <div className="space-y-3">
@@ -313,8 +317,8 @@ export default function SandraPage() {
                     viewport={{ once: true }}
                     transition={{ delay: index * 0.1 }}
                   >
-                    <CheckCircle className="w-5 h-5 text-accent flex-shrink-0 mt-0.5" />
-                    <span className="text-ivory text-sm">{cert}</span>
+                    <CheckCircle className="w-5 h-5 text-[var(--color-accent-val)] flex-shrink-0 mt-0.5" />
+                    <span className="text-[var(--color-text-primary)] text-sm">{cert}</span>
                   </motion.div>
                 ))}
               </div>
@@ -327,13 +331,13 @@ export default function SandraPage() {
             >
               <GlassCard className="p-8">
                 <div className="text-center">
-                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-accent to-emerald-light mx-auto mb-6 flex items-center justify-center">
-                    <Award className="w-10 h-10 text-carbon" />
+                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[var(--color-accent-val)] to-emerald-bright mx-auto mb-6 flex items-center justify-center">
+                    <Award className="w-10 h-10 text-[var(--color-bg-base)]" />
                   </div>
-                  <h3 className="text-xl font-semibold text-ivory mb-2">
+                  <h3 className="text-xl font-semibold text-[var(--color-text-primary)] mb-2">
                     ¿Listo para empezar?
                   </h3>
-                  <p className="text-muted-foreground text-sm mb-6">
+                  <p className="text-[var(--color-text-secondary)] text-sm mb-6">
                     Reserva tu primera consulta gratuita y descubre cómo podemos ayudarte.
                   </p>
                   <Link href="/portal">

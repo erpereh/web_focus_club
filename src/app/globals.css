@@ -10,23 +10,21 @@
 
   /* ============================================
      PALETA - Focus Club Vallecas
-     Verdes oscuros + Blanco hueso
+     Dark Premium (Vercel/Stripe style)
      ============================================ */
 
-  /* Fondo - Negro Carbón */
-  --color-carbon: #0A0A0A;
+  /* Fondos */
+  --color-carbon: #080808;
+  --color-surface: #0d0d0d;
 
-  /* Verde Bosque */
+  /* Verdes */
   --color-forest: #1B4332;
-
-  /* Verde Esmeralda */
   --color-emerald: #2D6A4F;
+  --color-emerald-light: #52b788;
+  --color-emerald-bright: #74c69d;
 
-  /* Verde Esmeralda Claro */
-  --color-emerald-light: #40916C;
-
-  /* Blanco Hueso */
-  --color-ivory: #F8F9FA;
+  /* Texto */
+  --color-ivory: #f0f0f0;
 
   /* Sidebar */
   --color-sidebar-ring: var(--sidebar-ring);
@@ -38,7 +36,7 @@
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
 
-  /* Gráficos */
+  /* Graficos */
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -70,64 +68,85 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* ============================================
+   SISTEMA DE DISEÑO — Variables Globales
+   ============================================ */
 :root {
   --radius: 0.75rem;
 
-  /* Fondo */
-  --background: #0A0A0A;
-  --foreground: #F8F9FA;
+  /* ── Nuevos tokens de diseño ── */
+  --color-bg-base: #080808;
+  --color-bg-surface: #0d0d0d;
+  --color-bg-card: rgba(255, 255, 255, 0.03);
+  --color-bg-card-hover: rgba(82, 183, 136, 0.04);
+  --color-accent-val: #52b788;
+  --color-accent-bright: #74c69d;
+  --color-accent-dim: rgba(64, 145, 108, 0.08);
+  --color-accent-border: rgba(82, 183, 136, 0.25);
+  --color-text-primary: #f0f0f0;
+  --color-text-secondary: rgba(255, 255, 255, 0.45);
+  --color-text-muted: rgba(255, 255, 255, 0.2);
+  --color-border-base: rgba(255, 255, 255, 0.07);
+  --color-border-hover: rgba(82, 183, 136, 0.25);
+  --gradient-cta: linear-gradient(135deg, #2d6a4f, #52b788);
+  --gradient-glow: radial-gradient(ellipse at 50% 0%, rgba(64, 145, 108, 0.12) 0%, transparent 70%);
+  --font-size-hero: clamp(36px, 6vw, 72px);
+  --font-size-section: clamp(28px, 4vw, 48px);
+  --easing-smooth: cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-base: 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  --radius-card: 12px;
+  --radius-btn: 6px;
 
-  /* Tarjetas */
-  --card: rgba(27, 67, 50, 0.15);
-  --card-foreground: #F8F9FA;
+  /* ── Puente shadcn/ui ── */
+  --background: #080808;
+  --foreground: #f0f0f0;
 
-  /* Popover */
-  --popover: rgba(10, 10, 10, 0.98);
-  --popover-foreground: #F8F9FA;
+  --card: rgba(255, 255, 255, 0.03);
+  --card-foreground: #f0f0f0;
 
-  /* Primario - Verde Esmeralda */
+  --popover: rgba(13, 13, 13, 0.98);
+  --popover-foreground: #f0f0f0;
+
   --primary: #2D6A4F;
-  --primary-foreground: #F8F9FA;
+  --primary-foreground: #f0f0f0;
 
-  /* Secundario */
-  --secondary: rgba(45, 106, 79, 0.2);
-  --secondary-foreground: #F8F9FA;
+  --secondary: rgba(45, 106, 79, 0.15);
+  --secondary-foreground: #f0f0f0;
 
-  /* Atenuado */
-  --muted: rgba(248, 249, 250, 0.1);
-  --muted-foreground: rgba(248, 249, 250, 0.7);
+  --muted: rgba(255, 255, 255, 0.06);
+  --muted-foreground: rgba(255, 255, 255, 0.45);
 
-  /* Acento - Verde Esmeralda Claro */
-  --accent: #40916C;
-  --accent-foreground: #F8F9FA;
+  --accent: #52b788;
+  --accent-foreground: #f0f0f0;
 
-  /* Destructivo */
   --destructive: #DC2626;
-  --destructive-foreground: #F8F9FA;
+  --destructive-foreground: #f0f0f0;
 
-  /* Bordes */
-  --border: rgba(27, 67, 50, 0.3);
-  --input: rgba(27, 67, 50, 0.25);
-  --ring: #40916C;
+  --border: rgba(255, 255, 255, 0.07);
+  --input: rgba(255, 255, 255, 0.05);
+  --ring: #52b788;
 
-  /* Gráficos */
+  /* Graficos */
   --chart-1: #2D6A4F;
-  --chart-2: #40916C;
-  --chart-3: #52B788;
+  --chart-2: #52b788;
+  --chart-3: #74c69d;
   --chart-4: #1B4332;
-  --chart-5: #74C69D;
+  --chart-5: #95d5b2;
 
   /* Sidebar */
-  --sidebar: rgba(10, 10, 10, 0.98);
-  --sidebar-foreground: #F8F9FA;
+  --sidebar: rgba(8, 8, 8, 0.98);
+  --sidebar-foreground: #f0f0f0;
   --sidebar-primary: #2D6A4F;
-  --sidebar-primary-foreground: #F8F9FA;
-  --sidebar-accent: rgba(64, 145, 108, 0.2);
-  --sidebar-accent-foreground: #F8F9FA;
-  --sidebar-border: rgba(27, 67, 50, 0.3);
-  --sidebar-ring: #40916C;
+  --sidebar-primary-foreground: #f0f0f0;
+  --sidebar-accent: rgba(82, 183, 136, 0.15);
+  --sidebar-accent-foreground: #f0f0f0;
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+  --sidebar-ring: #52b788;
 }
 
+/* ============================================
+   BASE
+   ============================================ */
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -135,8 +154,8 @@
 
   body {
     @apply bg-background text-foreground;
-    background: #0A0A0A;
-    color: #F8F9FA;
+    background: var(--color-bg-base);
+    color: var(--color-text-primary);
     font-family: var(--font-sans), system-ui, sans-serif;
   }
 
@@ -145,89 +164,140 @@
   }
 }
 
-/* Barra de desplazamiento personalizada */
+/* ============================================
+   SCROLLBAR
+   ============================================ */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(10, 10, 10, 0.5);
-  border-radius: 4px;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(45, 106, 79, 0.6);
-  border-radius: 4px;
-  border: 2px solid rgba(10, 10, 10, 0.5);
+  background: rgba(82, 183, 136, 0.2);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #40916C;
+  background: rgba(82, 183, 136, 0.4);
 }
 
-/* Glassmorphism */
+/* ============================================
+   GLASSMORPHISM
+   ============================================ */
 .glass {
-  background: rgba(27, 67, 50, 0.15);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(27, 67, 50, 0.3);
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border-base);
 }
 
 .glass-dark {
-  background: rgba(10, 10, 10, 0.95);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(27, 67, 50, 0.25);
+  background: rgba(8, 8, 8, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .glass-card {
-  background: rgba(27, 67, 50, 0.15);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(27, 67, 50, 0.3);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: var(--color-bg-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border-base);
+  border-radius: var(--radius-card);
+  transition: all var(--transition-base);
 }
 
 .glass-card:hover {
-  border-color: rgba(64, 145, 108, 0.4);
-  background: rgba(27, 67, 50, 0.2);
+  border-color: var(--color-accent-border);
+  background: var(--color-bg-card-hover);
+  transform: translateY(-4px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--color-accent-border);
+}
+
+.card-glass {
+  background: var(--color-bg-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border-base);
+  border-radius: var(--radius-card);
+  transition: all var(--transition-base);
+}
+
+.card-glass:hover {
+  border-color: var(--color-accent-border);
+  background: var(--color-bg-card-hover);
+  transform: translateY(-4px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--color-accent-border);
 }
 
 .glass-elevated {
-  background: rgba(27, 67, 50, 0.2);
+  background: rgba(255, 255, 255, 0.05);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(45, 106, 79, 0.4);
+  border: 1px solid rgba(82, 183, 136, 0.15);
 }
 
-/* Sombras */
+/* ============================================
+   SHADOWS
+   ============================================ */
 .shadow-glow {
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
 }
 
 .shadow-glow-lg {
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
 }
 
 .shadow-emerald {
-  box-shadow: 0 4px 20px rgba(64, 145, 108, 0.3);
+  box-shadow: 0 4px 20px rgba(82, 183, 136, 0.2);
 }
 
 .shadow-emerald-glow {
-  box-shadow: 0 0 15px rgba(64, 145, 108, 0.3);
+  box-shadow: 0 0 20px rgba(82, 183, 136, 0.25), 0 0 40px rgba(82, 183, 136, 0.1);
 }
 
-/* Animaciones */
+/* ============================================
+   KEYFRAMES
+   ============================================ */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;
     transform: translateY(10px);
   }
-
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 
@@ -236,27 +306,65 @@
     opacity: 0;
     transform: translateX(20px);
   }
-
   to {
     opacity: 1;
     transform: translateX(0);
   }
 }
 
+@keyframes shimmer {
+  to {
+    background-position: 200% center;
+  }
+}
+
+@keyframes line-grow {
+  from { width: 0; }
+  to { width: 40px; }
+}
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(82, 183, 136, 0.6); }
+  50% { opacity: 0.4; box-shadow: 0 0 2px rgba(82, 183, 136, 0.2); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(82, 183, 136, 0.4); }
+  50% { box-shadow: 0 0 20px rgba(82, 183, 136, 0.6), 0 0 40px rgba(82, 183, 136, 0.2); }
+}
+
 @keyframes pulse-accent {
-
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(64, 145, 108, 0.4);
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(82, 183, 136, 0.4);
   }
-
   50% {
-    box-shadow: 0 0 0 10px rgba(64, 145, 108, 0);
+    box-shadow: 0 0 0 10px rgba(82, 183, 136, 0);
   }
+}
+
+@keyframes gradient-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* ============================================
+   ANIMATION CLASSES
+   ============================================ */
+.animate-fade-up {
+  animation: fade-up 0.6s var(--easing-smooth) both;
 }
 
 .animate-fade-in {
   animation: fadeIn 0.5s ease-out forwards;
+}
+
+.animate-fade-in-pure {
+  animation: fade-in 0.5s var(--easing-smooth) both;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.5s var(--easing-smooth) both;
 }
 
 .animate-slide-in-right {
@@ -267,7 +375,117 @@
   animation: pulse-accent 2s ease-in-out infinite;
 }
 
-/* Elementos de formulario */
+/* Stagger delays */
+.stagger-1 { animation-delay: 80ms; }
+.stagger-2 { animation-delay: 160ms; }
+.stagger-3 { animation-delay: 240ms; }
+.stagger-4 { animation-delay: 320ms; }
+.stagger-5 { animation-delay: 400ms; }
+.stagger-6 { animation-delay: 480ms; }
+
+/* ============================================
+   BUTTON STYLES
+   ============================================ */
+.btn-primary {
+  background: var(--gradient-cta);
+  color: white;
+  border: none;
+  border-radius: var(--radius-btn);
+  position: relative;
+  overflow: hidden;
+  transition: all var(--transition-base);
+  font-weight: 600;
+}
+
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.12) 50%, transparent 100%);
+  background-size: 200% 100%;
+  opacity: 0;
+  transition: opacity var(--transition-base);
+}
+
+.btn-primary:hover::after {
+  opacity: 1;
+  animation: shimmer 1.5s linear infinite;
+}
+
+.btn-primary:active {
+  transform: scale(0.97);
+}
+
+.btn-ghost {
+  border: 1px solid var(--color-accent-border);
+  color: var(--color-accent-val);
+  background: transparent;
+  border-radius: var(--radius-btn);
+  transition: all var(--transition-base);
+  font-weight: 500;
+}
+
+.btn-ghost:hover {
+  background: var(--color-accent-dim);
+  color: var(--color-accent-bright);
+  border-color: rgba(82, 183, 136, 0.4);
+}
+
+/* ============================================
+   TYPOGRAPHY UTILITIES
+   ============================================ */
+.line-accent {
+  display: inline-block;
+  height: 2px;
+  width: 40px;
+  background: var(--color-accent-val);
+  border-radius: 1px;
+  animation: line-grow 0.6s var(--easing-smooth) both;
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--color-accent-val);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.eyebrow::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent-val);
+  animation: dot-pulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.glow-text {
+  background: linear-gradient(135deg, #ffffff 0%, rgba(255, 255, 255, 0.7) 40%, #52b788 70%, #74c69d 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ============================================
+   GRADIENT TEXT ANIMATION (Gallery)
+   ============================================ */
+.animate-gradient-text {
+  background: linear-gradient(90deg, #f0f0f0 0%, #52b788 40%, #74c69d 60%, #f0f0f0 100%);
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gradient-shift 4s ease infinite;
+}
+
+/* ============================================
+   FORM ELEMENTS
+   ============================================ */
 input,
 textarea,
 select {
@@ -278,14 +496,14 @@ input:focus,
 textarea:focus,
 select:focus {
   outline: none;
-  border-color: rgba(64, 145, 108, 0.5);
-  box-shadow: 0 0 0 3px rgba(64, 145, 108, 0.1);
+  border-color: var(--color-accent-border);
+  box-shadow: 0 0 0 3px var(--color-accent-dim);
 }
 
 /* Fix: opciones de select visibles en fondo oscuro */
 select option {
-  background-color: #0A0A0A;
-  color: #F8F9FA;
+  background-color: #080808;
+  color: #f0f0f0;
 }
 
 /* Fix: calendario nativo de input[type=date] en modo oscuro */
@@ -293,7 +511,9 @@ input[type="date"] {
   color-scheme: dark;
 }
 
-/* ── Galería: Flip Card (Sección Resultados) ── */
+/* ============================================
+   GALLERY: Flip Card (Seccion Resultados)
+   ============================================ */
 .flip-card {
   perspective: 1000px;
 }
@@ -320,24 +540,25 @@ input[type="date"] {
   transform: rotateY(180deg);
 }
 
-/* ── Galería: Before/After slider cursor ── */
+/* ============================================
+   GALLERY: Before/After Slider
+   ============================================ */
 .before-after-slider {
   cursor: ew-resize;
   user-select: none;
   -webkit-user-select: none;
 }
 
-/* ── Galería: Gradient text animado ── */
-@keyframes gradient-shift {
-  0%   { background-position: 0% 50%; }
-  50%  { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-.animate-gradient-text {
-  background: linear-gradient(90deg, #F8F9FA 0%, #40916C 40%, #74C69D 60%, #F8F9FA 100%);
-  background-size: 200% auto;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: gradient-shift 4s ease infinite;
+/* ============================================
+   ACCESSIBILITY
+   ============================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

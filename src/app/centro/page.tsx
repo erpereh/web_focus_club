@@ -13,25 +13,25 @@ const facilities = [
     title: 'Entrada',
     description: 'Acceso exclusivo al centro, diseñado para que tu experiencia comience desde el primer paso.',
     image: '/imagenes/el_centro/entrada.jpeg',
-    gradient: 'from-primary/40 to-forest-700/40',
+    gradient: 'from-[var(--color-accent-dim)] to-[var(--color-accent-dim)]',
   },
   {
     title: 'Zona de Entrenamiento',
     description: 'Espacio equipado con todo lo necesario para tus sesiones de entrenamiento funcional y cardio.',
     image: '/imagenes/el_centro/gym1.jpeg',
-    gradient: 'from-accent/30 to-accent/20',
+    gradient: 'from-[var(--color-accent-dim)] to-[var(--color-accent-dim)]',
   },
   {
     title: 'Zona de Musculación',
     description: 'Área dedicada al trabajo de fuerza con maquinaria y pesos libres de calidad profesional.',
     image: '/imagenes/el_centro/gym3.jpeg',
-    gradient: 'from-forest-700/40 to-primary/30',
+    gradient: 'from-[var(--color-accent-dim)] to-[var(--color-accent-dim)]',
   },
   {
     title: 'Baño',
     description: 'Instalaciones limpias y bien equipadas para que puedas asearte cómodamente tras tu sesión.',
     image: '/imagenes/el_centro/baño.jpeg',
-    gradient: 'from-primary/30 to-accent/20',
+    gradient: 'from-[var(--color-accent-dim)] to-[var(--color-accent-dim)]',
   },
 ];
 
@@ -78,7 +78,7 @@ export default function CentroPage() {
     <div className="min-h-screen">
       {/* Hero Section */}
       <section className="relative py-20 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-primary/10 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-accent-dim)] to-transparent" />
         <div className="container mx-auto px-4">
           <motion.div
             className="text-center max-w-3xl mx-auto"
@@ -86,13 +86,13 @@ export default function CentroPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
           >
-            <span className="text-accent text-sm font-medium uppercase tracking-wider">
+            <span className="eyebrow">
               Nuestras Instalaciones
             </span>
-            <h1 className="text-4xl md:text-5xl font-bold text-ivory mt-3 mb-6">
+            <h1 className="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mt-3 mb-6">
               {cmsContent?.centro?.title || 'El Centro'}
             </h1>
-            <p className="text-muted-foreground text-lg">
+            <p className="text-[var(--color-text-secondary)] text-lg">
               {cmsContent?.centro?.subtitle || 'Un espacio diseñado para tu transformación.'}
             </p>
           </motion.div>
@@ -108,7 +108,7 @@ export default function CentroPage() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
           >
-            <p className="text-muted-foreground text-lg leading-relaxed">
+            <p className="text-[var(--color-text-secondary)] text-lg leading-relaxed">
               {cmsContent?.centro?.description || 'Un espacio diseñado para tu transformación personal.'}
             </p>
           </motion.div>
@@ -116,7 +116,7 @@ export default function CentroPage() {
       </section>
 
       {/* Instalaciones / Zonas */}
-      <section className="py-20 bg-obsidian">
+      <section className="py-20 bg-[var(--color-bg-surface)]">
         <div className="container mx-auto px-4">
           <motion.div
             className="text-center mb-16"
@@ -124,10 +124,11 @@ export default function CentroPage() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
           >
-            <h2 className="text-3xl font-bold text-ivory mb-4">
+            <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)] mb-4">
               Nuestras Zonas
             </h2>
-            <p className="text-muted-foreground">
+            <div className="line-accent mx-auto" />
+            <p className="text-[var(--color-text-secondary)] mt-4">
               Espacios pensados para cada etapa de tu entrenamiento
             </p>
           </motion.div>
@@ -140,7 +141,7 @@ export default function CentroPage() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ delay: index * 0.1 }}
-                className="group relative rounded-3xl overflow-hidden glass-card p-2"
+                className="group relative rounded-3xl overflow-hidden card-glass p-2"
               >
                 <div className={`absolute inset-0 bg-gradient-to-br ${facility.gradient} opacity-10 group-hover:opacity-20 transition-opacity duration-500`} />
                 <div className="relative h-full flex flex-col p-6">
@@ -153,8 +154,8 @@ export default function CentroPage() {
                     />
                   </div>
                   <div className="flex-1">
-                    <h3 className="text-2xl font-bold text-ivory mb-3 group-hover:text-accent transition-colors">{facility.title}</h3>
-                    <p className="text-muted-foreground leading-relaxed">{facility.description}</p>
+                    <h3 className="text-2xl font-bold text-[var(--color-text-primary)] mb-3 group-hover:text-[var(--color-accent-val)] transition-colors">{facility.title}</h3>
+                    <p className="text-[var(--color-text-secondary)] leading-relaxed">{facility.description}</p>
                   </div>
                 </div>
               </motion.div>
@@ -163,7 +164,7 @@ export default function CentroPage() {
         </div>
       </section>
 
-      <section className="py-20 bg-gradient-to-b from-transparent via-primary/5 to-transparent">
+      <section className="py-20 bg-gradient-to-b from-transparent via-[var(--color-accent-dim)] to-transparent">
         <div className="container mx-auto px-4">
           <motion.div
             className="text-center mb-12"
@@ -171,10 +172,11 @@ export default function CentroPage() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
           >
-            <h2 className="text-3xl font-bold text-ivory mb-4">
+            <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)] mb-4">
               ¿Por qué elegirnos?
             </h2>
-            <p className="text-muted-foreground">
+            <div className="line-accent mx-auto" />
+            <p className="text-[var(--color-text-secondary)] mt-4">
               Detalles que marcan la diferencia
             </p>
           </motion.div>
@@ -192,11 +194,11 @@ export default function CentroPage() {
                 return (
                   <motion.div key={index} variants={itemVariants}>
                     <GlassCard className="text-center h-full">
-                      <div className="w-14 h-14 rounded-xl bg-primary/20 flex items-center justify-center mx-auto mb-4">
-                        <IconComponent className="w-7 h-7 text-accent" />
+                      <div className="w-14 h-14 rounded-xl bg-[var(--color-accent-dim)] flex items-center justify-center mx-auto mb-4">
+                        <IconComponent className="w-7 h-7 text-[var(--color-accent-val)]" />
                       </div>
-                      <h3 className="text-lg font-semibold text-ivory mb-2">{feature.title}</h3>
-                      <p className="text-muted-foreground text-sm">{feature.description}</p>
+                      <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">{feature.title}</h3>
+                      <p className="text-[var(--color-text-secondary)] text-sm">{feature.description}</p>
                     </GlassCard>
                   </motion.div>
                 );
@@ -205,11 +207,11 @@ export default function CentroPage() {
               features.map((feature, index) => (
                 <motion.div key={index} variants={itemVariants}>
                   <GlassCard className="text-center h-full">
-                    <div className="w-14 h-14 rounded-xl bg-primary/20 flex items-center justify-center mx-auto mb-4">
-                      <feature.icon className="w-7 h-7 text-accent" />
+                    <div className="w-14 h-14 rounded-xl bg-[var(--color-accent-dim)] flex items-center justify-center mx-auto mb-4">
+                      <feature.icon className="w-7 h-7 text-[var(--color-accent-val)]" />
                     </div>
-                    <h3 className="text-lg font-semibold text-ivory mb-2">{feature.title}</h3>
-                    <p className="text-muted-foreground text-sm">{feature.description}</p>
+                    <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">{feature.title}</h3>
+                    <p className="text-[var(--color-text-secondary)] text-sm">{feature.description}</p>
                   </GlassCard>
                 </motion.div>
               ))
@@ -227,25 +229,26 @@ export default function CentroPage() {
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true }}
             >
-              <span className="text-accent text-sm font-medium uppercase tracking-wider">
+              <span className="eyebrow">
                 Ubicación
               </span>
-              <h2 className="text-3xl font-bold text-ivory mt-3 mb-6">
+              <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)] mt-3 mb-4">
                 Cómo llegar
               </h2>
+              <div className="line-accent mb-6" />
 
               <div className="space-y-6">
                 <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center flex-shrink-0">
-                    <MapPin className="w-6 h-6 text-accent" />
+                  <div className="w-12 h-12 rounded-xl bg-[var(--color-accent-dim)] flex items-center justify-center flex-shrink-0">
+                    <MapPin className="w-6 h-6 text-[var(--color-accent-val)]" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-ivory mb-1">Dirección</h3>
+                    <h3 className="font-semibold text-[var(--color-text-primary)] mb-1">Dirección</h3>
                     <a
                       href="https://maps.app.goo.gl/EHFk2xEh9xwHBaDKA"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-muted-foreground hover:text-accent transition-colors"
+                      className="text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors"
                     >
                       {cmsContent?.address || 'Focus Club Vallecas'}
                     </a>
@@ -253,12 +256,12 @@ export default function CentroPage() {
                 </div>
 
                 <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center flex-shrink-0">
-                    <Clock className="w-6 h-6 text-accent" />
+                  <div className="w-12 h-12 rounded-xl bg-[var(--color-accent-dim)] flex items-center justify-center flex-shrink-0">
+                    <Clock className="w-6 h-6 text-[var(--color-accent-val)]" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-ivory mb-1">Horario</h3>
-                    <p className="text-muted-foreground">
+                    <h3 className="font-semibold text-[var(--color-text-primary)] mb-1">Horario</h3>
+                    <p className="text-[var(--color-text-secondary)]">
                       {cmsContent?.centro?.schedule?.weekdays || 'Lunes a Viernes: 7:00 - 21:00'}<br />
                       {cmsContent?.centro?.schedule?.saturday || 'Sábados: 9:00 - 14:00'}
                     </p>
@@ -266,24 +269,24 @@ export default function CentroPage() {
                 </div>
 
                 <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center flex-shrink-0">
-                    <Phone className="w-6 h-6 text-accent" />
+                  <div className="w-12 h-12 rounded-xl bg-[var(--color-accent-dim)] flex items-center justify-center flex-shrink-0">
+                    <Phone className="w-6 h-6 text-[var(--color-accent-val)]" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-ivory mb-1">Teléfono</h3>
-                    <a href={`tel:${cmsContent?.phone}`} className="text-muted-foreground hover:text-accent transition-colors">
+                    <h3 className="font-semibold text-[var(--color-text-primary)] mb-1">Teléfono</h3>
+                    <a href={`tel:${cmsContent?.phone}`} className="text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors">
                       {cmsContent?.phone || 'Contactar'}
                     </a>
                   </div>
                 </div>
 
                 <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center flex-shrink-0">
-                    <Mail className="w-6 h-6 text-accent" />
+                  <div className="w-12 h-12 rounded-xl bg-[var(--color-accent-dim)] flex items-center justify-center flex-shrink-0">
+                    <Mail className="w-6 h-6 text-[var(--color-accent-val)]" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-ivory mb-1">Email</h3>
-                    <a href={`mailto:${cmsContent?.email}`} className="text-muted-foreground hover:text-accent transition-colors">
+                    <h3 className="font-semibold text-[var(--color-text-primary)] mb-1">Email</h3>
+                    <a href={`mailto:${cmsContent?.email}`} className="text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors">
                       {cmsContent?.email || 'Email de contacto'}
                     </a>
                   </div>
@@ -298,7 +301,7 @@ export default function CentroPage() {
             </motion.div>
 
             <motion.div
-              className="rounded-3xl overflow-hidden glass-card p-2"
+              className="rounded-3xl overflow-hidden card-glass p-2"
               initial={{ opacity: 0, x: 30 }}
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true }}

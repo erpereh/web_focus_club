@@ -42,8 +42,8 @@ import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { InteractiveCalendar } from '@/components/ui/interactive-calendar';
 import { useAuth } from '@/contexts/AuthContext';
-import type { TimeSlot, Appointment, Bono } from '@/types';
-import { addAppointment as addAppointmentFS, getAppointmentsByUser, getActiveBonoByUser, getBonosByUser, updateUserProfile } from '@/lib/firestore';
+import type { TimeSlot, Appointment, Bono, Trainer } from '@/types';
+import { addAppointment as addAppointmentFS, getAppointmentsByUser, getActiveBonoByUser, getBonosByUser, updateUserProfile, getTrainers } from '@/lib/firestore';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { updatePassword } from 'firebase/auth';
@@ -76,7 +76,7 @@ const statusConfig = {
   },
   approved: {
     label: 'Aprobada',
-    color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+    color: 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border-[var(--color-accent-border)]',
     icon: CheckCircle,
     description: '¡Tu cita ha sido confirmada!',
   },
@@ -147,6 +147,7 @@ export default function PortalPage() {
 
   // Obtener citas del usuario desde Firestore
   const [userAppointments, setUserAppointments] = useState<Appointment[]>([]);
+  const [trainers, setTrainers] = useState<Trainer[]>([]);
 
   // Bono state
   const [activeBono, setActiveBono] = useState<Bono | null>(null);
@@ -178,6 +179,7 @@ export default function PortalPage() {
   useEffect(() => {
     if (user) {
       getAppointmentsByUser(user.uid).then(setUserAppointments).catch(console.error);
+      getTrainers().then(setTrainers).catch(console.error);
       // Load bono data
       (async () => {
         try {
@@ -461,23 +463,23 @@ export default function PortalPage() {
           <GlassCard className="p-8">
             {/* Header */}
             <div className="text-center mb-8">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald to-accent mx-auto mb-4 flex items-center justify-center">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--color-accent-val)] to-[var(--color-accent-bright)] mx-auto mb-4 flex items-center justify-center">
                 {authMode === 'complete-profile' ? (
-                  <UserPlus className="w-8 h-8 text-obsidian" />
+                  <UserPlus className="w-8 h-8 text-[var(--color-bg-base)]" />
                 ) : authMode === 'forgot-password' ? (
-                  <KeyRound className="w-8 h-8 text-obsidian" />
+                  <KeyRound className="w-8 h-8 text-[var(--color-bg-base)]" />
                 ) : (
-                  <User className="w-8 h-8 text-obsidian" />
+                  <User className="w-8 h-8 text-[var(--color-bg-base)]" />
                 )}
               </div>
-              <h1 className="text-2xl font-bold text-ivory mb-2">
+              <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-2">
                 {authMode === 'complete-profile'
                   ? 'Completa tu Perfil'
                   : authMode === 'forgot-password'
                     ? 'Recuperar Contraseña'
                     : 'Portal del Cliente'}
               </h1>
-              <p className="text-muted-foreground text-sm">
+              <p className="text-[var(--color-text-secondary)] text-sm">
                 {authMode === 'complete-profile'
                   ? 'Necesitamos algunos datos más'
                   : authMode === 'forgot-password'
@@ -499,7 +501,7 @@ export default function PortalPage() {
                 exit={{ opacity: 0, x: -20 }}
               >
                 <div>
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                  <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] mb-2">
                     <User className="w-4 h-4" />
                     Nombre
                   </label>
@@ -507,13 +509,13 @@ export default function PortalPage() {
                     type="text"
                     value={profileForm.name}
                     onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
-                    className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-emerald-light"
+                    className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                     placeholder="Tu nombre"
                     required
                   />
                 </div>
                 <div>
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                  <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] mb-2">
                     <Phone className="w-4 h-4" />
                     Teléfono
                   </label>
@@ -521,7 +523,7 @@ export default function PortalPage() {
                     type="tel"
                     value={profileForm.phone}
                     onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
-                    className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-emerald-light"
+                    className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                     placeholder="+34 600 000 000"
                     required
                   />
@@ -559,7 +561,7 @@ export default function PortalPage() {
                 exit={{ opacity: 0, x: -20 }}
               >
                 <div>
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                  <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] mb-2">
                     <Mail className="w-4 h-4" />
                     Email
                   </label>
@@ -567,7 +569,7 @@ export default function PortalPage() {
                     type="email"
                     value={authForm.email}
                     onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
-                    className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-emerald-light"
+                    className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                     placeholder="tu@email.com"
                     required
                   />
@@ -581,7 +583,7 @@ export default function PortalPage() {
                 )}
 
                 {authSuccess && (
-                  <p className="text-emerald-400 text-sm flex items-center gap-2">
+                  <p className="text-[var(--color-accent-val)] text-sm flex items-center gap-2">
                     <MailCheck className="w-4 h-4" />
                     {authSuccess}
                   </p>
@@ -600,7 +602,7 @@ export default function PortalPage() {
                 <button
                   type="button"
                   onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess(''); }}
-                  className="w-full text-center text-sm text-muted-foreground hover:text-ivory transition-colors mt-2"
+                  className="w-full text-center text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors mt-2"
                 >
                   Volver al inicio de sesión
                 </button>
@@ -613,14 +615,14 @@ export default function PortalPage() {
             {(authMode === 'login' || authMode === 'register') && (
               <>
                 {/* Tab Switcher */}
-                <div className="flex bg-forest-deep/30 rounded-xl p-1 mb-6">
+                <div className="flex bg-[var(--color-accent-dim)] rounded-xl p-1 mb-6">
                   <button
                     onClick={() => { setAuthMode('login'); setAuthError(''); setAuthSuccess(''); setNeedsVerification(false); }}
                     className={cn(
                       'flex-1 py-2 rounded-lg text-sm font-medium transition-all',
                       authMode === 'login'
-                        ? 'bg-emerald text-ivory'
-                        : 'text-muted-foreground hover:text-ivory'
+                        ? 'bg-[var(--color-accent-val)] text-[var(--color-text-primary)]'
+                        : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
                     )}
                   >
                     Iniciar Sesión
@@ -630,8 +632,8 @@ export default function PortalPage() {
                     className={cn(
                       'flex-1 py-2 rounded-lg text-sm font-medium transition-all',
                       authMode === 'register'
-                        ? 'bg-emerald text-ivory'
-                        : 'text-muted-foreground hover:text-ivory'
+                        ? 'bg-[var(--color-accent-val)] text-[var(--color-text-primary)]'
+                        : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
                     )}
                   >
                     Registrarse
@@ -640,8 +642,8 @@ export default function PortalPage() {
 
                 {/* Success message (tras registro, tras reenviar verificación) */}
                 {authSuccess && (
-                  <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
-                    <p className="text-emerald-400 text-sm flex items-center gap-2">
+                  <div className="mb-4 p-3 rounded-xl bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)]">
+                    <p className="text-[var(--color-accent-val)] text-sm flex items-center gap-2">
                       <MailCheck className="w-4 h-4 flex-shrink-0" />
                       {authSuccess}
                     </p>
@@ -660,7 +662,7 @@ export default function PortalPage() {
                       exit={{ opacity: 0, x: 20 }}
                     >
                       <div>
-                        <label className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                        <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] mb-2">
                           <Mail className="w-4 h-4" />
                           Email
                         </label>
@@ -668,13 +670,13 @@ export default function PortalPage() {
                           type="email"
                           value={authForm.email}
                           onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
-                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-emerald-light"
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           placeholder="tu@email.com"
                           required
                         />
                       </div>
                       <div>
-                        <label className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                        <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] mb-2">
                           <Lock className="w-4 h-4" />
                           Contraseña
                         </label>
@@ -683,14 +685,14 @@ export default function PortalPage() {
                             type={showPassword ? 'text' : 'password'}
                             value={authForm.password}
                             onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-emerald-light pr-12"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)] pr-12"
                             placeholder="••••••••"
                             required
                           />
                           <button
                             type="button"
                             onClick={() => setShowPassword(!showPassword)}
-                            className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-ivory"
+                            className="absolute right-4 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
                           >
                             {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
@@ -702,7 +704,7 @@ export default function PortalPage() {
                         <button
                           type="button"
                           onClick={() => { setAuthMode('forgot-password'); setAuthError(''); setAuthSuccess(''); }}
-                          className="text-xs text-muted-foreground hover:text-accent transition-colors"
+                          className="text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors"
                         >
                           ¿Has olvidado tu contraseña?
                         </button>
@@ -719,7 +721,7 @@ export default function PortalPage() {
                               type="button"
                               onClick={handleResendVerification}
                               disabled={authLoading}
-                              className="text-sm text-accent hover:text-accent/80 transition-colors flex items-center gap-1"
+                              className="text-sm text-[var(--color-accent-val)] hover:text-[var(--color-accent-val)]/80 transition-colors flex items-center gap-1"
                             >
                               <RefreshCw className={cn("w-3 h-3", authLoading && "animate-spin")} />
                               Reenviar email de verificación
@@ -739,7 +741,7 @@ export default function PortalPage() {
                       </PremiumButton>
 
                       {/* Separator */}
-                      <div className="flex items-center gap-3 my-2 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-3 my-2 text-xs text-[var(--color-text-secondary)]">
                         <div className="flex-1 border-t border-border" />
                         <span>o</span>
                         <div className="flex-1 border-t border-border" />
@@ -750,7 +752,7 @@ export default function PortalPage() {
                         type="button"
                         onClick={handleGoogleLogin}
                         disabled={authLoading}
-                        className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl border border-border bg-input hover:bg-border/50 text-ivory text-sm font-medium transition-all disabled:opacity-50"
+                        className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl border border-border bg-input hover:bg-border/50 text-[var(--color-text-primary)] text-sm font-medium transition-all disabled:opacity-50"
                       >
                         <svg className="w-5 h-5" viewBox="0 0 24 24">
                           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
@@ -771,7 +773,7 @@ export default function PortalPage() {
                       exit={{ opacity: 0, x: -20 }}
                     >
                       <div>
-                        <label className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                        <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] mb-2">
                           <User className="w-4 h-4" />
                           Nombre completo
                         </label>
@@ -779,13 +781,13 @@ export default function PortalPage() {
                           type="text"
                           value={authForm.name}
                           onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })}
-                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-emerald-light"
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           placeholder="Tu nombre"
                           required
                         />
                       </div>
                       <div>
-                        <label className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                        <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] mb-2">
                           <Mail className="w-4 h-4" />
                           Email
                         </label>
@@ -793,13 +795,13 @@ export default function PortalPage() {
                           type="email"
                           value={authForm.email}
                           onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
-                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-emerald-light"
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           placeholder="tu@email.com"
                           required
                         />
                       </div>
                       <div>
-                        <label className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                        <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] mb-2">
                           <Phone className="w-4 h-4" />
                           Teléfono
                         </label>
@@ -807,13 +809,13 @@ export default function PortalPage() {
                           type="tel"
                           value={authForm.phone}
                           onChange={(e) => setAuthForm({ ...authForm, phone: e.target.value })}
-                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-emerald-light"
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           placeholder="+34 600 000 000"
                           required
                         />
                       </div>
                       <div>
-                        <label className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                        <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] mb-2">
                           <Lock className="w-4 h-4" />
                           Contraseña
                         </label>
@@ -821,13 +823,13 @@ export default function PortalPage() {
                           type="password"
                           value={authForm.password}
                           onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
-                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-emerald-light"
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           placeholder="••••••••"
                           required
                         />
                       </div>
                       <div>
-                        <label className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                        <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] mb-2">
                           <Lock className="w-4 h-4" />
                           Confirmar contraseña
                         </label>
@@ -835,7 +837,7 @@ export default function PortalPage() {
                           type="password"
                           value={authForm.confirmPassword}
                           onChange={(e) => setAuthForm({ ...authForm, confirmPassword: e.target.value })}
-                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-emerald-light"
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                           placeholder="••••••••"
                           required
                         />
@@ -857,9 +859,9 @@ export default function PortalPage() {
                           required
                           className="mt-1 w-4 h-4 rounded border-border accent-accent flex-shrink-0"
                         />
-                        <span className="text-xs text-muted-foreground leading-relaxed group-hover:text-ivory/70 transition-colors">
+                        <span className="text-xs text-[var(--color-text-secondary)] leading-relaxed group-hover:text-[var(--color-text-primary)]/70 transition-colors">
                           He leído y acepto la{' '}
-                          <Link href="/politica-de-privacidad" className="text-accent hover:underline" target="_blank">
+                          <Link href="/politica-de-privacidad" className="text-[var(--color-accent-val)] hover:underline" target="_blank">
                             Política de Privacidad
                           </Link>{' '}
                           y el tratamiento de mis datos personales.
@@ -877,7 +879,7 @@ export default function PortalPage() {
                       </PremiumButton>
 
                       {/* Separator */}
-                      <div className="flex items-center gap-3 my-2 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-3 my-2 text-xs text-[var(--color-text-secondary)]">
                         <div className="flex-1 border-t border-border" />
                         <span>o</span>
                         <div className="flex-1 border-t border-border" />
@@ -888,7 +890,7 @@ export default function PortalPage() {
                         type="button"
                         onClick={handleGoogleLogin}
                         disabled={authLoading}
-                        className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl border border-border bg-input hover:bg-border/50 text-ivory text-sm font-medium transition-all disabled:opacity-50"
+                        className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl border border-border bg-input hover:bg-border/50 text-[var(--color-text-primary)] text-sm font-medium transition-all disabled:opacity-50"
                       >
                         <svg className="w-5 h-5" viewBox="0 0 24 24">
                           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
@@ -932,7 +934,7 @@ export default function PortalPage() {
               <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0">
                 <Image src="/imagenes/logo.jpeg" alt="Focus Club" width={32} height={32} className="w-full h-full object-cover" />
               </div>
-              <span className="font-bold text-ivory hidden sm:block">Focus Club</span>
+              <span className="font-bold text-[var(--color-text-primary)] hidden sm:block">Focus Club</span>
             </Link>
 
             <div className="flex items-center gap-2">
@@ -971,19 +973,19 @@ export default function PortalPage() {
                 <div className="flex items-center gap-3">
                   <button onClick={() => setShowProfileModal(true)} className="relative group shrink-0">
                     {userProfile?.photoURL ? (
-                      <img src={userProfile.photoURL} alt="" className="w-12 h-12 rounded-full object-cover ring-2 ring-accent/40 group-hover:ring-accent transition-all" />
+                      <img src={userProfile.photoURL} alt="" className="w-12 h-12 rounded-full object-cover ring-2 ring-[var(--color-accent-border)] group-hover:ring-[var(--color-accent-border)] transition-all" />
                     ) : (
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald to-accent flex items-center justify-center text-obsidian font-bold text-lg group-hover:scale-105 transition-transform">
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[var(--color-accent-val)] to-[var(--color-accent-bright)] flex items-center justify-center text-[var(--color-bg-base)] font-bold text-lg group-hover:scale-105 transition-transform">
                         {userProfile?.name?.charAt(0)}
                       </div>
                     )}
-                    <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-obsidian border border-border flex items-center justify-center">
-                      <Settings className="w-2.5 h-2.5 text-muted-foreground" />
+                    <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-[var(--color-bg-base)] border border-border flex items-center justify-center">
+                      <Settings className="w-2.5 h-2.5 text-[var(--color-text-secondary)]" />
                     </span>
                   </button>
                   <div>
-                    <p className="font-bold text-ivory leading-tight">{userProfile?.name}</p>
-                    <p className="text-xs text-muted-foreground">{userProfile?.email}</p>
+                    <p className="font-bold text-[var(--color-text-primary)] leading-tight">{userProfile?.name}</p>
+                    <p className="text-xs text-[var(--color-text-secondary)]">{userProfile?.email}</p>
                   </div>
                 </div>
 
@@ -1014,58 +1016,58 @@ export default function PortalPage() {
                 <GlassCard className="p-5">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <Ticket className="w-4 h-4 text-accent" />
-                      <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Mi Bono</span>
+                      <Ticket className="w-4 h-4 text-[var(--color-accent-val)]" />
+                      <span className="text-xs text-[var(--color-text-secondary)] font-medium uppercase tracking-wide">Mi Bono</span>
                     </div>
                     {activeBono && (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-emerald/10 text-emerald border border-emerald/20 font-medium">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] font-medium">
                         Activo
                       </span>
                     )}
                   </div>
                   {bonoLoading ? (
-                    <div className="flex items-center gap-2 text-muted-foreground">
+                    <div className="flex items-center gap-2 text-[var(--color-text-secondary)]">
                       <RefreshCw className="w-4 h-4 animate-spin" />
                       <span className="text-sm">Cargando...</span>
                     </div>
                   ) : activeBono ? (
                     <>
-                      <p className="text-ivory font-semibold text-lg mb-1">
+                      <p className="text-[var(--color-text-primary)] font-semibold text-lg mb-1">
                         {activeBono.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
                       </p>
-                      <div className="mt-2 mb-1 flex justify-between text-xs text-muted-foreground">
+                      <div className="mt-2 mb-1 flex justify-between text-xs text-[var(--color-text-secondary)]">
                         <span>Sesiones</span>
-                        <span className="text-ivory font-medium">{activeBono.sesionesRestantes}/{activeBono.sesionesTotales}</span>
+                        <span className="text-[var(--color-text-primary)] font-medium">{activeBono.sesionesRestantes}/{activeBono.sesionesTotales}</span>
                       </div>
                       <div className="h-1.5 rounded-full bg-muted/30 overflow-hidden">
                         <div
-                          className="h-full rounded-full bg-gradient-to-r from-emerald to-accent transition-all"
+                          className="h-full rounded-full bg-gradient-to-r from-[var(--color-accent-val)] to-[var(--color-accent-bright)] transition-all"
                           style={{ width: `${(activeBono.sesionesRestantes / activeBono.sesionesTotales) * 100}%` }}
                         />
                       </div>
-                      <p className="text-xs text-muted-foreground mt-2">
+                      <p className="text-xs text-[var(--color-text-secondary)] mt-2">
                         Válido hasta {new Date(activeBono.fechaExpiracion).toLocaleDateString('es-ES')}
                       </p>
                     </>
                   ) : (
-                    <p className="text-sm text-muted-foreground mt-1">Sin bono activo</p>
+                    <p className="text-sm text-[var(--color-text-secondary)] mt-1">Sin bono activo</p>
                   )}
                 </GlassCard>
 
                 {/* Próxima Cita */}
                 <GlassCard className="p-5">
                   <div className="flex items-center gap-2 mb-3">
-                    <Calendar className="w-4 h-4 text-accent" />
-                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Próxima Cita</span>
+                    <Calendar className="w-4 h-4 text-[var(--color-accent-val)]" />
+                    <span className="text-xs text-[var(--color-text-secondary)] font-medium uppercase tracking-wide">Próxima Cita</span>
                   </div>
                   {nextAppointment ? (
                     <>
-                      <p className="text-ivory font-semibold text-lg mb-1">
+                      <p className="text-[var(--color-text-primary)] font-semibold text-lg mb-1">
                         {nextAppointment.preferredSlots[0]
                           ? new Date(nextAppointment.preferredSlots[0].date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
                           : '—'}
                       </p>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-sm text-[var(--color-text-secondary)]">
                         {nextAppointment.preferredSlots[0]?.time || ''}
                       </p>
                       <span className={cn('inline-flex items-center gap-1 mt-2 text-xs px-2 py-0.5 rounded-full border', statusConfig[nextAppointment.status].color)}>
@@ -1073,18 +1075,18 @@ export default function PortalPage() {
                       </span>
                     </>
                   ) : (
-                    <p className="text-sm text-muted-foreground mt-1">Sin citas próximas</p>
+                    <p className="text-sm text-[var(--color-text-secondary)] mt-1">Sin citas próximas</p>
                   )}
                 </GlassCard>
 
                 {/* Sesiones Realizadas */}
                 <GlassCard className="p-5">
                   <div className="flex items-center gap-2 mb-3">
-                    <Activity className="w-4 h-4 text-accent" />
-                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Sesiones Realizadas</span>
+                    <Activity className="w-4 h-4 text-[var(--color-accent-val)]" />
+                    <span className="text-xs text-[var(--color-text-secondary)] font-medium uppercase tracking-wide">Sesiones Realizadas</span>
                   </div>
-                  <p className="text-4xl font-bold text-ivory">{totalSessionsUsed}</p>
-                  <p className="text-xs text-muted-foreground mt-1">sesiones totales completadas</p>
+                  <p className="text-4xl font-bold text-[var(--color-text-primary)]">{totalSessionsUsed}</p>
+                  <p className="text-xs text-[var(--color-text-secondary)] mt-1">sesiones totales completadas</p>
                 </GlassCard>
               </div>
 
@@ -1092,12 +1094,12 @@ export default function PortalPage() {
               <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
                 {/* Left: Mis Citas (pending + approved) */}
                 <div className="lg:col-span-3 space-y-4">
-                  <h2 className="text-lg font-semibold text-ivory">Mis Citas</h2>
+                  <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Mis Citas</h2>
                   {userAppointments.filter(a => a.status === 'pending' || a.status === 'approved').length === 0 ? (
                     <GlassCard className="p-8 text-center">
-                      <Calendar className="w-10 h-10 mx-auto mb-3 text-muted-foreground opacity-40" />
-                      <p className="text-ivory font-medium mb-1">Sin citas activas</p>
-                      <p className="text-sm text-muted-foreground">Reserva una sesión para empezar</p>
+                      <Calendar className="w-10 h-10 mx-auto mb-3 text-[var(--color-text-secondary)] opacity-40" />
+                      <p className="text-[var(--color-text-primary)] font-medium mb-1">Sin citas activas</p>
+                      <p className="text-sm text-[var(--color-text-secondary)]">Reserva una sesión para empezar</p>
                     </GlassCard>
                   ) : (
                     userAppointments.filter(a => a.status === 'pending' || a.status === 'approved').map((appt) => {
@@ -1106,24 +1108,24 @@ export default function PortalPage() {
                       return (
                         <GlassCard
                           key={appt.id}
-                          className="p-5 cursor-pointer hover:border-accent/40 transition-all"
+                          className="p-5 cursor-pointer hover:border-[var(--color-accent-border)] transition-all"
                           onClick={() => { setSelectedAppointment(appt.id); setPortalView('appointment-detail'); }}
                         >
                           <div className="flex items-center justify-between gap-3">
                             <div className="flex items-center gap-3">
-                              <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center', appt.status === 'approved' ? 'bg-emerald/20' : 'bg-muted/30')}>
-                                <Calendar className={cn('w-5 h-5', appt.status === 'approved' ? 'text-accent' : 'text-muted-foreground')} />
+                              <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center', appt.status === 'approved' ? 'bg-[var(--color-accent-dim)]' : 'bg-muted/30')}>
+                                <Calendar className={cn('w-5 h-5', appt.status === 'approved' ? 'text-[var(--color-accent-val)]' : 'text-[var(--color-text-secondary)]')} />
                               </div>
                               <div>
-                                <p className="font-medium text-ivory text-sm">{serviceLabels[appt.serviceType] || appt.serviceType}</p>
-                                <p className="text-xs text-muted-foreground">
+                                <p className="font-medium text-[var(--color-text-primary)] text-sm">{serviceLabels[appt.serviceType] || appt.serviceType}</p>
+                                <p className="text-xs text-[var(--color-text-secondary)]">
                                   {appt.preferredSlots[0]
                                     ? `${new Date(appt.preferredSlots[0].date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} · ${appt.preferredSlots[0].time}`
                                     : '—'}
                                 </p>
                               </div>
                             </div>
-                            <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-obsidian/50 shrink-0', status.color)}>
+                            <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border bg-[var(--color-bg-base)]/50 shrink-0', status.color)}>
                               <StatusIcon className="w-3 h-3" />
                               {status.label}
                             </span>
@@ -1143,7 +1145,7 @@ export default function PortalPage() {
                         onClick={() => setActiveHistoryTab(tab)}
                         className={cn(
                           'flex-1 py-1.5 rounded-lg text-xs font-medium transition-all',
-                          activeHistoryTab === tab ? 'bg-accent/20 text-accent' : 'text-muted-foreground hover:text-ivory'
+                          activeHistoryTab === tab ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)]' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
                         )}
                       >
                         {tab === 'citas' ? 'Historial Citas' : 'Historial Bonos'}
@@ -1154,20 +1156,20 @@ export default function PortalPage() {
                   {activeHistoryTab === 'citas' && (
                     <div className="space-y-2">
                       {userAppointments.filter(a => a.status === 'rejected').length === 0 ? (
-                        <p className="text-sm text-muted-foreground text-center py-6">Sin historial de citas</p>
+                        <p className="text-sm text-[var(--color-text-secondary)] text-center py-6">Sin historial de citas</p>
                       ) : userAppointments.filter(a => a.status === 'rejected').map((appt) => {
                         const status = statusConfig[appt.status];
                         const StatusIcon = status.icon;
                         return (
                           <GlassCard
                             key={appt.id}
-                            className="p-4 cursor-pointer hover:border-accent/30 transition-all"
+                            className="p-4 cursor-pointer hover:border-[var(--color-accent-border)] transition-all"
                             onClick={() => { setSelectedAppointment(appt.id); setPortalView('appointment-detail'); }}
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div>
-                                <p className="text-ivory text-xs font-medium">{serviceLabels[appt.serviceType] || appt.serviceType}</p>
-                                <p className="text-xs text-muted-foreground">
+                                <p className="text-[var(--color-text-primary)] text-xs font-medium">{serviceLabels[appt.serviceType] || appt.serviceType}</p>
+                                <p className="text-xs text-[var(--color-text-secondary)]">
                                   {appt.preferredSlots[0]
                                     ? `${new Date(appt.preferredSlots[0].date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} · ${appt.preferredSlots[0].time}`
                                     : new Date(appt.createdAt).toLocaleDateString('es-ES')}
@@ -1187,25 +1189,25 @@ export default function PortalPage() {
                   {activeHistoryTab === 'bonos' && (
                     <div className="space-y-2">
                       {allBonos.filter(b => b.estado !== 'activo').length === 0 ? (
-                        <p className="text-sm text-muted-foreground text-center py-6">Sin historial de bonos</p>
+                        <p className="text-sm text-[var(--color-text-secondary)] text-center py-6">Sin historial de bonos</p>
                       ) : allBonos.filter(b => b.estado !== 'activo').map((bono) => {
                         const usadas = bono.sesionesTotales - bono.sesionesRestantes;
                         const estadoBadge =
                           bono.estado === 'agotado' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
-                          bono.estado === 'expirado' ? 'bg-muted/20 text-muted-foreground border-muted/20' :
+                          bono.estado === 'expirado' ? 'bg-muted/20 text-[var(--color-text-secondary)] border-muted/20' :
                           'bg-red-500/10 text-red-400 border-red-500/20';
                         return (
                           <GlassCard key={bono.id} className="p-4">
                             <div className="flex items-start justify-between gap-2">
                               <div>
-                                <p className="text-ivory text-xs font-medium">
+                                <p className="text-[var(--color-text-primary)] text-xs font-medium">
                                   {bono.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
                                   {bono.modalidad ? ` · ${bono.modalidad}` : ''}
                                 </p>
-                                <p className="text-xs text-muted-foreground mt-0.5">
+                                <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
                                   {new Date(bono.fechaAsignacion).toLocaleDateString('es-ES')} → {new Date(bono.fechaExpiracion).toLocaleDateString('es-ES')}
                                 </p>
-                                <p className="text-xs text-muted-foreground">{usadas}/{bono.sesionesTotales} sesiones usadas</p>
+                                <p className="text-xs text-[var(--color-text-secondary)]">{usadas}/{bono.sesionesTotales} sesiones usadas</p>
                               </div>
                               <span className={cn('text-xs px-2 py-0.5 rounded-full border font-medium shrink-0', estadoBadge)}>
                                 {bono.estado.charAt(0).toUpperCase() + bono.estado.slice(1)}
@@ -1242,7 +1244,7 @@ export default function PortalPage() {
                   <>
                     <button
                       onClick={() => { setPortalView('dashboard'); setSelectedAppointment(null); }}
-                      className="flex items-center gap-2 text-muted-foreground hover:text-ivory mb-6 transition-colors"
+                      className="flex items-center gap-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] mb-6 transition-colors"
                     >
                       <ArrowLeft className="w-4 h-4" />
                       Volver a mis citas
@@ -1251,10 +1253,10 @@ export default function PortalPage() {
                     <GlassCard className="p-8 rounded-2xl">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
                         <div>
-                          <h1 className="text-3xl font-bold text-ivory mb-2">Detalle de la Cita</h1>
-                          <p className="text-muted-foreground">Revisa el estado y los detalles de tu solicitud.</p>
+                          <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-2">Detalle de la Cita</h1>
+                          <p className="text-[var(--color-text-secondary)]">Revisa el estado y los detalles de tu solicitud.</p>
                         </div>
-                        <span className={cn('inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border bg-obsidian/50', status.color)}>
+                        <span className={cn('inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border bg-[var(--color-bg-base)]/50', status.color)}>
                           <StatusIcon className="w-5 h-5" />
                           {status.label}
                         </span>
@@ -1262,44 +1264,44 @@ export default function PortalPage() {
 
                       <div className="space-y-8">
                         {/* Status Message */}
-                        <div className="p-5 rounded-xl bg-emerald/10 border border-emerald/20 flex gap-4 items-start">
+                        <div className="p-5 rounded-xl bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)] flex gap-4 items-start">
                           <div className="mt-0.5">
                             <StatusIcon className={cn('w-5 h-5', status.color.split(' ')[0])} />
                           </div>
                           <div>
-                            <p className="font-semibold text-ivory mb-1">Estado actual: {status.label}</p>
-                            <p className="text-muted-foreground text-sm">{status.description}</p>
+                            <p className="font-semibold text-[var(--color-text-primary)] mb-1">Estado actual: {status.label}</p>
+                            <p className="text-[var(--color-text-secondary)] text-sm">{status.description}</p>
                           </div>
                         </div>
 
                         {/* Service & Duration */}
                         <div className="grid sm:grid-cols-2 gap-6 p-6 rounded-xl bg-muted/5 border border-border/50">
                           <div>
-                            <p className="text-sm text-muted-foreground flex items-center gap-2 mb-2">
-                              <Calendar className="w-4 h-4" />
+                            <p className="text-sm text-[var(--color-text-secondary)] flex items-center gap-2 mb-2">
+                              <Dumbbell className="w-4 h-4" />
                               Servicio
                             </p>
-                            <p className="text-ivory font-semibold text-lg">{serviceLabels[appointment.serviceType]}</p>
+                            <p className="text-[var(--color-text-primary)] font-semibold text-lg">{serviceLabels[appointment.serviceType] || appointment.serviceType}</p>
                           </div>
                           <div>
-                            <p className="text-sm text-muted-foreground flex items-center gap-2 mb-2">
+                            <p className="text-sm text-[var(--color-text-secondary)] flex items-center gap-2 mb-2">
                               <Clock className="w-4 h-4" />
                               Duración
                             </p>
-                            <p className="text-ivory font-semibold text-lg">{durations.find(d => d.value === appointment.duration)?.label}</p>
+                            <p className="text-[var(--color-text-primary)] font-semibold text-lg">{durations.find(d => d.value === appointment.duration)?.label}</p>
                           </div>
                         </div>
 
                         {/* Time Slots */}
                         <div>
-                          <h3 className="text-lg font-bold text-ivory mb-4">Franja propuesta</h3>
+                          <h3 className="text-lg font-bold text-[var(--color-text-primary)] mb-4">Franja propuesta</h3>
                           <div className="grid gap-3">
                             {appointment.preferredSlots.map((slot, index) => (
-                              <div key={index} className="flex items-center gap-4 p-4 rounded-xl bg-obsidian border border-border">
-                                <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center text-accent font-medium text-sm">
+                              <div key={index} className="flex items-center gap-4 p-4 rounded-xl bg-[var(--color-bg-base)] border border-border">
+                                <div className="w-8 h-8 rounded-full bg-[var(--color-accent-dim)] flex items-center justify-center text-[var(--color-accent-val)] font-medium text-sm">
                                   {index + 1}
                                 </div>
-                                <p className="text-ivory font-medium">
+                                <p className="text-[var(--color-text-primary)] font-medium">
                                   {new Date(slot.date).toLocaleDateString('es-ES', {
                                     weekday: 'long',
                                     day: 'numeric',
@@ -1313,14 +1315,14 @@ export default function PortalPage() {
                         </div>
 
                         {appointment.status === 'approved' && (appointment.approvedSlot || appointment.assignedTrainer || appointment.sessionType) && (
-                          <div className="p-5 rounded-xl bg-emerald/10 border border-emerald/20">
-                            <h3 className="text-lg font-bold text-emerald-light mb-3 flex items-center gap-2">
+                          <div className="p-5 rounded-xl bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)]">
+                            <h3 className="text-lg font-bold text-[var(--color-accent-val)] mb-3 flex items-center gap-2">
                               <CheckCircle className="w-5 h-5" />
                               Cita confirmada
                             </h3>
                             <div className="space-y-2">
                               {appointment.approvedSlot && (
-                                <p className="text-ivory font-medium">
+                                <p className="text-[var(--color-text-primary)] font-medium">
                                   {new Date(appointment.approvedSlot.date).toLocaleDateString('es-ES', {
                                     weekday: 'long',
                                     day: 'numeric',
@@ -1330,13 +1332,13 @@ export default function PortalPage() {
                                 </p>
                               )}
                               {appointment.assignedTrainer && (
-                                <p className="text-muted-foreground text-sm">
-                                  Entrenador/a: <span className="text-ivory font-medium">{appointment.assignedTrainer}</span>
+                                <p className="text-[var(--color-text-secondary)] text-sm">
+                                  Entrenador/a: <span className="text-[var(--color-text-primary)] font-medium">{trainers.find(t => t.id === appointment.assignedTrainer)?.name || appointment.assignedTrainer}</span>
                                 </p>
                               )}
                               {appointment.sessionType && (
-                                <p className="text-muted-foreground text-sm">
-                                  Tipo de sesión: <span className="text-ivory font-medium capitalize">{appointment.sessionType}</span>
+                                <p className="text-[var(--color-text-secondary)] text-sm">
+                                  Tipo de sesión: <span className="text-[var(--color-text-primary)] font-medium capitalize">{appointment.sessionType}</span>
                                 </p>
                               )}
                             </div>
@@ -1345,18 +1347,18 @@ export default function PortalPage() {
 
                         {appointment.reason && (
                           <div>
-                            <h3 className="text-lg font-bold text-ivory mb-3">Tu comentario</h3>
-                            <div className="p-5 rounded-xl bg-obsidian border border-border">
-                              <p className="text-muted-foreground leading-relaxed">{appointment.reason}</p>
+                            <h3 className="text-lg font-bold text-[var(--color-text-primary)] mb-3">Tu comentario</h3>
+                            <div className="p-5 rounded-xl bg-[var(--color-bg-base)] border border-border">
+                              <p className="text-[var(--color-text-secondary)] leading-relaxed">{appointment.reason}</p>
                             </div>
                           </div>
                         )}
 
                         <div className="pt-6 border-t border-border flex justify-between items-center">
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xs text-[var(--color-text-secondary)]">
                             ID: {appointment.id?.slice(0, 8)}...
                           </p>
-                          <p className="text-xs text-muted-foreground">
+                          <p className="text-xs text-[var(--color-text-secondary)]">
                             Solicitada el {new Date(appointment.createdAt).toLocaleDateString('es-ES', {
                               day: 'numeric',
                               month: 'long',
@@ -1395,52 +1397,52 @@ export default function PortalPage() {
               className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-lg bg-background border-l border-border overflow-y-auto"
             >
               <div className="flex items-center justify-between p-6 border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm z-10">
-                <h2 className="text-xl font-bold text-ivory">Reservar Sesión</h2>
+                <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Reservar Sesión</h2>
                 <button
                   onClick={() => setShowReservaDrawer(false)}
                   className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted/30 transition-colors"
                 >
-                  <X className="w-4 h-4 text-muted-foreground" />
+                  <X className="w-4 h-4 text-[var(--color-text-secondary)]" />
                 </button>
               </div>
 
               <div className="p-6 space-y-6">
                 {submitSuccess ? (
                   <div className="text-center py-12">
-                    <div className="w-16 h-16 rounded-full bg-emerald/20 flex items-center justify-center mx-auto mb-4">
-                      <CheckCircle className="w-8 h-8 text-emerald" />
+                    <div className="w-16 h-16 rounded-full bg-[var(--color-accent-dim)] flex items-center justify-center mx-auto mb-4">
+                      <CheckCircle className="w-8 h-8 text-[var(--color-accent-val)]" />
                     </div>
-                    <h2 className="text-xl font-bold text-ivory mb-2">¡Solicitud Enviada!</h2>
-                    <p className="text-muted-foreground">Te contactaremos pronto para confirmar tu cita.</p>
+                    <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-2">¡Solicitud Enviada!</h2>
+                    <p className="text-[var(--color-text-secondary)]">Te contactaremos pronto para confirmar tu cita.</p>
                   </div>
                 ) : (
                   <>
                     {/* Servicio y duración */}
                     <GlassCard className="p-5">
-                      <h3 className="text-sm font-semibold text-ivory mb-4 flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-emerald/20 text-accent text-xs flex items-center justify-center">1</span>
+                      <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs flex items-center justify-center">1</span>
                         Servicio y Duración
                       </h3>
                       <div className="flex flex-col sm:flex-row gap-3">
-                        <div className="flex-1 p-3 rounded-xl bg-emerald/10 border border-accent/30">
-                          <p className="text-xs text-muted-foreground mb-0.5">Servicio</p>
-                          <p className="text-ivory font-semibold text-sm">{bonoServiceLabel}</p>
+                        <div className="flex-1 p-3 rounded-xl bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)]">
+                          <p className="text-xs text-[var(--color-text-secondary)] mb-0.5">Servicio</p>
+                          <p className="text-[var(--color-text-primary)] font-semibold text-sm">{bonoServiceLabel}</p>
                         </div>
-                        <div className="p-3 rounded-xl bg-emerald/10 border border-accent/30">
-                          <p className="text-xs text-muted-foreground mb-0.5">Duración</p>
-                          <p className="text-ivory font-semibold text-sm">{bonoDurationValue} min</p>
+                        <div className="p-3 rounded-xl bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)]">
+                          <p className="text-xs text-[var(--color-text-secondary)] mb-0.5">Duración</p>
+                          <p className="text-[var(--color-text-primary)] font-semibold text-sm">{bonoDurationValue} min</p>
                         </div>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-3">Determinado por tu bono activo.</p>
+                      <p className="text-xs text-[var(--color-text-secondary)] mt-3">Determinado por tu bono activo.</p>
                     </GlassCard>
 
                     {/* Calendario */}
                     <GlassCard className="p-5">
-                      <h3 className="text-sm font-semibold text-ivory mb-1 flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-emerald/20 text-accent text-xs flex items-center justify-center">2</span>
+                      <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1 flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs flex items-center justify-center">2</span>
                         Franja Horaria
                       </h3>
-                      <p className="text-xs text-muted-foreground mb-4 ml-8">Elige la franja que prefieras.</p>
+                      <p className="text-xs text-[var(--color-text-secondary)] mb-4 ml-8">Elige la franja que prefieras.</p>
                       <InteractiveCalendar
                         selectedSlot={formData.preferredSlot}
                         onSelectSlot={handleSelectSlot}
@@ -1450,15 +1452,15 @@ export default function PortalPage() {
 
                     {/* Comentario */}
                     <GlassCard className="p-5">
-                      <h3 className="text-sm font-semibold text-ivory mb-4 flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-emerald/20 text-accent text-xs flex items-center justify-center">3</span>
+                      <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs flex items-center justify-center">3</span>
                         Comentario (opcional)
                       </h3>
                       <textarea
                         value={formData.reason}
                         onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
                         rows={3}
-                        className="w-full px-4 py-3 rounded-xl bg-obsidian border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-all resize-none text-sm"
+                        className="w-full px-4 py-3 rounded-xl bg-[var(--color-bg-base)] border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)] focus:ring-1 focus:ring-[var(--color-accent-border)] transition-all resize-none text-sm"
                         placeholder="Cuéntanos sobre tus objetivos o cualquier lesión..."
                       />
                     </GlassCard>
@@ -1507,12 +1509,12 @@ export default function PortalPage() {
               className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-md bg-background border-l border-border overflow-y-auto"
             >
               <div className="flex items-center justify-between p-6 border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm z-10">
-                <h2 className="text-xl font-bold text-ivory">Mi Perfil</h2>
+                <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Mi Perfil</h2>
                 <button
                   onClick={() => setShowProfileModal(false)}
                   className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted/30 transition-colors"
                 >
-                  <X className="w-4 h-4 text-muted-foreground" />
+                  <X className="w-4 h-4 text-[var(--color-text-secondary)]" />
                 </button>
               </div>
 
@@ -1524,15 +1526,15 @@ export default function PortalPage() {
                       <img
                         src={profilePhotoPreview || userProfile?.photoURL}
                         alt=""
-                        className="w-20 h-20 rounded-full object-cover ring-2 ring-accent/40"
+                        className="w-20 h-20 rounded-full object-cover ring-2 ring-[var(--color-accent-border)]"
                       />
                     ) : (
-                      <div className="w-20 h-20 rounded-full bg-gradient-to-br from-emerald to-accent flex items-center justify-center text-obsidian font-bold text-3xl">
+                      <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[var(--color-accent-val)] to-[var(--color-accent-bright)] flex items-center justify-center text-[var(--color-bg-base)] font-bold text-3xl">
                         {userProfile?.name?.charAt(0)}
                       </div>
                     )}
-                    <label className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-accent flex items-center justify-center cursor-pointer hover:bg-accent/80 transition-colors">
-                      <Camera className="w-3.5 h-3.5 text-obsidian" />
+                    <label className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-[var(--color-accent-val)] flex items-center justify-center cursor-pointer hover:bg-[var(--color-accent-val)]/80 transition-colors">
+                      <Camera className="w-3.5 h-3.5 text-[var(--color-bg-base)]" />
                       <input
                         type="file"
                         accept="image/*"
@@ -1551,42 +1553,42 @@ export default function PortalPage() {
 
                 {/* Nombre */}
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Nombre visible</label>
+                  <label className="text-xs text-[var(--color-text-secondary)] mb-1.5 block">Nombre visible</label>
                   <input
                     type="text"
                     value={profileEditForm.name}
                     onChange={e => setProfileEditForm({ ...profileEditForm, name: e.target.value })}
-                    className="w-full px-4 py-3 rounded-xl bg-obsidian border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-accent transition-all text-sm"
+                    className="w-full px-4 py-3 rounded-xl bg-[var(--color-bg-base)] border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)] transition-all text-sm"
                   />
                 </div>
 
                 {/* Teléfono */}
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 block">Teléfono</label>
+                  <label className="text-xs text-[var(--color-text-secondary)] mb-1.5 block">Teléfono</label>
                   <input
                     type="tel"
                     value={profileEditForm.phone}
                     onChange={e => setProfileEditForm({ ...profileEditForm, phone: e.target.value })}
-                    className="w-full px-4 py-3 rounded-xl bg-obsidian border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-accent transition-all text-sm"
+                    className="w-full px-4 py-3 rounded-xl bg-[var(--color-bg-base)] border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)] transition-all text-sm"
                   />
                 </div>
 
                 {/* Contraseña — solo email/password */}
                 {user?.providerData.some(p => p.providerId === 'password') && (
                   <div>
-                    <label className="text-xs text-muted-foreground mb-1.5 block">Nueva contraseña</label>
+                    <label className="text-xs text-[var(--color-text-secondary)] mb-1.5 block">Nueva contraseña</label>
                     <input
                       type="password"
                       value={newPassword}
                       onChange={e => setNewPassword(e.target.value)}
                       placeholder="Dejar vacío para no cambiar"
-                      className="w-full px-4 py-3 rounded-xl bg-obsidian border border-border text-ivory placeholder:text-muted-foreground focus:outline-none focus:border-accent transition-all text-sm"
+                      className="w-full px-4 py-3 rounded-xl bg-[var(--color-bg-base)] border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)] transition-all text-sm"
                     />
                   </div>
                 )}
 
                 {profileError && <p className="text-red-400 text-sm">{profileError}</p>}
-                {profileSuccess && <p className="text-emerald text-sm">{profileSuccess}</p>}
+                {profileSuccess && <p className="text-[var(--color-accent-val)] text-sm">{profileSuccess}</p>}
 
                 <PremiumButton
                   variant="cta"

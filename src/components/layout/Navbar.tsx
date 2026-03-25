@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Menu, X, User, LogOut, Settings } from 'lucide-react';
-import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { useAuth } from '@/contexts/AuthContext';
@@ -27,10 +26,10 @@ export function Navbar() {
 
   useEffect(() => {
     const handleScroll = () => {
-      setScrolled(window.scrollY > 20);
+      setScrolled(window.scrollY > 50);
     };
 
-    window.addEventListener('scroll', handleScroll);
+    window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
@@ -44,38 +43,27 @@ export function Navbar() {
       className={cn(
         'fixed top-0 left-0 right-0 z-50 transition-all duration-300',
         scrolled
-          ? 'glass-dark py-3 shadow-lg'
+          ? 'bg-[rgba(8,8,8,0.85)] backdrop-blur-[20px] border-b border-[rgba(255,255,255,0.06)] py-3'
           : 'bg-transparent py-5'
       )}
       initial={{ y: -100 }}
       animate={{ y: 0 }}
-      transition={{ duration: 0.5 }}
+      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
     >
       <div className="container mx-auto px-4">
         <nav className="flex items-center justify-between">
-          {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 group">
-            <motion.div
-              className="w-10 h-10 rounded-xl overflow-hidden"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
+          {/* Logo — Solo texto */}
+          <Link href="/" className="flex flex-col group">
+            <motion.span
+              className="text-lg font-bold tracking-tight text-[var(--color-text-primary)] group-hover:text-[var(--color-accent-val)] transition-colors duration-300"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
             >
-              <Image
-                src="/imagenes/logo.jpeg"
-                alt="Focus Club Vallecas"
-                width={40}
-                height={40}
-                className="w-full h-full object-cover"
-              />
-            </motion.div>
-            <div className="flex flex-col">
-              <span className="text-lg font-bold tracking-tight text-ivory group-hover:text-accent transition-colors">
-                Focus Club
-              </span>
-              <span className="text-[10px] uppercase tracking-widest text-muted-foreground">
-                Vallecas
-              </span>
-            </div>
+              Focus Club
+            </motion.span>
+            <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--color-accent-val)]">
+              Vallecas
+            </span>
           </Link>
 
           {/* Desktop Navigation */}
@@ -85,16 +73,16 @@ export function Navbar() {
                 key={link.href}
                 href={link.href}
                 className={cn(
-                  'relative text-sm font-medium transition-colors hover:text-accent',
-                  pathname === link.href ? 'text-accent' : 'text-ivory/80'
+                  'relative text-sm font-medium transition-colors duration-300 hover:text-[var(--color-accent-val)]',
+                  pathname === link.href ? 'text-[var(--color-accent-val)]' : 'text-[var(--color-text-primary)]/80'
                 )}
               >
                 {link.label}
                 {pathname === link.href && (
                   <motion.div
-                    className="absolute -bottom-1 left-0 right-0 h-0.5 bg-accent rounded-full"
+                    className="absolute -bottom-1 left-0 right-0 h-0.5 bg-[var(--color-accent-val)] rounded-full origin-center"
                     layoutId="navbar-indicator"
-                    transition={{ duration: 0.3 }}
+                    transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
                   />
                 )}
               </Link>
@@ -103,7 +91,6 @@ export function Navbar() {
 
           {/* CTA Buttons */}
           <div className="hidden md:flex items-center gap-3">
-            {/* Show user menu if authenticated */}
             {user && userProfile ? (
               <>
                 <Link href={isAdmin ? '/admin' : '/portal'}>
@@ -113,7 +100,7 @@ export function Navbar() {
                 </Link>
                 <button
                   onClick={() => logout()}
-                  className="p-2 text-muted-foreground hover:text-ivory transition-colors"
+                  className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors duration-300"
                   title="Cerrar sesión"
                 >
                   <LogOut className="w-5 h-5" />
@@ -122,7 +109,7 @@ export function Navbar() {
             ) : (
               <>
                 <Link href="/portal">
-                  <PremiumButton variant="ghost" size="sm" icon={<User className="w-4 h-4" />}>
+                  <PremiumButton variant="outline" size="sm" icon={<User className="w-4 h-4" />}>
                     Portal
                   </PremiumButton>
                 </Link>
@@ -137,7 +124,7 @@ export function Navbar() {
 
           {/* Mobile Menu Button */}
           <button
-            className="md:hidden p-2 text-ivory hover:text-accent transition-colors"
+            className="md:hidden p-2 text-[var(--color-text-primary)] hover:text-[var(--color-accent-val)] transition-colors duration-300"
             onClick={() => setIsOpen(!isOpen)}
             aria-label="Toggle menu"
           >
@@ -150,11 +137,11 @@ export function Navbar() {
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            className="md:hidden glass-dark absolute top-full left-0 right-0 border-t border-border"
+            className="md:hidden absolute top-full left-0 right-0 bg-[rgba(8,8,8,0.95)] backdrop-blur-[20px] border-t border-[rgba(255,255,255,0.06)]"
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.3 }}
+            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
           >
             <div className="container mx-auto px-4 py-6">
               <div className="flex flex-col gap-4">
@@ -163,17 +150,16 @@ export function Navbar() {
                     key={link.href}
                     href={link.href}
                     className={cn(
-                      'text-base font-medium py-2 transition-colors hover:text-accent',
-                      pathname === link.href ? 'text-accent' : 'text-ivory/80'
+                      'text-base font-medium py-2 transition-colors duration-300 hover:text-[var(--color-accent-val)]',
+                      pathname === link.href ? 'text-[var(--color-accent-val)]' : 'text-[var(--color-text-primary)]/80'
                     )}
                     onClick={() => setIsOpen(false)}
                   >
                     {link.label}
                   </Link>
                 ))}
-                <hr className="border-border my-2" />
+                <hr className="border-[var(--color-border-base)] my-2" />
 
-                {/* User section in mobile */}
                 {user && userProfile ? (
                   <>
                     <Link href={isAdmin ? '/admin' : '/portal'} onClick={() => setIsOpen(false)}>
@@ -197,7 +183,7 @@ export function Navbar() {
                 ) : (
                   <>
                     <Link href="/portal" onClick={() => setIsOpen(false)}>
-                      <PremiumButton variant="ghost" size="sm" className="w-full" icon={<User className="w-4 h-4" />}>
+                      <PremiumButton variant="outline" size="sm" className="w-full" icon={<User className="w-4 h-4" />}>
                         Portal Cliente
                       </PremiumButton>
                     </Link>

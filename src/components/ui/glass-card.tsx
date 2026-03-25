@@ -13,9 +13,9 @@ interface GlassCardProps extends HTMLMotionProps<'div'> {
 export const GlassCard = forwardRef<HTMLDivElement, GlassCardProps>(
   ({ className, variant = 'default', glow = false, hover = true, children, ...props }, ref) => {
     const variants = {
-      default: 'glass-card',
+      default: 'card-glass',
       dark: 'glass-dark',
-      bordered: 'glass-card border-accent/30',
+      bordered: 'card-glass border-[var(--color-accent-border)]',
     };
 
     return (
@@ -23,14 +23,14 @@ export const GlassCard = forwardRef<HTMLDivElement, GlassCardProps>(
         ref={ref}
         className={cn(
           variants[variant],
-          'rounded-2xl p-6',
+          'rounded-[var(--radius-card)] p-6',
           glow && 'shadow-glow',
-          hover && 'transition-all duration-300 hover:border-emerald-light/30 hover:shadow-lg',
+          hover && 'transition-all duration-300 hover:border-[var(--color-border-hover)] hover:shadow-lg',
           className
         )}
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
+        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
         {...props}
       >
         {children}
