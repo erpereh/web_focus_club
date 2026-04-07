@@ -37,7 +37,7 @@ export interface Appointment {
     email: string;
     phone: string;
     serviceType: string;
-    duration: '30' | '60' | '90';
+    duration: '30' | '45' | '60';
     preferredSlots: TimeSlot[];
     reason: string;
     status: 'pending' | 'approved' | 'rejected';
@@ -52,7 +52,7 @@ export interface Appointment {
 export interface BlockedSlot {
     id: string;
     date: string;       // "YYYY-MM-DD"
-    time: string;       // "HH:00"
+    time: string;       // "HH:MM"
     reason?: string;
     createdBy: string;  // uid del admin
     createdAt: string;
@@ -60,7 +60,7 @@ export interface BlockedSlot {
 
 export interface SlotOccupancy {
     date: string;       // "YYYY-MM-DD"
-    time: string;       // "HH:00"
+    time: string;       // "HH:MM" (intervalos de 30 min)
     count: number;      // número de personas aprobadas en esa franja
 }
 
@@ -116,10 +116,12 @@ export interface CentroData {
 }
 
 export interface SiteConfig {
-    startHour: number;        // ej: 8
-    endHour: number;          // ej: 20
-    sessionDuration: number;  // en minutos: 60
+    startHour: number;         // ej: 8
+    endHour: number;           // ej: 20
+    slotInterval: number;      // intervalo de slots en minutos (default: 30)
     bonoExpirationMonths: number; // meses de validez de los bonos (default: 1)
+    // Legacy (compatibilidad hacia atrás)
+    sessionDuration?: number;
 }
 
 // ============================================
@@ -129,23 +131,50 @@ export interface SiteConfig {
 export interface BonoHistorialEntry {
     fecha: string;          // ISO date de la sesión
     tipo: string;           // nombre del servicio o "Deducción manual"
-    duracion: string;       // '30' | '60' | duración en minutos
+    duracion: string;       // '30' | '45' | '60' — minutos de la sesión
     appointmentId: string;  // ref a appointments/{id} o 'manual'
 }
 
 export interface Bono {
     id: string;
-    userId: string;                              // ref a users/{uid}
-    tipo: 'sesion_personal' | 'bono_mensual';
-    sesionesTotales: number;                     // 1 | 4 | 8
-    sesionesRestantes: number;
-    modalidad?: '1h' | '30min';                  // solo para bono_mensual
-    fechaAsignacion: string;                     // ISO date
-    fechaExpiracion: string;                     // calculada
+    userId: string;            // ref a users/{uid}
+    tamano: 240 | 360 | 480;  // tamaño del bono: 4h, 6h u 8h en minutos
+    minutosTotales: number;    // minutos totales al crear el bono
+    minutosRestantes: number;  // minutos disponibles
+    fechaAsignacion: string;   // ISO date
+    fechaExpiracion: string;   // calculada: fechaAsignacion + bonoExpirationMonths
     estado: 'activo' | 'agotado' | 'expirado' | 'eliminado';
     historial: BonoHistorialEntry[];
-    asignadoPor: string;                         // admin email
+    asignadoPor: string;       // admin email
     createdAt: string;
+    // Campos legacy (solo lectura, para bonos creados antes de la migración)
+    tipo?: string;
+    sesionesTotales?: number;
+    sesionesRestantes?: number;
+    modalidad?: string;
+}
+
+/** Devuelve los minutos restantes del bono, con soporte para bonos legacy. */
+export function getBonoMinutosRestantes(bono: Bono): number {
+    if (bono.minutosRestantes !== undefined) return bono.minutosRestantes;
+    const minPerSession = bono.modalidad === '30min' ? 30 : 60;
+    return (bono.sesionesRestantes ?? 0) * minPerSession;
+}
+
+/** Devuelve los minutos totales del bono, con soporte para bonos legacy. */
+export function getBonoMinutosTotales(bono: Bono): number {
+    if (bono.minutosTotales !== undefined) return bono.minutosTotales;
+    const minPerSession = bono.modalidad === '30min' ? 30 : 60;
+    return (bono.sesionesTotales ?? 0) * minPerSession;
+}
+
+/** Formatea minutos como string legible: "4h", "3h 30min", "30min" */
+export function formatMinutos(minutos: number): string {
+    const h = Math.floor(minutos / 60);
+    const m = minutos % 60;
+    if (h === 0) return `${m}min`;
+    if (m === 0) return `${h}h`;
+    return `${h}h ${m}min`;
 }
 
 export interface GaleriaContent {

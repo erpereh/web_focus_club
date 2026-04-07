@@ -24,6 +24,10 @@ interface InteractiveCalendarProps {
   onSelectSlot: (slot: TimeSlot) => void;
   /** Se llama cuando el usuario deselecciona la franja actual */
   onClearSlot: () => void;
+  /** Duración de la sesión en minutos (30, 45 o 60). Determina cuántos bloques valida el click. */
+  selectedDuration?: 30 | 45 | 60;
+  /** Claves "YYYY-MM-DD_HH:MM" de los bloques ya reservados por este usuario (pending o approved). */
+  userBookedSlotKeys?: Set<string>;
 }
 
 // ============================================
@@ -72,8 +76,21 @@ function isPastDay(year: number, month: number, day: number): boolean {
 function isPastTime(year: number, month: number, day: number, time: string): boolean {
   if (!isToday(year, month, day)) return false;
   const now = new Date();
-  const [hours] = time.split(':').map(Number);
-  return hours <= now.getHours();
+  const [hours, minutes] = time.split(':').map(Number);
+  const slotMinutes = hours * 60 + minutes;
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  return slotMinutes <= nowMinutes;
+}
+
+/** Bloques de 30 min que cubre una sesión (helper local para validación de click) */
+function getCalendarSlotBlocks(startTime: string, durationMinutes: number): string[] {
+  const [h, m] = startTime.split(':').map(Number);
+  const startTotal = h * 60 + m;
+  const numBlocks = Math.ceil(durationMinutes / 30);
+  return Array.from({ length: numBlocks }, (_, i) => {
+    const total = startTotal + i * 30;
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  });
 }
 
 // ============================================
@@ -84,6 +101,8 @@ export function InteractiveCalendar({
   selectedSlot,
   onSelectSlot,
   onClearSlot,
+  selectedDuration = 60,
+  userBookedSlotKeys,
 }: InteractiveCalendarProps) {
   const now = new Date();
   const [currentYear, setCurrentYear] = useState(now.getFullYear());
@@ -214,7 +233,6 @@ export function InteractiveCalendar({
   function handleSlotClick(time: string) {
     if (!selectedDay) return;
     const dateStr = formatDateKey(currentYear, currentMonth, selectedDay);
-    const status = getSlotStatus(selectedDay, time);
 
     // Si está seleccionada, deseleccionar
     if (selectedSlot && selectedSlot.date === dateStr && selectedSlot.time === time) {
@@ -222,14 +240,20 @@ export function InteractiveCalendar({
       return;
     }
 
-    // Si está llena, mostrar mensaje y no seleccionar
-    if (status.occupancy >= MAX_CAPACITY) {
-      setFullMessage('Esta sesión está completa');
-      return;
+    // Validar todos los bloques de 30 min que cubrirá la sesión
+    const blocks = getCalendarSlotBlocks(time, selectedDuration);
+    for (const blockTime of blocks) {
+      const blockStatus = getSlotStatus(selectedDay, blockTime);
+      if (blockStatus.isBlocked) return;
+      if (blockStatus.occupancy >= MAX_CAPACITY) {
+        setFullMessage('Esta franja no está disponible para la duración seleccionada');
+        return;
+      }
+      if (userBookedSlotKeys?.has(`${dateStr}_${blockTime}`)) {
+        setFullMessage('Ya tienes una sesión reservada en esta franja');
+        return;
+      }
     }
-
-    // Si está bloqueada, no hacer nada
-    if (status.isBlocked) return;
 
     // Seleccionar (reemplaza la anterior automáticamente)
     onSelectSlot({ date: dateStr, time });
@@ -388,8 +412,11 @@ export function InteractiveCalendar({
                 const status = getSlotStatus(selectedDay, time);
                 const selected = isSlotSelected(selectedDay, time);
                 const isFull = status.occupancy >= MAX_CAPACITY;
-                const isPartial = status.occupancy === 1;
-                const disabled = past || status.isBlocked;
+                const dateStr = formatDateKey(currentYear, currentMonth, selectedDay);
+                const slotKey = `${dateStr}_${time}`;
+                const isUserBooked = !!userBookedSlotKeys?.has(slotKey);
+                const isPartial = !isUserBooked && status.occupancy === 1;
+                const disabled = past || status.isBlocked || isUserBooked;
 
                 return (
                   <button
@@ -402,13 +429,15 @@ export function InteractiveCalendar({
                       past && 'opacity-25 cursor-not-allowed border-transparent text-[var(--color-text-secondary)]',
                       // Bloqueado por admin
                       !past && status.isBlocked && 'bg-muted/20 border-border/50 text-[var(--color-text-secondary)]/50 cursor-not-allowed',
+                      // Cita propia del usuario (pending o approved)
+                      !past && !status.isBlocked && isUserBooked && !selected && 'bg-blue-500/10 border-blue-500/30 text-blue-300 cursor-not-allowed',
                       // Lleno (2/2) — clicable para mostrar mensaje, pero estilizado como lleno
-                      !past && !status.isBlocked && isFull && !selected && 'bg-red-500/10 border-red-500/30 text-red-400/70 cursor-pointer',
+                      !past && !status.isBlocked && !isUserBooked && isFull && !selected && 'bg-red-500/10 border-red-500/30 text-red-400/70 cursor-pointer',
                       // Parcial (1/2) — disponible
                       !past && !status.isBlocked && isPartial && !selected &&
                         'bg-amber-400/10 border-amber-400/30 text-amber-300 hover:bg-amber-400/20 hover:border-amber-400/50 hover:shadow-[0_0_10px_rgba(251,191,36,0.15)]',
                       // Libre (0/2) — disponible
-                      !past && !status.isBlocked && !isFull && !isPartial && !selected &&
+                      !past && !status.isBlocked && !isUserBooked && !isFull && !isPartial && !selected &&
                         'bg-[var(--color-accent-val)]/5 border-[var(--color-border-base)] text-[var(--color-text-primary)] hover:bg-[var(--color-accent-val)]/10 hover:border-[var(--color-accent-border)] hover:shadow-emerald-glow',
                       // Seleccionado por el usuario
                       selected && 'bg-[var(--color-accent-val)]/20 border-[var(--color-accent-border)] text-[var(--color-text-primary)] shadow-emerald-glow ring-1 ring-[var(--color-accent-border)]',
@@ -420,7 +449,10 @@ export function InteractiveCalendar({
                     {!past && status.isBlocked && (
                       <Lock className="w-3 h-3 mx-auto mt-1 text-[var(--color-text-secondary)]/40" />
                     )}
-                    {!past && !status.isBlocked && isFull && !selected && (
+                    {!past && !status.isBlocked && isUserBooked && (
+                      <span className="block text-[10px] mt-0.5 text-blue-400 font-semibold">Tu sesión</span>
+                    )}
+                    {!past && !status.isBlocked && !isUserBooked && isFull && !selected && (
                       <span className="block text-[10px] mt-0.5 text-red-400/60">Completo</span>
                     )}
                     {!past && !status.isBlocked && isPartial && !selected && (

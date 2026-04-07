@@ -280,19 +280,30 @@ export async function deleteBlockedSlot(id: string): Promise<void> {
 // ============================================
 
 /**
- * Genera el ID del documento de slot_occupancy: "YYYY-MM-DD_HH:00"
+ * Genera el ID del documento de slot_occupancy: "YYYY-MM-DD_HH:MM"
  */
 function slotOccupancyId(date: string, time: string): string {
     return `${date}_${time}`;
 }
 
 /**
- * Incrementa el contador de ocupación de una franja horaria.
- * Llamar cuando Sandra aprueba una cita.
+ * Devuelve los bloques de 30 min que cubre una sesión.
+ * Ej: startTime="09:00", durationMinutes=60 → ["09:00", "09:30"]
+ *     startTime="09:00", durationMinutes=45 → ["09:00", "09:30"]
+ *     startTime="09:00", durationMinutes=30 → ["09:00"]
  */
-export async function incrementSlotOccupancy(date: string, time: string): Promise<void> {
-    const id = slotOccupancyId(date, time);
-    const ref = doc(db, 'slot_occupancy', id);
+function getSlotBlocks(startTime: string, durationMinutes: number): string[] {
+    const [h, m] = startTime.split(':').map(Number);
+    const startTotal = h * 60 + m;
+    const numBlocks = Math.ceil(durationMinutes / 30);
+    return Array.from({ length: numBlocks }, (_, i) => {
+        const total = startTotal + i * 30;
+        return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+    });
+}
+
+async function incrementSingleSlot(date: string, time: string): Promise<void> {
+    const ref = doc(db, 'slot_occupancy', slotOccupancyId(date, time));
     const snap = await getDoc(ref);
     if (snap.exists()) {
         await updateDoc(ref, { count: increment(1) });
@@ -301,14 +312,8 @@ export async function incrementSlotOccupancy(date: string, time: string): Promis
     }
 }
 
-/**
- * Decrementa el contador de ocupación de una franja horaria.
- * Llamar cuando Sandra revierte una cita aprobada a pendiente/rechazada.
- * Nunca deja el contador por debajo de 0.
- */
-export async function decrementSlotOccupancy(date: string, time: string): Promise<void> {
-    const id = slotOccupancyId(date, time);
-    const ref = doc(db, 'slot_occupancy', id);
+async function decrementSingleSlot(date: string, time: string): Promise<void> {
+    const ref = doc(db, 'slot_occupancy', slotOccupancyId(date, time));
     const snap = await getDoc(ref);
     if (snap.exists()) {
         const current = (snap.data() as SlotOccupancy).count;
@@ -318,6 +323,25 @@ export async function decrementSlotOccupancy(date: string, time: string): Promis
             await updateDoc(ref, { count: increment(-1) });
         }
     }
+}
+
+/**
+ * Incrementa el contador de ocupación de todos los bloques de 30 min cubiertos por la sesión.
+ * Una sesión de 60 min a las 09:00 incrementa 09:00 Y 09:30.
+ * Llamar cuando se aprueba una cita.
+ */
+export async function incrementSlotOccupancy(date: string, startTime: string, durationMinutes: number): Promise<void> {
+    const blocks = getSlotBlocks(startTime, durationMinutes);
+    await Promise.all(blocks.map((time) => incrementSingleSlot(date, time)));
+}
+
+/**
+ * Decrementa el contador de ocupación de todos los bloques de 30 min cubiertos por la sesión.
+ * Llamar cuando se revierte una cita aprobada.
+ */
+export async function decrementSlotOccupancy(date: string, startTime: string, durationMinutes: number): Promise<void> {
+    const blocks = getSlotBlocks(startTime, durationMinutes);
+    await Promise.all(blocks.map((time) => decrementSingleSlot(date, time)));
 }
 
 /**
@@ -449,19 +473,20 @@ export async function addActivityLog(log: Omit<ActivityLog, 'timestamp'>): Promi
 const DEFAULT_SITE_CONFIG: SiteConfig = {
     startHour: 8,
     endHour: 20,
-    sessionDuration: 60,
+    slotInterval: 30,
     bonoExpirationMonths: 1,
 };
 
 /**
  * Genera un array de franjas horarias a partir de la configuración.
- * Ej: { startHour: 8, endHour: 20, sessionDuration: 60 } → ['08:00', '09:00', ..., '20:00']
+ * Ej: { startHour: 8, endHour: 20, slotInterval: 30 } → ['08:00', '08:30', '09:00', ..., '20:00']
  */
 export function generateTimeSlots(config: SiteConfig): string[] {
+    const interval = config.slotInterval ?? config.sessionDuration ?? 30;
     const slots: string[] = [];
     const startMinutes = config.startHour * 60;
     const endMinutes = config.endHour * 60;
-    for (let m = startMinutes; m <= endMinutes; m += config.sessionDuration) {
+    for (let m = startMinutes; m <= endMinutes; m += interval) {
         const h = Math.floor(m / 60);
         const min = m % 60;
         slots.push(`${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
@@ -526,42 +551,42 @@ export async function deleteBono(bonoId: string): Promise<void> {
     await updateDoc(doc(db, 'bonos', bonoId), { estado: 'eliminado' });
 }
 
-/** Añade 1 sesión al bono; si estaba agotado, lo reactiva */
-export async function addBonoSession(bonoId: string): Promise<void> {
+/** Añade minutos al bono; si estaba agotado, lo reactiva */
+export async function addBonoMinutes(bonoId: string, minutes: number): Promise<void> {
     await runTransaction(db, async (transaction) => {
         const bonoRef = doc(db, 'bonos', bonoId);
         const snap = await transaction.get(bonoRef);
         if (!snap.exists()) throw new Error('Bono no encontrado');
         const bono = snap.data() as Omit<Bono, 'id'>;
-        const newRemaining = bono.sesionesRestantes + 1;
+        const newRemaining = (bono.minutosRestantes ?? 0) + minutes;
         transaction.update(bonoRef, {
-            sesionesRestantes: newRemaining,
-            sesionesTotales: bono.sesionesTotales + 1,
+            minutosRestantes: newRemaining,
+            minutosTotales: (bono.minutosTotales ?? 0) + minutes,
             estado: bono.estado === 'agotado' ? 'activo' : bono.estado,
         });
     });
 }
 
-/** Descontar una sesión del bono (transacción atómica) */
-export async function deductBonoSession(bonoId: string, entry: BonoHistorialEntry): Promise<void> {
+/** Descontar minutos del bono (transacción atómica) */
+export async function deductBonoMinutes(bonoId: string, minutesToDeduct: number, entry: BonoHistorialEntry): Promise<void> {
     await runTransaction(db, async (transaction) => {
         const bonoRef = doc(db, 'bonos', bonoId);
         const bonoSnap = await transaction.get(bonoRef);
         if (!bonoSnap.exists()) throw new Error('Bono no encontrado');
 
         const bono = bonoSnap.data() as Omit<Bono, 'id'>;
-        const newRemaining = bono.sesionesRestantes - 1;
+        const newRemaining = (bono.minutosRestantes ?? 0) - minutesToDeduct;
 
         transaction.update(bonoRef, {
-            sesionesRestantes: newRemaining,
+            minutosRestantes: newRemaining,
             estado: newRemaining <= 0 ? 'agotado' : 'activo',
             historial: arrayUnion(entry),
         });
     });
 }
 
-/** Devolver una sesión al bono cuando se cancela una cita */
-export async function returnBonoSession(bonoId: string, appointmentId: string): Promise<void> {
+/** Devolver minutos al bono cuando se cancela/revierte una cita */
+export async function returnBonoMinutes(bonoId: string, appointmentId: string): Promise<void> {
     await runTransaction(db, async (transaction) => {
         const bonoRef = doc(db, 'bonos', bonoId);
         const bonoSnap = await transaction.get(bonoRef);
@@ -569,31 +594,34 @@ export async function returnBonoSession(bonoId: string, appointmentId: string): 
 
         const bono = bonoSnap.data() as Omit<Bono, 'id'>;
 
-        // No devolver sesión si el bono está expirado
+        // No devolver minutos si el bono está expirado
         if (bono.estado === 'expirado') return;
 
         const entryToRemove = bono.historial.find((h) => h.appointmentId === appointmentId);
         if (!entryToRemove) return;
 
-        const newRemaining = bono.sesionesRestantes + 1;
+        const minutesReturned = parseInt(entryToRemove.duracion, 10);
+        if (isNaN(minutesReturned)) return; // entrada legacy sin duración válida
+
+        const newRemaining = (bono.minutosRestantes ?? 0) + minutesReturned;
 
         transaction.update(bonoRef, {
-            sesionesRestantes: newRemaining,
+            minutosRestantes: newRemaining,
             estado: newRemaining > 0 ? 'activo' : bono.estado,
             historial: arrayRemove(entryToRemove),
         });
     });
 }
 
-/** Deducción manual por parte del admin */
-export async function manualDeductBonoSession(bonoId: string, adminEmail: string): Promise<void> {
+/** Deducción manual de minutos por parte del admin */
+export async function manualDeductBonoMinutes(bonoId: string, minutes: number, adminEmail: string): Promise<void> {
     const entry: BonoHistorialEntry = {
         fecha: new Date().toISOString(),
         tipo: 'Deducción manual',
-        duracion: '-',
+        duracion: String(minutes),
         appointmentId: 'manual',
     };
-    await deductBonoSession(bonoId, entry);
+    await deductBonoMinutes(bonoId, minutes, entry);
 }
 
 /** Recalcular la fecha de expiración de todos los bonos activos */

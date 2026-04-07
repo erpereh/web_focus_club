@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -43,6 +43,7 @@ import { PremiumButton } from '@/components/ui/premium-button';
 import { InteractiveCalendar } from '@/components/ui/interactive-calendar';
 import { useAuth } from '@/contexts/AuthContext';
 import type { TimeSlot, Appointment, Bono, Trainer } from '@/types';
+import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import { addAppointment as addAppointmentFS, getAppointmentsByUser, getActiveBonoByUser, getBonosByUser, updateUserProfile, getTrainers } from '@/lib/firestore';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -58,7 +59,7 @@ type PortalView = 'dashboard' | 'new-appointment' | 'appointment-detail';
 
 interface FormData {
   serviceType: string;
-  duration: '30' | '60' | '90';
+  duration: '30' | '45' | '60';
   preferredSlot: TimeSlot | null;
   reason: string;
 }
@@ -100,11 +101,11 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Dumbbell, Trophy, Apple, Activity, Users, Heart,
 };
 
-const durations = [
-  { value: '30', label: '30 minutos', desc: 'Consulta rápida' },
-  { value: '60', label: '60 minutos', desc: 'Sesión estándar' },
-  { value: '90', label: '90 minutos', desc: 'Sesión extendida' },
-] as const;
+const durations: { value: '30' | '45' | '60'; label: string; desc: string }[] = [
+  { value: '30', label: '30 minutos', desc: 'Media sesión' },
+  { value: '45', label: '45 minutos', desc: 'Sesión media-larga' },
+  { value: '60', label: '60 minutos', desc: 'Sesión completa' },
+];
 
 // ============================================
 // COMPONENTE PRINCIPAL
@@ -168,13 +169,8 @@ export default function PortalPage() {
   const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
   const [profilePhotoPreview, setProfilePhotoPreview] = useState('');
 
-  // Derivados del bono activo — determinan servicio y duración de la cita
-  const bonoServiceLabel = activeBono
-    ? activeBono.tipo === 'sesion_personal'
-      ? 'Sesión de Entrenamiento Personal'
-      : 'Bono Mensual de Entrenamiento'
-    : '';
-  const bonoDurationValue: '30' | '60' = activeBono?.modalidad === '30min' ? '30' : '60';
+  // Etiqueta del servicio derivada del bono activo
+  const bonoServiceLabel = activeBono ? 'Bono Mensual de Entrenamiento' : '';
 
   useEffect(() => {
     if (user) {
@@ -208,8 +204,8 @@ export default function PortalPage() {
     }
   }, [userProfile]);
 
-  // Computed: sesiones totales históricas y próxima cita
-  const totalSessionsUsed = allBonos.reduce((sum, b) => sum + (b.sesionesTotales - b.sesionesRestantes), 0);
+  // Computed: minutos totales históricos y próxima cita
+  const totalMinutosUsados = allBonos.reduce((sum, b) => sum + (getBonoMinutosTotales(b) - getBonoMinutosRestantes(b)), 0);
   const nextAppointment = [...userAppointments]
     .filter(a => a.status === 'pending' || a.status === 'approved')
     .sort((a, b) => {
@@ -217,6 +213,27 @@ export default function PortalPage() {
       const dateB = b.preferredSlots[0]?.date || b.createdAt;
       return new Date(dateA).getTime() - new Date(dateB).getTime();
     })[0] || null;
+
+  // Franjas ya reservadas por este usuario (pending o approved) — para bloquear en el calendario
+  const userBookedSlotKeys = useMemo(() => {
+    const keys = new Set<string>();
+    userAppointments
+      .filter(a => a.status === 'pending' || a.status === 'approved')
+      .forEach(a => {
+        const slot = a.approvedSlot || a.preferredSlots?.[0];
+        if (!slot) return;
+        const dur = parseInt(a.duration || '60', 10);
+        const [h, m] = slot.time.split(':').map(Number);
+        const startTotal = h * 60 + m;
+        const numBlocks = Math.ceil(dur / 30);
+        for (let i = 0; i < numBlocks; i++) {
+          const total = startTotal + i * 30;
+          const blockTime = `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+          keys.add(`${slot.date}_${blockTime}`);
+        }
+      });
+    return keys;
+  }, [userAppointments]);
 
   // ============================================
   // MANEJADORES DE AUTENTICACIÓN
@@ -368,10 +385,15 @@ export default function PortalPage() {
   const handleSubmitAppointment = async () => {
     if (!user || !userProfile || !formData.preferredSlot) return;
 
-    // Verificar bono activo con sesiones disponibles
+    // Verificar bono activo con minutos suficientes para la duración elegida
     const currentBono = await getActiveBonoByUser(user.uid);
-    if (!currentBono || currentBono.sesionesRestantes <= 0) {
-      alert('No tienes sesiones disponibles en tu bono. Consulta en el gimnasio para renovar o adquirir un bono.');
+    const durationMinutes = parseInt(formData.duration, 10);
+    if (!currentBono || getBonoMinutosRestantes(currentBono) < durationMinutes) {
+      if (!currentBono) {
+        alert('No tienes un bono activo. Consulta en el gimnasio para adquirir uno.');
+      } else {
+        alert(`No tienes suficientes minutos disponibles. Te quedan ${getBonoMinutosRestantes(currentBono)} min y la sesión requiere ${durationMinutes} min.`);
+      }
       return;
     }
 
@@ -382,7 +404,7 @@ export default function PortalPage() {
         email: userProfile.email,
         phone: userProfile.phone || '',
         serviceType: bonoServiceLabel,
-        duration: bonoDurationValue,
+        duration: formData.duration,
         preferredSlots: [formData.preferredSlot],
         reason: formData.reason,
       });
@@ -989,7 +1011,7 @@ export default function PortalPage() {
                   </div>
                 </div>
 
-                {!bonoLoading && activeBono && activeBono.sesionesRestantes > 0 && (
+                {!bonoLoading && activeBono && getBonoMinutosRestantes(activeBono) >= 30 && (
                   <PremiumButton
                     variant="cta"
                     icon={<CalendarPlus className="w-4 h-4" />}
@@ -1003,10 +1025,10 @@ export default function PortalPage() {
               </div>
 
               {/* Sin bono activo — aviso */}
-              {!bonoLoading && (!activeBono || activeBono.sesionesRestantes <= 0) && (
+              {!bonoLoading && (!activeBono || getBonoMinutosRestantes(activeBono) < 30) && (
                 <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0" />
-                  No tienes sesiones disponibles. Consulta en el gimnasio para adquirir o renovar tu bono.
+                  No tienes minutos disponibles. Consulta en el gimnasio para adquirir o renovar tu bono.
                 </div>
               )}
 
@@ -1033,16 +1055,18 @@ export default function PortalPage() {
                   ) : activeBono ? (
                     <>
                       <p className="text-[var(--color-text-primary)] font-semibold text-lg mb-1">
-                        {activeBono.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
+                        Bono Mensual {getBonoMinutosTotales(activeBono) / 60}h
                       </p>
                       <div className="mt-2 mb-1 flex justify-between text-xs text-[var(--color-text-secondary)]">
-                        <span>Sesiones</span>
-                        <span className="text-[var(--color-text-primary)] font-medium">{activeBono.sesionesRestantes}/{activeBono.sesionesTotales}</span>
+                        <span>Disponible</span>
+                        <span className="text-[var(--color-text-primary)] font-medium">
+                          {formatMinutos(getBonoMinutosRestantes(activeBono))} / {formatMinutos(getBonoMinutosTotales(activeBono))}
+                        </span>
                       </div>
                       <div className="h-1.5 rounded-full bg-muted/30 overflow-hidden">
                         <div
                           className="h-full rounded-full bg-gradient-to-r from-[var(--color-accent-val)] to-[var(--color-accent-bright)] transition-all"
-                          style={{ width: `${(activeBono.sesionesRestantes / activeBono.sesionesTotales) * 100}%` }}
+                          style={{ width: `${(getBonoMinutosRestantes(activeBono) / getBonoMinutosTotales(activeBono)) * 100}%` }}
                         />
                       </div>
                       <p className="text-xs text-[var(--color-text-secondary)] mt-2">
@@ -1085,8 +1109,8 @@ export default function PortalPage() {
                     <Activity className="w-4 h-4 text-[var(--color-accent-val)]" />
                     <span className="text-xs text-[var(--color-text-secondary)] font-medium uppercase tracking-wide">Sesiones Realizadas</span>
                   </div>
-                  <p className="text-4xl font-bold text-[var(--color-text-primary)]">{totalSessionsUsed}</p>
-                  <p className="text-xs text-[var(--color-text-secondary)] mt-1">sesiones totales completadas</p>
+                  <p className="text-4xl font-bold text-[var(--color-text-primary)]">{formatMinutos(totalMinutosUsados)}</p>
+                  <p className="text-xs text-[var(--color-text-secondary)] mt-1">entrenados en total</p>
                 </GlassCard>
               </div>
 
@@ -1191,7 +1215,7 @@ export default function PortalPage() {
                       {allBonos.filter(b => b.estado !== 'activo').length === 0 ? (
                         <p className="text-sm text-[var(--color-text-secondary)] text-center py-6">Sin historial de bonos</p>
                       ) : allBonos.filter(b => b.estado !== 'activo').map((bono) => {
-                        const usadas = bono.sesionesTotales - bono.sesionesRestantes;
+                        const minutosUsados = getBonoMinutosTotales(bono) - getBonoMinutosRestantes(bono);
                         const estadoBadge =
                           bono.estado === 'agotado' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
                           bono.estado === 'expirado' ? 'bg-muted/20 text-[var(--color-text-secondary)] border-muted/20' :
@@ -1201,13 +1225,12 @@ export default function PortalPage() {
                             <div className="flex items-start justify-between gap-2">
                               <div>
                                 <p className="text-[var(--color-text-primary)] text-xs font-medium">
-                                  {bono.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
-                                  {bono.modalidad ? ` · ${bono.modalidad}` : ''}
+                                  Bono Mensual {getBonoMinutosTotales(bono) / 60}h
                                 </p>
                                 <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
                                   {new Date(bono.fechaAsignacion).toLocaleDateString('es-ES')} → {new Date(bono.fechaExpiracion).toLocaleDateString('es-ES')}
                                 </p>
-                                <p className="text-xs text-[var(--color-text-secondary)]">{usadas}/{bono.sesionesTotales} sesiones usadas</p>
+                                <p className="text-xs text-[var(--color-text-secondary)]">{formatMinutos(minutosUsados)} usados de {formatMinutos(getBonoMinutosTotales(bono))}</p>
                               </div>
                               <span className={cn('text-xs px-2 py-0.5 rounded-full border font-medium shrink-0', estadoBadge)}>
                                 {bono.estado.charAt(0).toUpperCase() + bono.estado.slice(1)}
@@ -1417,23 +1440,41 @@ export default function PortalPage() {
                   </div>
                 ) : (
                   <>
-                    {/* Servicio y duración */}
+                    {/* Duración de la sesión */}
                     <GlassCard className="p-5">
                       <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">
                         <span className="w-6 h-6 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs flex items-center justify-center">1</span>
-                        Servicio y Duración
+                        Duración de la Sesión
                       </h3>
-                      <div className="flex flex-col sm:flex-row gap-3">
-                        <div className="flex-1 p-3 rounded-xl bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)]">
-                          <p className="text-xs text-[var(--color-text-secondary)] mb-0.5">Servicio</p>
-                          <p className="text-[var(--color-text-primary)] font-semibold text-sm">{bonoServiceLabel}</p>
-                        </div>
-                        <div className="p-3 rounded-xl bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)]">
-                          <p className="text-xs text-[var(--color-text-secondary)] mb-0.5">Duración</p>
-                          <p className="text-[var(--color-text-primary)] font-semibold text-sm">{bonoDurationValue} min</p>
-                        </div>
+                      <div className="flex gap-2">
+                        {durations.map((d) => {
+                          const minutos = parseInt(d.value, 10);
+                          const hasEnough = activeBono && getBonoMinutosRestantes(activeBono) >= minutos;
+                          return (
+                            <button
+                              key={d.value}
+                              disabled={!hasEnough}
+                              onClick={() => setFormData(prev => ({ ...prev, duration: d.value }))}
+                              className={cn(
+                                'flex-1 px-3 py-3 rounded-xl border text-sm font-medium transition-all',
+                                formData.duration === d.value
+                                  ? 'bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)]'
+                                  : hasEnough
+                                    ? 'bg-muted/20 border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-white/20'
+                                    : 'bg-muted/10 border-white/5 text-[var(--color-text-secondary)]/30 cursor-not-allowed'
+                              )}
+                            >
+                              <span className="block font-semibold">{d.label}</span>
+                              <span className="text-[10px] opacity-70">{d.desc}</span>
+                            </button>
+                          );
+                        })}
                       </div>
-                      <p className="text-xs text-[var(--color-text-secondary)] mt-3">Determinado por tu bono activo.</p>
+                      {activeBono && (
+                        <p className="text-xs text-[var(--color-text-secondary)] mt-3">
+                          Tienes <span className="text-[var(--color-text-primary)] font-medium">{formatMinutos(getBonoMinutosRestantes(activeBono))}</span> disponibles este mes.
+                        </p>
+                      )}
                     </GlassCard>
 
                     {/* Calendario */}
@@ -1447,6 +1488,8 @@ export default function PortalPage() {
                         selectedSlot={formData.preferredSlot}
                         onSelectSlot={handleSelectSlot}
                         onClearSlot={handleClearSlot}
+                        selectedDuration={parseInt(formData.duration, 10) as 30 | 45 | 60}
+                        userBookedSlotKeys={userBookedSlotKeys}
                       />
                     </GlassCard>
 

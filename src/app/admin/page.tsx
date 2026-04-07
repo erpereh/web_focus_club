@@ -56,6 +56,7 @@ import { ContextualImageManager } from '@/components/ui/ContextualImageManager';
 import { useAuth } from '@/contexts/AuthContext';
 import { defaultCMS } from '@/hooks/useFirestore';
 import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono } from '@/types';
+import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import {
   getAppointments,
   getAppointmentsByUser,
@@ -101,10 +102,10 @@ import {
   assignBono,
   deactivateBono,
   deleteBono,
-  addBonoSession,
-  deductBonoSession,
-  returnBonoSession,
-  manualDeductBonoSession,
+  addBonoMinutes,
+  deductBonoMinutes,
+  returnBonoMinutes,
+  manualDeductBonoMinutes,
   recalculateAllBonoExpirations,
   expireOverdueBonos,
 } from '@/lib/firestore';
@@ -167,8 +168,9 @@ const serviceLabels: Record<string, string> = {
 
 const durationLabels: Record<string, string> = {
   '30': '30 minutos',
+  '45': '45 minutos',
   '60': '60 minutos',
-  '90': '90 minutos',
+  '90': '90 minutos', // legacy
 };
 
 export default function AdminPage() {
@@ -261,8 +263,8 @@ export default function AdminPage() {
   const [clientSearch, setClientSearch] = useState('');
 
   // Site config (dynamic time slots)
-  const [siteConfig, setSiteConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, sessionDuration: 60, bonoExpirationMonths: 1 });
-  const [editConfig, setEditConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, sessionDuration: 60, bonoExpirationMonths: 1 });
+  const [siteConfig, setSiteConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, slotInterval: 30, bonoExpirationMonths: 1 });
+  const [editConfig, setEditConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, slotInterval: 30, bonoExpirationMonths: 1 });
   const [savingConfig, setSavingConfig] = useState(false);
   const timeSlots = generateTimeSlots(siteConfig);
 
@@ -272,8 +274,7 @@ export default function AdminPage() {
   const [clientBonos, setClientBonos] = useState<Record<string, Bono | null>>({});
   const [showAssignBonoModal, setShowAssignBonoModal] = useState(false);
   const [assignBonoClient, setAssignBonoClient] = useState<UserProfile | null>(null);
-  const [assignBonoType, setAssignBonoType] = useState<'sesion_personal' | 'bono_mensual'>('bono_mensual');
-  const [assignBonoModalidad, setAssignBonoModalidad] = useState<'1h' | '30min'>('1h');
+  const [assignBonoTamano, setAssignBonoTamano] = useState<240 | 360 | 480>(240);
   const [savingBono, setSavingBono] = useState(false);
   const [showBonoHistoryModal, setShowBonoHistoryModal] = useState(false);
   const [bonoHistoryData, setBonoHistoryData] = useState<Bono[]>([]);
@@ -413,17 +414,19 @@ export default function AdminPage() {
     await updateAppointmentStatusFS(id, status, extraFields);
 
     // Mantener slot_occupancy sincronizado
-    // Si pasa a 'approved', incrementar el aforo de la franja aprobada
+    // Si pasa a 'approved', incrementar el aforo de todos los bloques de 30min cubiertos
     if (status === 'approved') {
       const slot = extraFields?.approvedSlot || currentAppt?.preferredSlots?.[0];
-      if (slot) {
-        await incrementSlotOccupancy(slot.date, slot.time);
+      if (slot && currentAppt) {
+        const durationMinutes = parseInt(currentAppt.duration, 10);
+        await incrementSlotOccupancy(slot.date, slot.time, durationMinutes);
       }
-      // Descontar sesión del bono activo del usuario
+      // Descontar minutos del bono activo del usuario
       if (currentAppt) {
         const activeBono = await getActiveBonoByUser(currentAppt.userId);
-        if (activeBono && activeBono.sesionesRestantes > 0) {
-          await deductBonoSession(activeBono.id, {
+        const durationMinutes = parseInt(currentAppt.duration, 10);
+        if (activeBono && getBonoMinutosRestantes(activeBono) >= durationMinutes) {
+          await deductBonoMinutes(activeBono.id, durationMinutes, {
             fecha: new Date().toISOString(),
             tipo: currentAppt.serviceType,
             duracion: currentAppt.duration,
@@ -435,15 +438,16 @@ export default function AdminPage() {
     // Si ESTABA aprobada y ahora cambia a otro estado, decrementar
     if (prevStatus === 'approved' && status !== 'approved') {
       const slot = currentAppt?.approvedSlot || currentAppt?.preferredSlots?.[0];
-      if (slot) {
-        await decrementSlotOccupancy(slot.date, slot.time);
+      if (slot && currentAppt) {
+        const durationMinutes = parseInt(currentAppt.duration, 10);
+        await decrementSlotOccupancy(slot.date, slot.time, durationMinutes);
       }
-      // Devolver sesión al bono si tenía una entrada para esta cita
+      // Devolver minutos al bono si tenía una entrada para esta cita
       if (currentAppt) {
         const userBonos = await getBonosByUser(currentAppt.userId);
         const bonoWithEntry = userBonos.find(b => b.historial.some(h => h.appointmentId === id));
         if (bonoWithEntry) {
-          await returnBonoSession(bonoWithEntry.id, id);
+          await returnBonoMinutes(bonoWithEntry.id, id);
         }
       }
     }
@@ -1509,7 +1513,7 @@ export default function AdminPage() {
                                       // Decrement slot_occupancy if appointment was approved
                                       if (appointment.status === 'approved') {
                                         const slot = appointment.approvedSlot || appointment.preferredSlots?.[0];
-                                        if (slot) await decrementSlotOccupancy(slot.date, slot.time);
+                                        if (slot) await decrementSlotOccupancy(slot.date, slot.time, parseInt(appointment.duration, 10));
                                       }
                                       await deleteAppointmentFS(appointment.id);
                                       await addActivityLog({
@@ -1667,11 +1671,10 @@ export default function AdminPage() {
                               <div className="flex flex-wrap items-center gap-3">
                                 <span className="px-2.5 py-1 rounded-lg bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs font-medium border border-[var(--color-accent-border)]">
                                   <Ticket className="w-3 h-3 inline mr-1" />
-                                  {clientBonos[client.uid]!.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
-                                  {clientBonos[client.uid]!.modalidad && ` (${clientBonos[client.uid]!.modalidad === '1h' ? '4×1h' : '8×30min'})`}
+                                  Bono {getBonoMinutosTotales(clientBonos[client.uid]!) / 60}h
                                 </span>
                                 <span className="text-sm text-[var(--color-text-primary)]">
-                                  {clientBonos[client.uid]!.sesionesRestantes}/{clientBonos[client.uid]!.sesionesTotales} sesiones
+                                  {formatMinutos(getBonoMinutosRestantes(clientBonos[client.uid]!))} / {formatMinutos(getBonoMinutosTotales(clientBonos[client.uid]!))}
                                 </span>
                                 <span className="text-xs text-[var(--color-text-secondary)]">
                                   Expira: {new Date(clientBonos[client.uid]!.fechaExpiracion).toLocaleDateString('es-ES')}
@@ -1681,51 +1684,51 @@ export default function AdminPage() {
                               <div className="h-1.5 rounded-full bg-muted/30 overflow-hidden max-w-xs">
                                 <div
                                   className="h-full rounded-full bg-gradient-to-r from-[var(--color-accent-val)] to-emerald-bright transition-all"
-                                  style={{ width: `${(clientBonos[client.uid]!.sesionesRestantes / clientBonos[client.uid]!.sesionesTotales) * 100}%` }}
+                                  style={{ width: `${(getBonoMinutosRestantes(clientBonos[client.uid]!) / getBonoMinutosTotales(clientBonos[client.uid]!)) * 100}%` }}
                                 />
                               </div>
                               <div className="flex flex-wrap gap-2">
                                 <button
                                   onClick={async () => {
                                     const bono = clientBonos[client.uid]!;
-                                    if (bono.sesionesRestantes <= 0) {
-                                      alert('Este bono no tiene sesiones restantes.');
+                                    if (getBonoMinutosRestantes(bono) < 30) {
+                                      alert('Este bono no tiene minutos suficientes para descontar.');
                                       return;
                                     }
-                                    if (!window.confirm(`¿Descontar 1 sesión manualmente del bono de ${client.name}?`)) return;
+                                    if (!window.confirm(`¿Descontar 30 min manualmente del bono de ${client.name}?`)) return;
                                     try {
-                                      await manualDeductBonoSession(bono.id, user?.email || 'admin');
+                                      await manualDeductBonoMinutes(bono.id, 30, user?.email || 'admin');
                                       await addActivityLog({
                                         action: 'bono_manual_deduct',
                                         adminEmail: user?.email || 'unknown',
-                                        details: `Cliente: ${client.name}, Bono: ${bono.id}`,
+                                        details: `Cliente: ${client.name}, Bono: ${bono.id}, 30 min`,
                                       });
                                       await refreshData();
                                     } catch (err) {
-                                      console.error('Error deducting session:', err);
-                                      alert('Error al descontar sesión');
+                                      console.error('Error deducting minutes:', err);
+                                      alert('Error al descontar minutos');
                                     }
                                   }}
                                   className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
                                 >
-                                  <Minus className="w-3 h-3" /> Descontar Sesión
+                                  <Minus className="w-3 h-3" /> Descontar 30 min
                                 </button>
                                 <button
                                   onClick={async () => {
                                     const bono = clientBonos[client.uid]!;
-                                    if (!window.confirm(`¿Añadir 1 sesión al bono de ${client.name}?`)) return;
+                                    if (!window.confirm(`¿Añadir 30 min al bono de ${client.name}?`)) return;
                                     try {
-                                      await addBonoSession(bono.id);
-                                      await addActivityLog({ action: 'bono_manual_add', adminEmail: user?.email || 'unknown', details: `Cliente: ${client.name}, Bono: ${bono.id}` });
+                                      await addBonoMinutes(bono.id, 30);
+                                      await addActivityLog({ action: 'bono_manual_add', adminEmail: user?.email || 'unknown', details: `Cliente: ${client.name}, Bono: ${bono.id}, 30 min` });
                                       await refreshData();
                                     } catch (err) {
-                                      console.error('Error adding session:', err);
-                                      alert('Error al añadir sesión');
+                                      console.error('Error adding minutes:', err);
+                                      alert('Error al añadir minutos');
                                     }
                                   }}
                                   className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)] transition-colors flex items-center gap-1"
                                 >
-                                  <Plus className="w-3 h-3" /> Añadir Sesión
+                                  <Plus className="w-3 h-3" /> Añadir 30 min
                                 </button>
                                 <button
                                   onClick={() => { setDeleteBonoClient(client); setShowDeleteBonoModal(true); }}
@@ -1742,8 +1745,7 @@ export default function AdminPage() {
                             <button
                               onClick={() => {
                                 setAssignBonoClient(client);
-                                setAssignBonoType('bono_mensual');
-                                setAssignBonoModalidad('1h');
+                                setAssignBonoTamano(240);
                                 setShowAssignBonoModal(true);
                               }}
                               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)] transition-colors flex items-center gap-1"
@@ -3682,7 +3684,7 @@ export default function AdminPage() {
                                                 });
                                                 // Decrement slot_occupancy for approved appointments before deleting
                                                 if (appt.status === 'approved' && appt.approvedSlot) {
-                                                  await decrementSlotOccupancy(appt.approvedSlot.date, appt.approvedSlot.time);
+                                                  await decrementSlotOccupancy(appt.approvedSlot.date, appt.approvedSlot.time, parseInt(appt.duration, 10));
                                                 }
                                                 await deleteAppointmentFS(appt.id);
                                               }
@@ -3898,20 +3900,18 @@ export default function AdminPage() {
                           </div>
                         </div>
 
-                        {/* Session Duration */}
+                        {/* Slot Interval */}
                         <div>
-                          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Duración de Sesión</label>
+                          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Intervalo de Slots</label>
                           <select
-                            value={editConfig.sessionDuration}
-                            onChange={(e) => setEditConfig(prev => ({ ...prev, sessionDuration: parseInt(e.target.value) }))}
+                            value={editConfig.slotInterval ?? 30}
+                            onChange={(e) => setEditConfig(prev => ({ ...prev, slotInterval: parseInt(e.target.value) }))}
                             className="w-48 px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-[var(--color-text-primary)] focus:border-[var(--color-accent-val)] focus:outline-none"
                           >
                             <option value={30}>30 minutos</option>
-                            <option value={45}>45 minutos</option>
                             <option value={60}>60 minutos</option>
-                            <option value={90}>90 minutos</option>
-                            <option value={120}>120 minutos</option>
                           </select>
+                          <p className="text-xs text-[var(--color-text-secondary)] mt-1">Cada cuánto tiempo empieza un nuevo slot en el calendario.</p>
                         </div>
                       </div>
 
@@ -3935,7 +3935,7 @@ export default function AdminPage() {
                               await addActivityLog({
                                 action: 'site_config_updated',
                                 adminEmail: user?.email || 'unknown',
-                                details: `Horario: ${editConfig.startHour}:00-${editConfig.endHour}:00, Duración: ${editConfig.sessionDuration}min`,
+                                details: `Horario: ${editConfig.startHour}:00-${editConfig.endHour}:00, Intervalo: ${editConfig.slotInterval ?? 30}min`,
                               });
                             } catch (err) {
                               console.error('Error saving config:', err);
@@ -3955,7 +3955,7 @@ export default function AdminPage() {
                         </button>
 
                         {/* Reset button */}
-                        {(editConfig.startHour !== siteConfig.startHour || editConfig.endHour !== siteConfig.endHour || editConfig.sessionDuration !== siteConfig.sessionDuration) && (
+                        {(editConfig.startHour !== siteConfig.startHour || editConfig.endHour !== siteConfig.endHour || (editConfig.slotInterval ?? 30) !== (siteConfig.slotInterval ?? 30)) && (
                           <button
                             onClick={() => setEditConfig({ ...siteConfig })}
                             className="px-4 py-2.5 rounded-xl border border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-white/20 transition-colors text-sm"
@@ -3986,7 +3986,7 @@ export default function AdminPage() {
                             ))}
                           </div>
                           <p className="text-xs text-[var(--color-text-secondary)]">
-                            Total: {generateTimeSlots(editConfig).length} franjas &middot; Cada {editConfig.sessionDuration} min &middot; De {String(editConfig.startHour).padStart(2, '0')}:00 a {String(editConfig.endHour).padStart(2, '0')}:00
+                            Total: {generateTimeSlots(editConfig).length} franjas &middot; Cada {editConfig.slotInterval ?? 30} min &middot; De {String(editConfig.startHour).padStart(2, '0')}:00 a {String(editConfig.endHour).padStart(2, '0')}:00
                           </p>
                         </>
                       ) : (
@@ -3999,7 +3999,7 @@ export default function AdminPage() {
                         <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-[var(--color-text-secondary)]">
                           <span>Inicio: <strong className="text-[var(--color-text-primary)]">{String(siteConfig.startHour).padStart(2, '0')}:00</strong></span>
                           <span>Fin: <strong className="text-[var(--color-text-primary)]">{String(siteConfig.endHour).padStart(2, '0')}:00</strong></span>
-                          <span>Duración: <strong className="text-[var(--color-text-primary)]">{siteConfig.sessionDuration} min</strong></span>
+                          <span>Intervalo: <strong className="text-[var(--color-text-primary)]">{siteConfig.slotInterval ?? 30} min</strong></span>
                           <span>Franjas: <strong className="text-[var(--color-text-primary)]">{timeSlots.length}</strong></span>
                         </div>
                       </div>
@@ -4136,49 +4136,26 @@ export default function AdminPage() {
                       )}
 
                       <div className="space-y-5">
-                        {/* Bono Type */}
+                        {/* Tamaño del bono */}
                         <div>
-                          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Tipo de Bono</label>
-                          <select
-                            value={assignBonoType}
-                            onChange={(e) => setAssignBonoType(e.target.value as 'sesion_personal' | 'bono_mensual')}
-                            className="w-full px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-[var(--color-text-primary)] focus:border-[var(--color-accent-val)] focus:outline-none"
-                          >
-                            <option value="sesion_personal">Sesión de Entrenamiento Personal (1 sesión)</option>
-                            <option value="bono_mensual">Bono Mensual de Entrenamiento</option>
-                          </select>
-                        </div>
-
-                        {/* Modalidad (only for bono_mensual) */}
-                        {assignBonoType === 'bono_mensual' && (
-                          <div>
-                            <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Modalidad</label>
-                            <div className="flex gap-3">
+                          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Tamaño del Bono</label>
+                          <div className="flex gap-3">
+                            {([240, 360, 480] as const).map((tamano) => (
                               <button
-                                onClick={() => setAssignBonoModalidad('1h')}
+                                key={tamano}
+                                onClick={() => setAssignBonoTamano(tamano)}
                                 className={cn(
                                   "flex-1 px-4 py-3 rounded-xl border text-sm font-medium transition-all",
-                                  assignBonoModalidad === '1h'
+                                  assignBonoTamano === tamano
                                     ? "bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)]"
                                     : "bg-muted/20 border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
                                 )}
                               >
-                                4 sesiones × 1h/semana
+                                {tamano / 60}h / mes
                               </button>
-                              <button
-                                onClick={() => setAssignBonoModalidad('30min')}
-                                className={cn(
-                                  "flex-1 px-4 py-3 rounded-xl border text-sm font-medium transition-all",
-                                  assignBonoModalidad === '30min'
-                                    ? "bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)]"
-                                    : "bg-muted/20 border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                                )}
-                              >
-                                8 sesiones × 30min
-                              </button>
-                            </div>
+                            ))}
                           </div>
-                        )}
+                        </div>
 
                         {/* Summary */}
                         <div className="p-4 rounded-xl bg-muted/10 border border-white/5">
@@ -4190,14 +4167,12 @@ export default function AdminPage() {
                             </div>
                             <div className="flex justify-between">
                               <span className="text-[var(--color-text-secondary)]">Tipo</span>
-                              <span className="text-[var(--color-text-primary)]">
-                                {assignBonoType === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
-                              </span>
+                              <span className="text-[var(--color-text-primary)]">Bono Mensual</span>
                             </div>
                             <div className="flex justify-between">
-                              <span className="text-[var(--color-text-secondary)]">Sesiones</span>
+                              <span className="text-[var(--color-text-secondary)]">Horas</span>
                               <span className="text-[var(--color-text-primary)]">
-                                {assignBonoType === 'sesion_personal' ? '1' : assignBonoModalidad === '1h' ? '4' : '8'}
+                                {assignBonoTamano / 60}h ({assignBonoTamano} min)
                               </span>
                             </div>
                             <div className="flex justify-between">
@@ -4237,15 +4212,11 @@ export default function AdminPage() {
                               const expiration = new Date(now);
                               expiration.setMonth(expiration.getMonth() + (siteConfig.bonoExpirationMonths || 1));
 
-                              const totalSessions = assignBonoType === 'sesion_personal' ? 1
-                                : assignBonoModalidad === '1h' ? 4 : 8;
-
                               await assignBono({
                                 userId: assignBonoClient.uid,
-                                tipo: assignBonoType,
-                                sesionesTotales: totalSessions,
-                                sesionesRestantes: totalSessions,
-                                modalidad: assignBonoType === 'bono_mensual' ? assignBonoModalidad : undefined,
+                                tamano: assignBonoTamano,
+                                minutosTotales: assignBonoTamano,
+                                minutosRestantes: assignBonoTamano,
                                 fechaAsignacion: now.toISOString(),
                                 fechaExpiracion: expiration.toISOString(),
                                 estado: 'activo',
@@ -4256,7 +4227,7 @@ export default function AdminPage() {
                               await addActivityLog({
                                 action: 'bono_assigned',
                                 adminEmail: user?.email || 'unknown',
-                                details: `Cliente: ${assignBonoClient.name}, Tipo: ${assignBonoType}${assignBonoType === 'bono_mensual' ? ` (${assignBonoModalidad})` : ''}, Sesiones: ${totalSessions}`,
+                                details: `Cliente: ${assignBonoClient.name}, Bono Mensual ${assignBonoTamano / 60}h`,
                               });
 
                               setShowAssignBonoModal(false);
@@ -4333,18 +4304,17 @@ export default function AdminPage() {
                                 </span>
                               </div>
                               <div className="text-sm text-[var(--color-text-primary)] mb-1">
-                                {bono.tipo === 'bono_mensual' ? 'Bono Mensual' : 'Sesión Personal'}
-                                {bono.modalidad && ` (${bono.modalidad === '1h' ? '4×1h' : '8×30min'})`}
+                                Bono Mensual {getBonoMinutosTotales(bono) / 60}h
                               </div>
                               <div className="text-xs text-[var(--color-text-secondary)] mb-2">
-                                {bono.sesionesRestantes}/{bono.sesionesTotales} sesiones restantes · Expira: {new Date(bono.fechaExpiracion).toLocaleDateString('es-ES')}
+                                {formatMinutos(getBonoMinutosRestantes(bono))} restantes de {formatMinutos(getBonoMinutosTotales(bono))} · Expira: {new Date(bono.fechaExpiracion).toLocaleDateString('es-ES')}
                               </div>
                               {(bono.historial?.length ?? 0) > 0 && (
                                 <div className="mt-2 pt-2 border-t border-white/5 space-y-1">
                                   {bono.historial.map((h, i) => (
                                     <div key={i} className="flex justify-between text-xs text-[var(--color-text-secondary)]">
                                       <span>{new Date(h.fecha).toLocaleDateString('es-ES')}</span>
-                                      <span>{h.tipo}{h.duracion !== '-' ? ` · ${h.duracion}min` : ''}</span>
+                                      <span>{h.tipo}{h.duracion && h.duracion !== '-' ? ` · ${h.duracion}min` : ''}</span>
                                     </div>
                                   ))}
                                 </div>
@@ -4648,8 +4618,9 @@ export default function AdminPage() {
                                   try {
                                     // If approved, decrement old slot occupancy and increment new slot
                                     if (isApproved && appt?.approvedSlot) {
-                                      await decrementSlotOccupancy(appt.approvedSlot.date, appt.approvedSlot.time);
-                                      await incrementSlotOccupancy(editSlotData.date, editSlotData.time);
+                                      const dur = parseInt(appt?.duration || '60', 10);
+                                      await decrementSlotOccupancy(appt.approvedSlot.date, appt.approvedSlot.time, dur);
+                                      await incrementSlotOccupancy(editSlotData.date, editSlotData.time, dur);
                                     }
                                     await updateAppointmentSlotFS(
                                       selectedAppointmentId,
