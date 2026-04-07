@@ -1,11 +1,3 @@
 {
-  "mcpServers": {
-    "firebase": {
-      "command": "firebase",
-      "args": ["mcp"],
-      "env": {
-        "FIREBASE_PROJECT": "focus-club-f73b8"
-      }
-    }
-  }
+  "mcpServers": {}
 }
