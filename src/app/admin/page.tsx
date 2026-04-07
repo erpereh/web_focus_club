@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { usePathname } from 'next/navigation';
 
 import Link from 'next/link';
 import Image from 'next/image';
@@ -32,6 +33,7 @@ import {
   Plus,
   Star,
   Image as ImageIcon,
+  Images,
   Award,
   Trophy,
   MapPin,
@@ -175,6 +177,7 @@ const durationLabels: Record<string, string> = {
 
 export default function AdminPage() {
   const { user, userProfile, loading: authLoading, login, loginWithGoogle, logout, resetPassword, refreshUserProfile, isAdmin } = useAuth();
+  const pathname = usePathname();
 
   // Role checks
   const isTrainerRole = userProfile?.role === 'trainer';
@@ -1108,6 +1111,19 @@ export default function AdminPage() {
               <span className="font-medium">Testimonios</span>
               <span className="ml-auto text-xs text-[var(--color-text-secondary)]">{stats.testimonials}</span>
             </button>
+
+            <Link
+              href="/admin/medios"
+              className={cn(
+                'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
+                pathname?.startsWith('/admin/medios')
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
+              )}
+            >
+              <Images className="w-5 h-5" />
+              <span className="font-medium">Medios</span>
+            </Link>
 
             <button
               onClick={() => switchTab('config')}

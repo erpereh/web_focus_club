@@ -216,3 +216,31 @@ export interface CMSContent {
     socialFacebook: string;
     socialTwitter: string;
 }
+
+// ============================================
+// MEDIA LIBRARY
+// ============================================
+
+export interface MediaFolder {
+    id: string;
+    name: string;
+    parentId: string | null;
+    createdAt: string;
+}
+
+export interface MediaFile {
+    id: string;
+    name: string;
+    url: string;
+    storagePath: string;
+    folderId: string | null;
+    type: 'image' | 'video';
+    size: number;
+    createdAt: string;
+}
+
+export interface UploadProgress {
+    fileName: string;
+    progress: number;
+    status: 'uploading' | 'done' | 'error';
+}

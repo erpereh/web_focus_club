@@ -12,25 +12,25 @@ const facilities = [
   {
     title: 'Entrada',
     description: 'Acceso exclusivo al centro, diseñado para que tu experiencia comience desde el primer paso.',
-    image: '/imagenes/el_centro/entrada.jpeg',
+    image: 'https://firebasestorage.googleapis.com/v0/b/focus-club-f73b8.firebasestorage.app/o/public%2Fimagenes%2Fel_centro%2Fentrada.jpeg?alt=media&token=220c18a8-87af-49a6-a0dd-68480c729ffe',
     gradient: 'from-[var(--color-accent-dim)] to-[var(--color-accent-dim)]',
   },
   {
     title: 'Zona de Entrenamiento',
     description: 'Espacio equipado con todo lo necesario para tus sesiones de entrenamiento funcional y cardio.',
-    image: '/imagenes/el_centro/gym1.jpeg',
+    image: 'https://firebasestorage.googleapis.com/v0/b/focus-club-f73b8.firebasestorage.app/o/public%2Fimagenes%2Fel_centro%2Fgym1.jpeg?alt=media&token=b1d33f31-9880-4be9-8346-38958e78aac2',
     gradient: 'from-[var(--color-accent-dim)] to-[var(--color-accent-dim)]',
   },
   {
     title: 'Zona de Musculación',
     description: 'Área dedicada al trabajo de fuerza con maquinaria y pesos libres de calidad profesional.',
-    image: '/imagenes/el_centro/gym3.jpeg',
+    image: 'https://firebasestorage.googleapis.com/v0/b/focus-club-f73b8.firebasestorage.app/o/public%2Fimagenes%2Fel_centro%2Fgym3.jpeg?alt=media&token=19fdea88-575f-4adb-8d78-36457177b04b',
     gradient: 'from-[var(--color-accent-dim)] to-[var(--color-accent-dim)]',
   },
   {
     title: 'Baño',
     description: 'Instalaciones limpias y bien equipadas para que puedas asearte cómodamente tras tu sesión.',
-    image: '/imagenes/el_centro/baño.jpeg',
+    image: 'https://firebasestorage.googleapis.com/v0/b/focus-club-f73b8.firebasestorage.app/o/public%2Fimagenes%2Fel_centro%2Fba%C3%B1o.jpeg?alt=media&token=d4053e23-1633-416f-b708-56b0202f3bac',
     gradient: 'from-[var(--color-accent-dim)] to-[var(--color-accent-dim)]',
   },
 ];

@@ -257,7 +257,7 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
               <div className="rounded-3xl overflow-hidden card-glass p-2">
                 <div className="relative rounded-2xl overflow-hidden">
                   <Image
-                    src="/imagenes/sandra.jpg"
+                    src="https://firebasestorage.googleapis.com/v0/b/focus-club-f73b8.firebasestorage.app/o/public%2Fimagenes%2Fsandra.jpg?alt=media&token=b0af9bd2-add1-4e06-9e08-ee48e03fafe9"
                     alt="Sandra Andújar — Fundadora & Coach Principal de Focus Club Vallecas"
                     width={600}
                     height={800}

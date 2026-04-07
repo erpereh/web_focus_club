@@ -34,6 +34,8 @@ import type {
     SiteConfig,
     Bono,
     BonoHistorialEntry,
+    MediaFolder,
+    MediaFile,
 } from '@/types';
 
 // ============================================
@@ -661,4 +663,100 @@ export async function expireOverdueBonos(): Promise<void> {
         batch.update(doc(db, 'bonos', bono.id), { estado: 'expirado' });
     }
     await batch.commit();
+}
+
+// ============================================
+// MEDIA FOLDERS
+// ============================================
+
+export async function getMediaFolders(): Promise<MediaFolder[]> {
+    const snap = await getDocs(query(collection(db, 'media_folders'), orderBy('createdAt', 'asc')));
+    return snap.docs.map((d) => {
+        const data = d.data();
+        return {
+            id: d.id,
+            name: data.name,
+            parentId: data.parentId ?? null,
+            createdAt: data.createdAt?.toDate?.().toISOString?.() ?? data.createdAt ?? new Date().toISOString(),
+        };
+    });
+}
+
+export async function createMediaFolder(name: string, parentId: string | null): Promise<string> {
+    const ref = await addDoc(collection(db, 'media_folders'), {
+        name,
+        parentId,
+        createdAt: Timestamp.now(),
+    });
+    return ref.id;
+}
+
+export async function renameMediaFolder(id: string, name: string): Promise<void> {
+    await updateDoc(doc(db, 'media_folders', id), { name });
+}
+
+export async function deleteMediaFolder(id: string): Promise<void> {
+    await deleteDoc(doc(db, 'media_folders', id));
+}
+
+// ============================================
+// MEDIA FILES
+// ============================================
+
+export async function getMediaFiles(folderId: string | null): Promise<MediaFile[]> {
+    const snap = await getDocs(
+        query(
+            collection(db, 'media_files'),
+            where('folderId', '==', folderId),
+            orderBy('createdAt', 'desc')
+        )
+    );
+    return snap.docs.map((d) => {
+        const data = d.data();
+        return {
+            id: d.id,
+            name: data.name,
+            url: data.url,
+            storagePath: data.storagePath,
+            folderId: data.folderId ?? null,
+            type: data.type,
+            size: data.size,
+            createdAt: data.createdAt?.toDate?.().toISOString?.() ?? data.createdAt ?? new Date().toISOString(),
+        };
+    });
+}
+
+export async function getAllMediaFiles(): Promise<MediaFile[]> {
+    const snap = await getDocs(
+        query(collection(db, 'media_files'), orderBy('createdAt', 'desc'))
+    );
+    return snap.docs.map((d) => {
+        const data = d.data();
+        return {
+            id: d.id,
+            name: data.name,
+            url: data.url,
+            storagePath: data.storagePath,
+            folderId: data.folderId ?? null,
+            type: data.type,
+            size: data.size,
+            createdAt: data.createdAt?.toDate?.().toISOString?.() ?? data.createdAt ?? new Date().toISOString(),
+        };
+    });
+}
+
+export async function addMediaFile(data: Omit<MediaFile, 'id'>): Promise<string> {
+    const ref = await addDoc(collection(db, 'media_files'), {
+        ...data,
+        createdAt: Timestamp.now(),
+    });
+    return ref.id;
+}
+
+export async function updateMediaFile(id: string, data: Partial<MediaFile>): Promise<void> {
+    await updateDoc(doc(db, 'media_files', id), data);
+}
+
+export async function deleteMediaFileRecord(id: string): Promise<void> {
+    await deleteDoc(doc(db, 'media_files', id));
 }
