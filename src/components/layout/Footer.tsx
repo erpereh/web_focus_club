@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { Mail, Phone, MapPin, Instagram } from 'lucide-react';
 import { useCMS } from '@/hooks/useFirestore';
@@ -33,16 +34,27 @@ export function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-12">
           {/* Brand */}
           <div className="space-y-4">
-            <Link href="/" className="flex flex-col group">
-              <motion.span
-                className="text-lg font-bold tracking-tight text-[var(--color-text-primary)] group-hover:text-[var(--color-accent-val)] transition-colors duration-300"
-                whileHover={{ scale: 1.02 }}
+            <Link href="/" className="flex items-center gap-3 group w-fit">
+              <motion.div
+                whileHover={{ scale: 1.05 }}
+                className="relative w-14 h-14 flex-shrink-0"
               >
-                Focus Club
-              </motion.span>
-              <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--color-accent-val)]">
-                Vallecas
-              </span>
+                <Image
+                  src="/imagenes/logo.jpeg"
+                  alt="Focus Club Vallecas"
+                  fill
+                  className="object-cover rounded-full"
+                  sizes="56px"
+                />
+              </motion.div>
+              <div className="flex flex-col">
+                <span className="text-base font-bold tracking-tight text-[var(--color-text-primary)] group-hover:text-[var(--color-accent-val)] transition-colors duration-300 leading-tight">
+                  Focus Club
+                </span>
+                <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--color-accent-val)] leading-tight">
+                  Vallecas
+                </span>
+              </div>
             </Link>
             <p className="text-[var(--color-text-secondary)] text-sm leading-relaxed">
               {cmsContent.footerText}

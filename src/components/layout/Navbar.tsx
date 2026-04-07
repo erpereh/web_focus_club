@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { Menu, X, User, LogOut, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -52,18 +53,30 @@ export function Navbar() {
     >
       <div className="container mx-auto px-4">
         <nav className="flex items-center justify-between">
-          {/* Logo — Solo texto */}
-          <Link href="/" className="flex flex-col group">
-            <motion.span
-              className="text-lg font-bold tracking-tight text-[var(--color-text-primary)] group-hover:text-[var(--color-accent-val)] transition-colors duration-300"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+          {/* Logo */}
+          <Link href="/" className="flex items-center gap-3 group">
+            <motion.div
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.97 }}
+              className="relative w-10 h-10 flex-shrink-0"
             >
-              Focus Club
-            </motion.span>
-            <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--color-accent-val)]">
-              Vallecas
-            </span>
+              <Image
+                src="/imagenes/logo.jpeg"
+                alt="Focus Club Vallecas"
+                fill
+                className="object-cover rounded-full"
+                sizes="40px"
+                priority
+              />
+            </motion.div>
+            <div className="flex flex-col">
+              <span className="text-sm font-bold tracking-tight text-[var(--color-text-primary)] group-hover:text-[var(--color-accent-val)] transition-colors duration-300 leading-tight">
+                Focus Club
+              </span>
+              <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[var(--color-accent-val)] leading-tight">
+                Vallecas
+              </span>
+            </div>
           </Link>
 
           {/* Desktop Navigation */}
