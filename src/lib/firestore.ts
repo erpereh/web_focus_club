@@ -870,6 +870,21 @@ export async function updateBrandingConfig(data: Partial<BrandingConfig>): Promi
     await setDoc(doc(db, 'site_config', 'general'), data, { merge: true });
 }
 
+export async function getOrCreateSandraFolder(): Promise<{ folderId: string }> {
+    const configRef = doc(db, 'system_config', 'sandra_folder');
+    const configSnap = await getDoc(configRef);
+    if (configSnap.exists()) {
+        return { folderId: configSnap.data().folderId as string };
+    }
+    const folderRef = await addDoc(collection(db, 'media_folders'), {
+        name: 'Sandra',
+        parentId: null,
+        createdAt: Timestamp.now(),
+    });
+    await setDoc(configRef, { folderId: folderRef.id });
+    return { folderId: folderRef.id };
+}
+
 // ============================================
 // HERO CONFIG
 // ============================================

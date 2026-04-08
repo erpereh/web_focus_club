@@ -15,6 +15,7 @@ import {
     deleteMediaFileRecord,
     getOrCreateGalleryFolder,
     getOrCreateBrandingFolder,
+    getOrCreateSandraFolder,
 } from '@/lib/firestore';
 import type { MediaFolder, MediaFile, UploadProgress } from '@/types';
 import { v4 as uuidv4 } from 'uuid';
@@ -58,20 +59,23 @@ export function useMediaLibrary() {
     const [uploadQueue, setUploadQueue] = useState<UploadProgress[]>([]);
     const [galleryFolderId, setGalleryFolderId] = useState<string | null>(null);
     const [brandingFolderId, setBrandingFolderId] = useState<string | null>(null);
+    const [sandraFolderId, setSandraFolderId] = useState<string | null>(null);
 
     // --- FETCH ---
 
     const fetchFolders = useCallback(async () => {
         setLoading(true);
         try {
-            const [data, galleryResult, brandingResult] = await Promise.all([
+            const [data, galleryResult, brandingResult, sandraResult] = await Promise.all([
                 getMediaFolders(),
                 getOrCreateGalleryFolder(),
                 getOrCreateBrandingFolder(),
+                getOrCreateSandraFolder(),
             ]);
             setFolders(data);
             setGalleryFolderId(galleryResult.folderId);
             setBrandingFolderId(brandingResult.folderId);
+            setSandraFolderId(sandraResult.folderId);
         } finally {
             setLoading(false);
         }
@@ -121,7 +125,9 @@ export function useMediaLibrary() {
                 ? `public/imagenes/galeria/${uniqueName}`
                 : folderId && folderId === brandingFolderId
                     ? `public/imagenes/branding/${uniqueName}`
-                    : folderId
+                    : folderId && folderId === sandraFolderId
+                        ? `public/imagenes/sandra/${uniqueName}`
+                        : folderId
                         ? `media/${folderId}/${uniqueName}`
                         : `media/root/${uniqueName}`;
 
@@ -231,6 +237,7 @@ export function useMediaLibrary() {
         setUploadQueue,
         galleryFolderId,
         brandingFolderId,
+        sandraFolderId,
         fetchFolders,
         fetchFiles,
         createFolder: handleCreateFolder,

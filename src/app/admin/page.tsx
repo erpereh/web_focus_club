@@ -50,6 +50,7 @@ import {
   Ticket,
   Minus,
   History,
+  GripVertical,
 } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
@@ -58,10 +59,13 @@ import { ContextualImageManager } from '@/components/ui/ContextualImageManager';
 import { GalleryManager } from '@/components/admin/GalleryManager';
 import { MediaPicker } from '@/components/admin/MediaPicker';
 import { IconPicker } from '@/components/admin/IconPicker';
+import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useAuth } from '@/contexts/AuthContext';
 import { useMediaLibrary } from '@/hooks/useMediaLibrary';
 import { defaultCMS } from '@/hooks/useFirestore';
-import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono, BrandingConfig, HeroStat } from '@/types';
+import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono, BrandingConfig, HeroStat, SandraAchievement, SandraValue } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import {
   getAppointments,
@@ -188,6 +192,60 @@ const durationLabels: Record<string, string> = {
   '90': '90 minutos', // legacy
 };
 
+// ─── Sortable Timeline Item (for dnd-kit) ────────────────────────────────────
+function SortableTimelineItem({
+  item,
+  index,
+  onUpdate,
+  onRemove,
+}: {
+  item: { year: string; title: string; description: string };
+  index: number;
+  onUpdate: (field: 'year' | 'title' | 'description', val: string) => void;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: index.toString() });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  return (
+    <div ref={setNodeRef} style={style} className="p-4 rounded-xl bg-muted/30 border border-border">
+      <div className="flex items-center gap-2 mb-3">
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          className="cursor-grab text-[var(--color-text-muted)] hover:text-white touch-none"
+        >
+          <GripVertical className="w-4 h-4" />
+        </button>
+        <input
+          type="text"
+          value={item.year}
+          onChange={(e) => onUpdate('year', e.target.value)}
+          placeholder="Año"
+          className="w-20 px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+        />
+        <input
+          type="text"
+          value={item.title}
+          onChange={(e) => onUpdate('title', e.target.value)}
+          placeholder="Título"
+          className="flex-1 px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+        />
+        <button type="button" onClick={onRemove} className="p-2 text-destructive hover:bg-destructive/10 rounded-lg flex-shrink-0">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+      <textarea
+        value={item.description}
+        onChange={(e) => onUpdate('description', e.target.value)}
+        placeholder="Descripción"
+        rows={2}
+        className="w-full px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none text-sm"
+      />
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const { user, userProfile, loading: authLoading, login, loginWithGoogle, logout, resetPassword, refreshUserProfile, isAdmin } = useAuth();
   const pathname = usePathname();
@@ -262,9 +320,10 @@ export default function AdminPage() {
   } | null>(null);
 
   // Branding / Logo
-  const { brandingFolderId, fetchFolders: fetchMediaFolders } = useMediaLibrary();
+  const { brandingFolderId, sandraFolderId, fetchFolders: fetchMediaFolders } = useMediaLibrary();
   const [brandingConfig, setBrandingConfig] = useState<BrandingConfig | null>(null);
   const [logoPickerOpen, setLogoPickerOpen] = useState(false);
+  const [sandraPickerOpen, setSandraPickerOpen] = useState(false);
 
   // Autenticación admin
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
@@ -332,6 +391,13 @@ export default function AdminPage() {
     setBrandingConfig(branding);
     if (cms) {
       const mergedCms = { ...cms, galeria: cms.galeria ?? defaultCMS.galeria };
+      // Normalize Sandra achievements: if Firestore still has old string[] format, reset to []
+      if (
+        mergedCms.sandra?.achievements?.length > 0 &&
+        typeof (mergedCms.sandra.achievements as unknown[])[0] !== 'object'
+      ) {
+        mergedCms.sandra = { ...mergedCms.sandra, achievements: [] };
+      }
       setCmsContent(mergedCms);
       setEditedContent(mergedCms);
     }
@@ -2144,6 +2210,25 @@ export default function AdminPage() {
               {/* ============================================
                   CMS - SANDRA
                   ============================================ */}
+
+              {/* MediaPicker Sandra foto */}
+              {sandraPickerOpen && (
+                <MediaPicker
+                  open={sandraPickerOpen}
+                  onClose={() => setSandraPickerOpen(false)}
+                  onSelect={(file) => {
+                    setEditedContent((prev) =>
+                      prev?.sandra
+                        ? { ...prev, sandra: { ...prev.sandra, image: file.url } } as CMSContent
+                        : prev
+                    );
+                    setSandraPickerOpen(false);
+                  }}
+                  uploadFolderId={sandraFolderId}
+                  filterType="image"
+                />
+              )}
+
               {activeTab === 'Sandra' && (
                 <motion.div
                   key="Sandra"
@@ -2152,213 +2237,353 @@ export default function AdminPage() {
                   exit={{ opacity: 0, y: -20 }}
                 >
                   <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Editar Sandra Andújar</h1>
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Sandra Andújar</h1>
                     <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveSandra}>
                       Guardar Cambios
                     </PremiumButton>
                   </div>
 
                   <div className="space-y-6">
-                    {/* Basic Info */}
+                    {/* === INFORMACIÓN BÁSICA === */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Información Básica</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-6">Información Básica</h2>
+
+                      {/* Foto */}
                       <div className="mb-6">
                         <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Foto de Perfil</label>
-                        {isValidImageUrl(editedContent?.sandra?.image) ? (
-                          <img src={editedContent!.sandra!.image} alt="Sandra" className="w-32 h-32 object-cover rounded-xl mb-3 border border-border" />
-                        ) : (
-                          <div className="w-32 h-32 rounded-xl mb-3 border border-border bg-muted/30 flex items-center justify-center">
-                            <ImageIcon className="w-8 h-8 text-[var(--color-text-secondary)] opacity-50" />
+                        <div className="flex items-center gap-4 mb-3">
+                          <div className="w-24 h-24 rounded-2xl overflow-hidden border border-border flex-shrink-0">
+                            {editedContent?.sandra?.image ? (
+                              <img src={editedContent.sandra.image} alt="Sandra" className="w-full h-full object-cover object-top" />
+                            ) : (
+                              <div className="w-full h-full bg-muted/30 flex items-center justify-center">
+                                <ImageIcon className="w-8 h-8 text-[var(--color-text-secondary)] opacity-50" />
+                              </div>
+                            )}
                           </div>
-                        )}
-                        <PremiumButton
-                          variant="outline"
-                          size="sm"
-                          icon={<ImageIcon className="w-4 h-4" />}
-                          onClick={() => setActiveImageManager({
-                            folder: 'Sandra',
-                            currentUrl: editedContent?.sandra?.image || undefined,
-                            onSelect: (url) => setEditedContent(prev => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, image: url } } as CMSContent : prev)
-                          })}
-                        >
-                          Cambiar Foto de Perfil
-                        </PremiumButton>
-                      </div>
-                      <div className="grid sm:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Nombre</label>
-                          <input
-                            type="text"
-                            value={editedContent?.sandra?.name || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev?.sandra) return prev;
-                                return {
-                                  ...prev,
-                                  sandra: { ...prev.sandra, name: e.target.value }
-                                } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título</label>
-                          <input
-                            type="text"
-                            value={editedContent?.sandra?.title || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev?.sandra) return prev;
-                                return {
-                                  ...prev,
-                                  sandra: { ...prev.sandra, title: e.target.value }
-                                } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          />
+                          <PremiumButton
+                            variant="outline"
+                            size="sm"
+                            icon={<ImageIcon className="w-4 h-4" />}
+                            onClick={() => setSandraPickerOpen(true)}
+                          >
+                            Cambiar Foto
+                          </PremiumButton>
                         </div>
                       </div>
-                      <div className="grid sm:grid-cols-2 gap-4 mt-4">
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtítulo</label>
-                          <input
-                            type="text"
-                            value={editedContent?.sandra?.subtitle || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev?.sandra) return prev;
-                                return { ...prev, sandra: { ...prev.sandra, subtitle: e.target.value } } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            placeholder="La experta detrás del proyecto"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Años de experiencia</label>
-                          <input
-                            type="text"
-                            value={editedContent?.sandra?.experience || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev?.sandra) return prev;
-                                return { ...prev, sandra: { ...prev.sandra, experience: e.target.value } } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            placeholder="20+ años"
-                          />
-                        </div>
+
+                      {/* Eyebrow */}
+                      <div className="mb-4">
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow (texto sobre el nombre)</label>
+                        <input
+                          type="text"
+                          value={editedContent?.sandra?.eyebrow ?? ''}
+                          onChange={(e) => setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, eyebrow: e.target.value } } as CMSContent : prev)}
+                          placeholder="La experta detrás del proyecto"
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                        />
                       </div>
-                      <div className="mt-4">
+
+                      {/* Nombre */}
+                      <div className="mb-4">
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Nombre</label>
+                        <input
+                          type="text"
+                          value={editedContent?.sandra?.name ?? ''}
+                          onChange={(e) => setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, name: e.target.value } } as CMSContent : prev)}
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                        />
+                      </div>
+
+                      {/* Biografía */}
+                      <div>
                         <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Biografía</label>
                         <textarea
-                          value={editedContent?.sandra?.bio || ''}
-                          onChange={(e) => {
-                            setEditedContent((prev) => {
-                              if (!prev?.sandra) return prev;
-                              return {
-                                ...prev,
-                                sandra: { ...prev.sandra, bio: e.target.value }
-                              } as CMSContent;
-                            });
-                          }}
-                          rows={4}
+                          value={editedContent?.sandra?.bio ?? ''}
+                          onChange={(e) => setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, bio: e.target.value } } as CMSContent : prev)}
+                          rows={5}
                           className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
                         />
                       </div>
                     </GlassCard>
 
-                    {/* Achievements */}
+                    {/* === LOGROS === */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Logros Destacados</h2>
-                      <div className="space-y-3">
-                        {(editedContent?.sandra?.achievements || []).map((achievement, index) => (
-                          <div key={index} className="flex gap-2">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-6">Logros Destacados</h2>
+                      <div className="space-y-2">
+                        {(editedContent?.sandra?.achievements ?? []).map((a, i) => (
+                          <div key={i} className="flex items-center gap-3">
+                            <IconPicker
+                              value={a.icon || 'Award'}
+                              onChange={(icon) => {
+                                const arr = [...(editedContent?.sandra?.achievements ?? [])];
+                                arr[i] = { ...arr[i], icon };
+                                setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, achievements: arr } } as CMSContent : prev);
+                              }}
+                            />
                             <input
                               type="text"
-                              value={achievement}
+                              value={a.title ?? ''}
                               onChange={(e) => {
-                                setEditedContent((prev) => {
-                                  if (!prev?.sandra) return prev;
-                                  const newAchievements = [...(prev.sandra.achievements || [])];
-                                  newAchievements[index] = e.target.value;
-                                  return {
-                                    ...prev,
-                                    sandra: { ...prev.sandra, achievements: newAchievements }
-                                  } as CMSContent;
-                                });
+                                const arr = [...(editedContent?.sandra?.achievements ?? [])];
+                                arr[i] = { ...arr[i], title: e.target.value };
+                                setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, achievements: arr } } as CMSContent : prev);
                               }}
-                              className="flex-1 px-4 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              placeholder="Título"
+                              className="w-36 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+                            />
+                            <input
+                              type="text"
+                              value={a.description ?? ''}
+                              onChange={(e) => {
+                                const arr = [...(editedContent?.sandra?.achievements ?? [])];
+                                arr[i] = { ...arr[i], description: e.target.value };
+                                setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, achievements: arr } } as CMSContent : prev);
+                              }}
+                              placeholder="Descripción breve"
+                              className="flex-1 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
                             />
                             <button
+                              type="button"
                               onClick={() => {
-                                setEditedContent((prev) => {
-                                  if (!prev?.sandra) return prev;
-                                  const newAchievements = (prev.sandra.achievements || []).filter((_, i) => i !== index);
-                                  return {
-                                    ...prev,
-                                    sandra: { ...prev.sandra, achievements: newAchievements }
-                                  } as CMSContent;
-                                });
+                                const arr = (editedContent?.sandra?.achievements ?? []).filter((_, j) => j !== i);
+                                setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, achievements: arr } } as CMSContent : prev);
                               }}
-                              className="p-2 text-destructive hover:bg-destructive/10 rounded-xl"
+                              className="p-2 text-destructive hover:bg-destructive/10 rounded-xl flex-shrink-0"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
                         ))}
+                      </div>
+                      <div className="mt-3">
                         <PremiumButton
                           variant="outline"
                           size="sm"
                           icon={<Plus className="w-4 h-4" />}
-                          onClick={() => setEditedContent((prev) => {
-                            if (!prev?.sandra) return prev;
-                            return {
-                              ...prev,
-                              sandra: { ...prev.sandra, achievements: [...(prev.sandra.achievements || []), ''] }
-                            } as CMSContent;
-                          })}
+                          onClick={() => {
+                            const arr = [...(editedContent?.sandra?.achievements ?? []), { icon: 'Award', title: '', description: '' }];
+                            setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, achievements: arr } } as CMSContent : prev);
+                          }}
                         >
-                          Añadir Logro
+                          Añadir logro
                         </PremiumButton>
                       </div>
                     </GlassCard>
 
-                    {/* Certifications */}
+                    {/* === VALORES === */}
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Valores</h2>
+                      <div className="grid sm:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow de sección</label>
+                          <input
+                            type="text"
+                            value={editedContent?.sandra?.valuesEyebrow ?? ''}
+                            onChange={(e) => setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, valuesEyebrow: e.target.value } } as CMSContent : prev)}
+                            placeholder="Filosofía de trabajo"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título de sección</label>
+                          <input
+                            type="text"
+                            value={editedContent?.sandra?.valuesTitle ?? ''}
+                            onChange={(e) => setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, valuesTitle: e.target.value } } as CMSContent : prev)}
+                            placeholder="Valores que nos definen"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        {(editedContent?.sandra?.values ?? []).map((v, i) => (
+                          <div key={i} className="flex items-center gap-3">
+                            <IconPicker
+                              value={v.icon || 'Heart'}
+                              onChange={(icon) => {
+                                const arr = [...(editedContent?.sandra?.values ?? [])];
+                                arr[i] = { ...arr[i], icon };
+                                setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, values: arr } } as CMSContent : prev);
+                              }}
+                            />
+                            <input
+                              type="text"
+                              value={v.title ?? ''}
+                              onChange={(e) => {
+                                const arr = [...(editedContent?.sandra?.values ?? [])];
+                                arr[i] = { ...arr[i], title: e.target.value };
+                                setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, values: arr } } as CMSContent : prev);
+                              }}
+                              placeholder="Título"
+                              className="w-36 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+                            />
+                            <input
+                              type="text"
+                              value={v.description ?? ''}
+                              onChange={(e) => {
+                                const arr = [...(editedContent?.sandra?.values ?? [])];
+                                arr[i] = { ...arr[i], description: e.target.value };
+                                setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, values: arr } } as CMSContent : prev);
+                              }}
+                              placeholder="Descripción"
+                              className="flex-1 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const arr = (editedContent?.sandra?.values ?? []).filter((_, j) => j !== i);
+                                setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, values: arr } } as CMSContent : prev);
+                              }}
+                              className="p-2 text-destructive hover:bg-destructive/10 rounded-xl flex-shrink-0"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-3">
+                        <PremiumButton
+                          variant="outline"
+                          size="sm"
+                          icon={<Plus className="w-4 h-4" />}
+                          onClick={() => {
+                            const arr = [...(editedContent?.sandra?.values ?? []), { icon: 'Heart', title: '', description: '' }];
+                            setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, values: arr } } as CMSContent : prev);
+                          }}
+                        >
+                          Añadir valor
+                        </PremiumButton>
+                      </div>
+                    </GlassCard>
+
+                    {/* === TIMELINE === */}
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Timeline Profesional</h2>
+                      <div className="grid sm:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow de sección</label>
+                          <input
+                            type="text"
+                            value={editedContent?.sandra?.timelineEyebrow ?? ''}
+                            onChange={(e) => setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, timelineEyebrow: e.target.value } } as CMSContent : prev)}
+                            placeholder="Trayectoria profesional"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título de sección</label>
+                          <input
+                            type="text"
+                            value={editedContent?.sandra?.timelineTitle ?? ''}
+                            onChange={(e) => setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, timelineTitle: e.target.value } } as CMSContent : prev)}
+                            placeholder="Un camino de dedicación"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                          />
+                        </div>
+                      </div>
+                      <DndContext
+                        collisionDetection={closestCenter}
+                        onDragEnd={(event: DragEndEvent) => {
+                          const { active, over } = event;
+                          if (active.id !== over?.id) {
+                            const oldIndex = Number(active.id);
+                            const newIndex = Number(over!.id);
+                            const newTimeline = arrayMove(editedContent!.sandra!.timeline, oldIndex, newIndex);
+                            setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, timeline: newTimeline } } as CMSContent : prev);
+                          }
+                        }}
+                      >
+                        <SortableContext
+                          items={(editedContent?.sandra?.timeline ?? []).map((_, i) => i.toString())}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          <div className="space-y-3 mb-3">
+                            {(editedContent?.sandra?.timeline ?? []).map((item, i) => (
+                              <SortableTimelineItem
+                                key={i}
+                                item={item}
+                                index={i}
+                                onUpdate={(field, val) => {
+                                  const arr = [...(editedContent?.sandra?.timeline ?? [])];
+                                  arr[i] = { ...arr[i], [field]: val };
+                                  setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, timeline: arr } } as CMSContent : prev);
+                                }}
+                                onRemove={() => {
+                                  const arr = (editedContent?.sandra?.timeline ?? []).filter((_, j) => j !== i);
+                                  setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, timeline: arr } } as CMSContent : prev);
+                                }}
+                              />
+                            ))}
+                          </div>
+                        </SortableContext>
+                      </DndContext>
+                      <PremiumButton
+                        variant="outline"
+                        size="sm"
+                        icon={<Plus className="w-4 h-4" />}
+                        onClick={() => {
+                          const arr = [...(editedContent?.sandra?.timeline ?? []), { year: '', title: '', description: '' }];
+                          setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, timeline: arr } } as CMSContent : prev);
+                        }}
+                      >
+                        Añadir hito
+                      </PremiumButton>
+                    </GlassCard>
+
+                    {/* === CERTIFICACIONES === */}
                     <GlassCard className="p-6">
                       <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Certificaciones</h2>
-                      <div className="space-y-3">
-                        {(editedContent?.sandra?.certifications || []).map((cert, index) => (
-                          <div key={index} className="flex gap-2">
+                      <div className="grid sm:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow de sección</label>
+                          <input
+                            type="text"
+                            value={editedContent?.sandra?.certsEyebrow ?? ''}
+                            onChange={(e) => setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, certsEyebrow: e.target.value } } as CMSContent : prev)}
+                            placeholder="Formación académica"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título de sección</label>
+                          <input
+                            type="text"
+                            value={editedContent?.sandra?.certsTitle ?? ''}
+                            onChange={(e) => setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, certsTitle: e.target.value } } as CMSContent : prev)}
+                            placeholder="Certificaciones y títulos"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                          />
+                        </div>
+                      </div>
+                      <div className="mb-4">
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtítulo de sección</label>
+                        <input
+                          type="text"
+                          value={editedContent?.sandra?.certsSubtitle ?? ''}
+                          onChange={(e) => setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, certsSubtitle: e.target.value } } as CMSContent : prev)}
+                          placeholder="Una formación continua y rigurosa..."
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        {(editedContent?.sandra?.certifications ?? []).map((cert, i) => (
+                          <div key={i} className="flex gap-2">
                             <input
                               type="text"
                               value={cert}
                               onChange={(e) => {
-                                setEditedContent((prev) => {
-                                  if (!prev?.sandra) return prev;
-                                  const newCerts = [...(prev.sandra.certifications || [])];
-                                  newCerts[index] = e.target.value;
-                                  return {
-                                    ...prev,
-                                    sandra: { ...prev.sandra, certifications: newCerts }
-                                  } as CMSContent;
-                                });
+                                const arr = [...(editedContent?.sandra?.certifications ?? [])];
+                                arr[i] = e.target.value;
+                                setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, certifications: arr } } as CMSContent : prev);
                               }}
                               className="flex-1 px-4 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                             />
                             <button
+                              type="button"
                               onClick={() => {
-                                setEditedContent((prev) => {
-                                  if (!prev?.sandra) return prev;
-                                  const newCerts = (prev.sandra.certifications || []).filter((_, i) => i !== index);
-                                  return {
-                                    ...prev,
-                                    sandra: { ...prev.sandra, certifications: newCerts }
-                                  } as CMSContent;
-                                });
+                                const arr = (editedContent?.sandra?.certifications ?? []).filter((_, j) => j !== i);
+                                setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, certifications: arr } } as CMSContent : prev);
                               }}
                               className="p-2 text-destructive hover:bg-destructive/10 rounded-xl"
                             >
@@ -2366,118 +2591,67 @@ export default function AdminPage() {
                             </button>
                           </div>
                         ))}
+                      </div>
+                      <div className="mt-3">
                         <PremiumButton
                           variant="outline"
                           size="sm"
                           icon={<Plus className="w-4 h-4" />}
-                          onClick={() => setEditedContent((prev) => {
-                            if (!prev?.sandra) return prev;
-                            return {
-                              ...prev,
-                              sandra: { ...prev.sandra, certifications: [...(prev.sandra.certifications || []), ''] }
-                            } as CMSContent;
-                          })}
+                          onClick={() => {
+                            const arr = [...(editedContent?.sandra?.certifications ?? []), ''];
+                            setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, certifications: arr } } as CMSContent : prev);
+                          }}
                         >
-                          Añadir Certificación
+                          Añadir certificación
                         </PremiumButton>
                       </div>
                     </GlassCard>
 
-                    {/* Timeline */}
+                    {/* === CTA === */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Timeline Profesional</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">CTA Final</h2>
                       <div className="space-y-4">
-                        {(editedContent?.sandra?.timeline || []).map((item, index) => (
-                          <div key={index} className="p-4 rounded-xl bg-muted/30 border border-border">
-                            <div className="grid sm:grid-cols-3 gap-3 mb-3">
-                              <input
-                                type="text"
-                                value={item.year}
-                                onChange={(e) => {
-                                  setEditedContent((prev) => {
-                                    if (!prev?.sandra) return prev;
-                                    const newTimeline = [...(prev.sandra.timeline || [])];
-                                    newTimeline[index] = { ...newTimeline[index], year: e.target.value };
-                                    return {
-                                      ...prev,
-                                      sandra: { ...prev.sandra, timeline: newTimeline }
-                                    } as CMSContent;
-                                  });
-                                }}
-                                placeholder="Año"
-                                className="px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                              />
-                              <input
-                                type="text"
-                                value={item.title}
-                                onChange={(e) => {
-                                  setEditedContent((prev) => {
-                                    if (!prev?.sandra) return prev;
-                                    const newTimeline = [...(prev.sandra.timeline || [])];
-                                    newTimeline[index] = { ...newTimeline[index], title: e.target.value };
-                                    return {
-                                      ...prev,
-                                      sandra: { ...prev.sandra, timeline: newTimeline }
-                                    } as CMSContent;
-                                  });
-                                }}
-                                placeholder="Título"
-                                className="sm:col-span-2 px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                              />
-                            </div>
-                            <div className="flex gap-2">
-                              <textarea
-                                value={item.description}
-                                onChange={(e) => {
-                                  setEditedContent((prev) => {
-                                    if (!prev?.sandra) return prev;
-                                    const newTimeline = [...(prev.sandra.timeline || [])];
-                                    newTimeline[index] = { ...newTimeline[index], description: e.target.value };
-                                    return {
-                                      ...prev,
-                                      sandra: { ...prev.sandra, timeline: newTimeline }
-                                    } as CMSContent;
-                                  });
-                                }}
-                                placeholder="Descripción"
-                                rows={2}
-                                className="flex-1 px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
-                              />
-                              <button
-                                onClick={() => {
-                                  setEditedContent((prev) => {
-                                    if (!prev?.sandra) return prev;
-                                    const newTimeline = (prev.sandra.timeline || []).filter((_, i) => i !== index);
-                                    return {
-                                      ...prev,
-                                      sandra: { ...prev.sandra, timeline: newTimeline }
-                                    } as CMSContent;
-                                  });
-                                }}
-                                className="p-2 text-destructive hover:bg-destructive/10 rounded-lg h-fit"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título</label>
+                          <input
+                            type="text"
+                            value={editedContent?.sandra?.ctaTitle ?? ''}
+                            onChange={(e) => setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, ctaTitle: e.target.value } } as CMSContent : prev)}
+                            placeholder="¿Listo para empezar?"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Descripción</label>
+                          <textarea
+                            value={editedContent?.sandra?.ctaDescription ?? ''}
+                            onChange={(e) => setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, ctaDescription: e.target.value } } as CMSContent : prev)}
+                            rows={2}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
+                          />
+                        </div>
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto del botón</label>
+                            <input
+                              type="text"
+                              value={editedContent?.sandra?.ctaButtonText ?? ''}
+                              onChange={(e) => setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, ctaButtonText: e.target.value } } as CMSContent : prev)}
+                              placeholder="Reservar Cita"
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            />
                           </div>
-                        ))}
-                        <PremiumButton
-                          variant="outline"
-                          size="sm"
-                          icon={<Plus className="w-4 h-4" />}
-                          onClick={() => setEditedContent((prev) => {
-                            if (!prev?.sandra) return prev;
-                            return {
-                              ...prev,
-                              sandra: {
-                                ...prev.sandra,
-                                timeline: [...(prev.sandra.timeline || []), { year: '', title: '', description: '' }]
-                              }
-                            } as CMSContent;
-                          })}
-                        >
-                          Añadir Año al Timeline
-                        </PremiumButton>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Enlace del botón</label>
+                            <input
+                              type="text"
+                              value={editedContent?.sandra?.ctaButtonLink ?? ''}
+                              onChange={(e) => setEditedContent((prev) => prev?.sandra ? { ...prev, sandra: { ...prev.sandra, ctaButtonLink: e.target.value } } as CMSContent : prev)}
+                              placeholder="/portal"
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            />
+                          </div>
+                        </div>
                       </div>
                     </GlassCard>
                   </div>

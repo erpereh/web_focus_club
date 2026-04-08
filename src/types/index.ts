@@ -83,13 +83,25 @@ export interface Testimonial {
     approved: boolean;
 }
 
+export interface SandraAchievement {
+    icon: string;
+    title: string;
+    description: string;
+}
+
+export interface SandraValue {
+    icon: string;
+    title: string;
+    description: string;
+}
+
 export interface SandraData {
     name: string;
     title: string;
     subtitle: string;
     bio: string;
     experience: string;
-    achievements: string[];
+    achievements: SandraAchievement[];
     certifications: string[];
     timeline: {
         year: string;
@@ -97,6 +109,19 @@ export interface SandraData {
         description: string;
     }[];
     image: string;
+    eyebrow?: string;
+    valuesEyebrow?: string;
+    valuesTitle?: string;
+    values?: SandraValue[];
+    timelineEyebrow?: string;
+    timelineTitle?: string;
+    certsEyebrow?: string;
+    certsTitle?: string;
+    certsSubtitle?: string;
+    ctaTitle?: string;
+    ctaDescription?: string;
+    ctaButtonText?: string;
+    ctaButtonLink?: string;
 }
 
 export interface CentroData {

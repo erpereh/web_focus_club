@@ -3,52 +3,35 @@
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Award, Heart, Users, Target, ArrowRight, Calendar, CheckCircle, Trophy, Medal, Star } from 'lucide-react';
+import { Award, ArrowRight, CheckCircle } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
+import { DynamicIcon } from '@/components/ui/DynamicIcon';
 import { useCMS } from '@/hooks/useFirestore';
 
-const timeline = [
-  {
-    year: '2003',
-    title: 'Inicio en el Fitness de Competición',
-    description: 'Comienza su especialización en entrenamiento de hipertrofia y preparación física para atletas.',
-  },
-  {
-    year: '2008',
-    title: 'Primera Competición Internacional',
-    description: 'Participa como competidora en campeonatos internacionales de fitness y fisicoculturismo.',
-  },
-  {
-    year: '2012',
-    title: 'Certificación como Jueza Internacional',
-    description: 'Obtiene la certificación oficial como jueza de competiciones de fitness y bodybuilding.',
-  },
-  {
-    year: '2015',
-    title: 'Fundación de Focus Club Vallecas',
-    description: 'Abre las puertas de su propio centro premium, materializando su visión de entrenamiento personalizado.',
-  },
-  {
-    year: '2020',
-    title: 'Reconocimiento a la Excelencia',
-    description: 'Premio nacional a la mejor preparadora física en la categoría de fisicoculturismo.',
-  },
-  {
-    year: '2024',
-    title: 'Más de 20 Años de Experiencia',
-    description: 'Dos décadas formando campeones y transformando vidas a través del entrenamiento premium.',
-  },
+const DEFAULT_TIMELINE = [
+  { year: '2003', title: 'Inicio en el Fitness de Competición', description: 'Comienza su especialización en entrenamiento de hipertrofia y preparación física para atletas.' },
+  { year: '2008', title: 'Primera Competición Internacional', description: 'Participa como competidora en campeonatos internacionales de fitness y fisicoculturismo.' },
+  { year: '2012', title: 'Certificación como Jueza Internacional', description: 'Obtiene la certificación oficial como jueza de competiciones de fitness y bodybuilding.' },
+  { year: '2015', title: 'Fundación de Focus Club Vallecas', description: 'Abre las puertas de su propio centro premium, materializando su visión de entrenamiento personalizado.' },
+  { year: '2020', title: 'Reconocimiento a la Excelencia', description: 'Premio nacional a la mejor preparadora física en la categoría de fisicoculturismo.' },
+  { year: '2024', title: 'Más de 20 Años de Experiencia', description: 'Dos décadas formando campeones y transformando vidas a través del entrenamiento premium.' },
 ];
 
-const achievements = [
-  { icon: Trophy, value: '20+', label: 'Años de Experiencia' },
-  { icon: Medal, value: '50+', label: 'Campeones Formados' },
-  { icon: Star, value: '15+', label: 'Competiciones Internacionales' },
-  { icon: Award, value: 'Jueza', label: 'Internacional Certificada' },
+const DEFAULT_ACHIEVEMENTS = [
+  { icon: 'Trophy', title: 'Juez Certificada de Competición', description: 'Certificación internacional como jueza de competiciones de fitness y bodybuilding' },
+  { icon: 'Users', title: 'Preparadora de +2500 clientes', description: 'Más de 2500 clientes en más de 10 años' },
+  { icon: 'Medal', title: '+50 competiciones', description: 'Atleta internacional con más de 50 competiciones a sus espaldas' },
+  { icon: 'Award', title: 'Premio Nacional de Excelencia 2020', description: 'Premio nacional a la mejor preparadora física en la categoría de fisicoculturismo' },
 ];
 
-const certifications = [
+const DEFAULT_VALUES = [
+  { icon: 'Heart', title: 'Dedicación Total', description: 'Cada cliente recibe atención personalizada y seguimiento constante.' },
+  { icon: 'Target', title: 'Metodología Científica', description: 'Programas basados en evidencia científica y resultados medibles.' },
+  { icon: 'Users', title: 'Comunidad de Campeones', description: 'Un entorno exclusivo donde cada miembro persigue la excelencia.' },
+];
+
+const DEFAULT_CERTIFICATIONS = [
   'Licenciatura en Ciencias de la Actividad Física y el Deporte',
   'Especialización en Hipertrofia y Fisicoculturismo',
   'Certificación como Jueza Internacional de Fitness',
@@ -57,48 +40,9 @@ const certifications = [
   'Preparadora de Atletas de Élite',
 ];
 
-const specialties = [
-  {
-    title: 'Hipertrofia Avanzada',
-    description: 'Programas científicos para maximizar el desarrollo muscular con técnicas avanzadas.',
-    icon: Target,
-  },
-  {
-    title: 'Preparación para Competición',
-    description: 'Acompañamiento completo para atletas que buscan competir a nivel nacional e internacional.',
-    icon: Trophy,
-  },
-  {
-    title: 'Recomposición Corporal',
-    description: 'Estrategias personalizadas para perder grasa mientras se mantiene o aumenta la masa muscular.',
-    icon: Medal,
-  },
-];
-
-const values = [
-  {
-    icon: Heart,
-    title: 'Dedicación Total',
-    description: 'Cada cliente recibe atención personalizada y seguimiento constante.',
-  },
-  {
-    icon: Target,
-    title: 'Metodología Científica',
-    description: 'Programas basados en evidencia científica y resultados medibles.',
-  },
-  {
-    icon: Users,
-    title: 'Comunidad de Campeones',
-    description: 'Un entorno exclusivo donde cada miembro persigue la excelencia.',
-  },
-];
-
 const containerVariants = {
   hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.1 },
-  },
+  visible: { opacity: 1, transition: { staggerChildren: 0.1 } },
 };
 
 const itemVariants = {
@@ -108,6 +52,18 @@ const itemVariants = {
 
 export default function SandraPage() {
   const { cmsContent } = useCMS();
+  const sandra = cmsContent?.sandra;
+
+  const achievements = (
+    sandra?.achievements?.length > 0 &&
+    typeof sandra.achievements[0] === 'object' &&
+    sandra.achievements[0] !== null
+  ) ? sandra.achievements : DEFAULT_ACHIEVEMENTS;
+  const values = sandra?.values?.length ? sandra.values : DEFAULT_VALUES;
+  const timelineItems = sandra?.timeline?.length ? sandra.timeline : DEFAULT_TIMELINE;
+  const certs = sandra?.certifications?.length ? sandra.certifications : DEFAULT_CERTIFICATIONS;
+
+  const sandraImage = sandra?.image || 'https://firebasestorage.googleapis.com/v0/b/focus-club-f73b8.firebasestorage.app/o/public%2Fimagenes%2Fsandra.jpg?alt=media&token=b0af9bd2-add1-4e06-9e08-ee48e03fafe9';
 
   return (
     <div className="min-h-screen">
@@ -122,15 +78,15 @@ export default function SandraPage() {
               transition={{ duration: 0.6 }}
             >
               <span className="eyebrow">
-                La experta detrás del proyecto
+                {sandra?.eyebrow ?? 'La experta detrás del proyecto'}
               </span>
               <h1 className="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mt-3 mb-6">
-                {cmsContent?.sandra?.name || 'Sandra Andújar'}
+                {sandra?.name || 'Sandra Andújar'}
               </h1>
               <div className="line-accent mb-4" />
               <div className="text-[var(--color-text-secondary)] text-lg leading-relaxed mb-4 space-y-4">
-                {cmsContent?.sandra?.bio ? (
-                  cmsContent.sandra.bio.split('\n').map((para, i) => (
+                {sandra?.bio ? (
+                  sandra.bio.split('\n').map((para, i) => (
                     <p key={i}>{para}</p>
                   ))
                 ) : (
@@ -147,22 +103,19 @@ export default function SandraPage() {
 
               {/* Achievements Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {(cmsContent?.sandra?.achievements && cmsContent.sandra.achievements.length > 0 ? cmsContent.sandra.achievements : ['20+ Años', '50+ Atletas', '15+ Copas', 'Jueza Int.']).map((text, index) => {
-                  const icons = [Trophy, Medal, Star, Award];
-                  const Icon = icons[index % icons.length];
-                  return (
-                    <motion.div
-                      key={index}
-                      className="text-center p-4 rounded-xl bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)]"
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.1 }}
-                    >
-                      <Icon className="w-6 h-6 text-[var(--color-accent-val)] mx-auto mb-2" />
-                      <div className="text-sm font-bold text-[var(--color-text-primary)]">{text}</div>
-                    </motion.div>
-                  );
-                })}
+                {achievements.map((a, index) => (
+                  <motion.div
+                    key={index}
+                    className="text-center p-4 rounded-xl bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)]"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                  >
+                    <DynamicIcon name={a.icon} className="w-6 h-6 text-[var(--color-accent-val)] mx-auto mb-2" />
+                    <div className="text-sm font-bold text-[var(--color-text-primary)]">{a.title}</div>
+                    <div className="text-xs text-[var(--color-text-secondary)] mt-0.5">{a.description}</div>
+                  </motion.div>
+                ))}
               </div>
             </motion.div>
 
@@ -175,7 +128,7 @@ export default function SandraPage() {
               <div className="rounded-3xl overflow-hidden glass-card p-2 max-w-md mx-auto">
                 <div className="relative rounded-2xl overflow-hidden">
                   <Image
-                    src="https://firebasestorage.googleapis.com/v0/b/focus-club-f73b8.firebasestorage.app/o/public%2Fimagenes%2Fsandra.jpg?alt=media&token=b0af9bd2-add1-4e06-9e08-ee48e03fafe9"
+                    src={sandraImage}
                     alt="Sandra Andújar — Entrenadora personal y jueza internacional en Focus Club Vallecas"
                     width={600}
                     height={600}
@@ -213,10 +166,10 @@ export default function SandraPage() {
             viewport={{ once: true }}
           >
             <span className="eyebrow">
-              Filosofía de trabajo
+              {sandra?.valuesEyebrow ?? 'Filosofía de trabajo'}
             </span>
             <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)] mt-3">
-              Valores que nos definen
+              {sandra?.valuesTitle ?? 'Valores que nos definen'}
             </h2>
             <div className="line-accent mx-auto mt-3" />
           </motion.div>
@@ -232,7 +185,7 @@ export default function SandraPage() {
               <motion.div key={index} variants={itemVariants}>
                 <GlassCard className="text-center h-full">
                   <div className="w-16 h-16 rounded-2xl bg-[var(--color-accent-dim)] flex items-center justify-center mx-auto mb-4">
-                    <value.icon className="w-8 h-8 text-[var(--color-accent-val)]" />
+                    <DynamicIcon name={value.icon} className="w-8 h-8 text-[var(--color-accent-val)]" />
                   </div>
                   <h3 className="text-xl font-semibold text-[var(--color-text-primary)] mb-2">{value.title}</h3>
                   <p className="text-[var(--color-text-secondary)] text-sm">{value.description}</p>
@@ -253,16 +206,16 @@ export default function SandraPage() {
             viewport={{ once: true }}
           >
             <span className="eyebrow">
-              Trayectoria profesional
+              {sandra?.timelineEyebrow ?? 'Trayectoria profesional'}
             </span>
             <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)] mt-3">
-              Un camino de dedicación
+              {sandra?.timelineTitle ?? 'Un camino de dedicación'}
             </h2>
             <div className="line-accent mx-auto mt-3" />
           </motion.div>
 
           <div className="max-w-3xl mx-auto">
-            {(cmsContent?.sandra?.timeline && cmsContent.sandra.timeline.length > 0 ? cmsContent.sandra.timeline : timeline).map((item, index) => (
+            {timelineItems.map((item, index) => (
               <motion.div
                 key={index}
                 className="relative pl-8 pb-12 last:pb-0"
@@ -271,12 +224,8 @@ export default function SandraPage() {
                 viewport={{ once: true }}
                 transition={{ delay: index * 0.1 }}
               >
-                {/* Timeline line */}
                 <div className="absolute left-0 top-2 bottom-0 w-px bg-gradient-to-b from-[var(--color-accent-val)] via-[var(--color-accent-val)] to-transparent" />
-
-                {/* Timeline dot */}
                 <div className="absolute left-0 top-2 -translate-x-1/2 w-4 h-4 rounded-full bg-[var(--color-accent-val)] shadow-emerald-glow" />
-
                 <GlassCard className="ml-4">
                   <span className="text-[var(--color-accent-val)] font-semibold text-sm">{item.year}</span>
                   <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mt-1 mb-2">{item.title}</h3>
@@ -298,17 +247,17 @@ export default function SandraPage() {
               viewport={{ once: true }}
             >
               <span className="eyebrow">
-                Formación académica
+                {sandra?.certsEyebrow ?? 'Formación académica'}
               </span>
               <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)] mt-3 mb-3">
-                Certificaciones y títulos
+                {sandra?.certsTitle ?? 'Certificaciones y títulos'}
               </h2>
               <div className="line-accent mb-6" />
               <p className="text-[var(--color-text-secondary)] mb-8">
-                Una formación continua y rigurosa que garantiza la máxima calidad en cada sesión.
+                {sandra?.certsSubtitle ?? 'Una formación continua y rigurosa que garantiza la máxima calidad en cada sesión.'}
               </p>
               <div className="space-y-3">
-                {(cmsContent?.sandra?.certifications && cmsContent.sandra.certifications.length > 0 ? cmsContent.sandra.certifications : certifications).map((cert, index) => (
+                {certs.map((cert, index) => (
                   <motion.div
                     key={index}
                     className="flex items-start gap-3"
@@ -335,14 +284,14 @@ export default function SandraPage() {
                     <Award className="w-10 h-10 text-[var(--color-bg-base)]" />
                   </div>
                   <h3 className="text-xl font-semibold text-[var(--color-text-primary)] mb-2">
-                    ¿Listo para empezar?
+                    {sandra?.ctaTitle ?? '¿Listo para empezar?'}
                   </h3>
                   <p className="text-[var(--color-text-secondary)] text-sm mb-6">
-                    Reserva tu primera consulta gratuita y descubre cómo podemos ayudarte.
+                    {sandra?.ctaDescription ?? 'Reserva tu primera consulta gratuita y descubre cómo podemos ayudarte.'}
                   </p>
-                  <Link href="/portal">
+                  <Link href={sandra?.ctaButtonLink ?? '/portal'}>
                     <PremiumButton variant="cta" icon={<ArrowRight className="w-4 h-4" />} iconPosition="right">
-                      Reservar Cita
+                      {sandra?.ctaButtonText ?? 'Reservar Cita'}
                     </PremiumButton>
                   </Link>
                 </div>
