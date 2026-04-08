@@ -14,6 +14,7 @@ import {
     updateMediaFile,
     deleteMediaFileRecord,
     getOrCreateGalleryFolder,
+    getOrCreateBrandingFolder,
 } from '@/lib/firestore';
 import type { MediaFolder, MediaFile, UploadProgress } from '@/types';
 import { v4 as uuidv4 } from 'uuid';
@@ -56,18 +57,21 @@ export function useMediaLibrary() {
     const [loading, setLoading] = useState(false);
     const [uploadQueue, setUploadQueue] = useState<UploadProgress[]>([]);
     const [galleryFolderId, setGalleryFolderId] = useState<string | null>(null);
+    const [brandingFolderId, setBrandingFolderId] = useState<string | null>(null);
 
     // --- FETCH ---
 
     const fetchFolders = useCallback(async () => {
         setLoading(true);
         try {
-            const [data, { folderId }] = await Promise.all([
+            const [data, galleryResult, brandingResult] = await Promise.all([
                 getMediaFolders(),
                 getOrCreateGalleryFolder(),
+                getOrCreateBrandingFolder(),
             ]);
             setFolders(data);
-            setGalleryFolderId(folderId);
+            setGalleryFolderId(galleryResult.folderId);
+            setBrandingFolderId(brandingResult.folderId);
         } finally {
             setLoading(false);
         }
@@ -115,9 +119,11 @@ export function useMediaLibrary() {
         const storagePath =
             folderId && folderId === galleryFolderId
                 ? `public/imagenes/galeria/${uniqueName}`
-                : folderId
-                    ? `media/${folderId}/${uniqueName}`
-                    : `media/root/${uniqueName}`;
+                : folderId && folderId === brandingFolderId
+                    ? `public/imagenes/branding/${uniqueName}`
+                    : folderId
+                        ? `media/${folderId}/${uniqueName}`
+                        : `media/root/${uniqueName}`;
 
         const storageRef = ref(storage, storagePath);
         const type: 'image' | 'video' = file.type.startsWith('video/') ? 'video' : 'image';
@@ -224,6 +230,7 @@ export function useMediaLibrary() {
         uploadQueue,
         setUploadQueue,
         galleryFolderId,
+        brandingFolderId,
         fetchFolders,
         fetchFiles,
         createFolder: handleCreateFolder,

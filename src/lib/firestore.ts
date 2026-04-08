@@ -37,6 +37,7 @@ import type {
     MediaFolder,
     MediaFile,
     GalleryItem,
+    BrandingConfig,
 } from '@/types';
 
 // ============================================
@@ -831,13 +832,39 @@ export async function getOrCreateGalleryFolder(): Promise<{ folderId: string }> 
     if (configSnap.exists()) {
         return { folderId: configSnap.data().folderId as string };
     }
-    // Create the media folder doc
     const folderRef = await addDoc(collection(db, 'media_folders'), {
         name: 'Galería Pública',
         parentId: null,
         createdAt: Timestamp.now(),
     });
-    // Store the reference in system_config
     await setDoc(configRef, { folderId: folderRef.id });
     return { folderId: folderRef.id };
+}
+
+export async function getOrCreateBrandingFolder(): Promise<{ folderId: string }> {
+    const configRef = doc(db, 'system_config', 'branding_folder');
+    const configSnap = await getDoc(configRef);
+    if (configSnap.exists()) {
+        return { folderId: configSnap.data().folderId as string };
+    }
+    const folderRef = await addDoc(collection(db, 'media_folders'), {
+        name: 'Branding',
+        parentId: null,
+        createdAt: Timestamp.now(),
+    });
+    await setDoc(configRef, { folderId: folderRef.id });
+    return { folderId: folderRef.id };
+}
+
+// ============================================
+// BRANDING CONFIG
+// ============================================
+
+export async function getBrandingConfig(): Promise<BrandingConfig | null> {
+    const snap = await getDoc(doc(db, 'site_config', 'general'));
+    return snap.exists() ? (snap.data() as BrandingConfig) : null;
+}
+
+export async function updateBrandingConfig(data: Partial<BrandingConfig>): Promise<void> {
+    await setDoc(doc(db, 'site_config', 'general'), data, { merge: true });
 }

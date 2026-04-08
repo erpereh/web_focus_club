@@ -61,9 +61,10 @@ export interface MediaPickerProps {
     onSelect: (file: MediaFile) => void;
     filterType?: 'image' | 'video';
     uploadFolderId?: string | null;
+    defaultFolderId?: string;
 }
 
-export function MediaPicker({ open, onClose, onSelect, filterType, uploadFolderId }: MediaPickerProps) {
+export function MediaPicker({ open, onClose, onSelect, filterType, uploadFolderId, defaultFolderId }: MediaPickerProps) {
     const {
         folders,
         files,
@@ -74,16 +75,17 @@ export function MediaPicker({ open, onClose, onSelect, filterType, uploadFolderI
         uploadMultipleFiles,
     } = useMediaLibrary();
 
-    const [selectedFolderId, setSelectedFolderId] = useState<string>('ALL');
+    const [selectedFolderId, setSelectedFolderId] = useState<string>(defaultFolderId ?? 'ALL');
     const [selectedFile, setSelectedFile] = useState<MediaFile | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         if (open) {
             fetchFolders();
-            fetchFiles('ALL');
+            const initialFolder = defaultFolderId ?? 'ALL';
+            fetchFiles(initialFolder);
             setSelectedFile(null);
-            setSelectedFolderId('ALL');
+            setSelectedFolderId(initialFolder);
         }
     }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 

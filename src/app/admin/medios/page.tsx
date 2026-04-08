@@ -401,6 +401,7 @@ export default function MediaPage() {
         loading,
         uploadQueue,
         galleryFolderId,
+        brandingFolderId,
         fetchFolders,
         fetchFiles,
         createFolder,
@@ -623,9 +624,34 @@ export default function MediaPage() {
                             );
                         })()}
 
+                        {/* Branding folder — second, protected */}
+                        {brandingFolderId && (() => {
+                            const brandingFolder = folders.find((f) => f.id === brandingFolderId);
+                            if (!brandingFolder) return null;
+                            return (
+                                <div key={brandingFolder.id} className="mb-1">
+                                    <div
+                                        className={cn(
+                                            'flex items-center gap-1.5 rounded-lg transition-all text-sm cursor-pointer px-3 py-1.5',
+                                            selectedFolderId === brandingFolder.id
+                                                ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)]'
+                                                : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
+                                        )}
+                                        onClick={() => handleSelectFolder(brandingFolder.id)}
+                                    >
+                                        <Lock className="w-3.5 h-3.5 shrink-0" />
+                                        <span className="flex-1 truncate">{brandingFolder.name}</span>
+                                        <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                                            GLOBAL
+                                        </span>
+                                    </div>
+                                </div>
+                            );
+                        })()}
+
                         {/* Regular folders */}
                         {folders
-                            .filter((f) => f.parentId === null && f.id !== galleryFolderId)
+                            .filter((f) => f.parentId === null && f.id !== galleryFolderId && f.id !== brandingFolderId)
                             .map((folder) => (
                                 <FolderTreeItem
                                     key={folder.id}

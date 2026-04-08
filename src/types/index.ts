@@ -259,3 +259,13 @@ export interface GalleryItem {
     active: boolean;
     createdAt: string;
 }
+
+// ============================================
+// BRANDING CONFIG
+// ============================================
+
+export interface BrandingConfig {
+    logoUrl: string;
+    logoStoragePath: string;
+    updatedAt: string;
+}

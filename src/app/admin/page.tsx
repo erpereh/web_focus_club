@@ -56,9 +56,11 @@ import { PremiumButton } from '@/components/ui/premium-button';
 import { ImageUpload } from '@/components/ui/ImageUpload';
 import { ContextualImageManager } from '@/components/ui/ContextualImageManager';
 import { GalleryManager } from '@/components/admin/GalleryManager';
+import { MediaPicker } from '@/components/admin/MediaPicker';
 import { useAuth } from '@/contexts/AuthContext';
+import { useMediaLibrary } from '@/hooks/useMediaLibrary';
 import { defaultCMS } from '@/hooks/useFirestore';
-import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono } from '@/types';
+import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono, BrandingConfig } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import {
   getAppointments,
@@ -111,6 +113,8 @@ import {
   manualDeductBonoMinutes,
   recalculateAllBonoExpirations,
   expireOverdueBonos,
+  getBrandingConfig,
+  updateBrandingConfig,
 } from '@/lib/firestore';
 import { cn } from '@/lib/utils';
 import type { UserProfile } from '@/types';
@@ -249,6 +253,11 @@ export default function AdminPage() {
     onSelect: (url: string) => void;
   } | null>(null);
 
+  // Branding / Logo
+  const { brandingFolderId, fetchFolders: fetchMediaFolders } = useMediaLibrary();
+  const [brandingConfig, setBrandingConfig] = useState<BrandingConfig | null>(null);
+  const [logoPickerOpen, setLogoPickerOpen] = useState(false);
+
   // Autenticación admin
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [loginError, setLoginError] = useState('');
@@ -292,7 +301,7 @@ export default function AdminPage() {
 
   // Cargar datos desde Firestore
   const refreshData = async () => {
-    const [appts, svcs, tests, cms, usersList, blocked, trainersList, config] = await Promise.all([
+    const [appts, svcs, tests, cms, usersList, blocked, trainersList, config, branding] = await Promise.all([
       getAppointments(),
       getServices(),
       getTestimonials(),
@@ -301,6 +310,7 @@ export default function AdminPage() {
       getBlockedSlots(),
       getTrainers(),
       getSiteConfig(),
+      getBrandingConfig(),
     ]);
     setAppointments(appts);
     setServices(svcs);
@@ -311,6 +321,7 @@ export default function AdminPage() {
     setSiteConfig(config);
     setEditConfig(config);
     setEditBonoConfig(config.bonoExpirationMonths || 1);
+    setBrandingConfig(branding);
     if (cms) {
       const mergedCms = { ...cms, galeria: cms.galeria ?? defaultCMS.galeria };
       setCmsContent(mergedCms);
@@ -342,6 +353,8 @@ export default function AdminPage() {
     if (isAdmin) {
       // eslint-disable-next-line
       refreshData().catch(console.error);
+      // eslint-disable-next-line
+      fetchMediaFolders().catch(console.error);
     } else if (isTrainerRole) {
       // Trainers only load their own data
       refreshTrainerData().catch(console.error);
@@ -3813,6 +3826,41 @@ export default function AdminPage() {
                 >
                   <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-6">Configuración Global</h1>
 
+                  {/* ── Identidad Visual ── */}
+                  <GlassCard className="p-6 mb-6">
+                    <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-1 flex items-center gap-2">
+                      <ImageIcon className="w-5 h-5 text-[var(--color-accent-val)]" />
+                      Identidad Visual
+                    </h2>
+                    <p className="text-sm text-[var(--color-text-secondary)] mb-5">
+                      Logo que aparece en la barra de navegación y el pie de página de toda la web.
+                    </p>
+                    <div className="flex items-center gap-6">
+                      {/* Logo preview */}
+                      <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-[var(--color-accent-border)] bg-black/30 shrink-0">
+                        <img
+                          src={brandingConfig?.logoUrl ?? '/imagenes/logo.jpeg'}
+                          alt="Logo actual"
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium text-[var(--color-text-primary)]">Logo actual</p>
+                        <p className="text-xs text-[var(--color-text-secondary)]">
+                          {brandingConfig?.logoUrl ? 'Imagen personalizada en Firebase Storage' : 'Imagen predeterminada (logo.jpeg)'}
+                        </p>
+                        <PremiumButton
+                          variant="outline"
+                          size="sm"
+                          icon={<ImageIcon className="w-4 h-4" />}
+                          onClick={() => setLogoPickerOpen(true)}
+                        >
+                          Cambiar Logo
+                        </PremiumButton>
+                      </div>
+                    </div>
+                  </GlassCard>
+
                   <div className="grid lg:grid-cols-2 gap-6">
                     {/* Config Form */}
                     <GlassCard className="p-6">
@@ -4054,6 +4102,23 @@ export default function AdminPage() {
                 />
               )}
             </AnimatePresence>
+
+            {/* Logo picker */}
+            <MediaPicker
+              open={logoPickerOpen}
+              onClose={() => setLogoPickerOpen(false)}
+              filterType="image"
+              uploadFolderId={brandingFolderId}
+              onSelect={async (file) => {
+                await updateBrandingConfig({
+                  logoUrl: file.url,
+                  logoStoragePath: file.storagePath,
+                  updatedAt: new Date().toISOString(),
+                });
+                setBrandingConfig({ logoUrl: file.url, logoStoragePath: file.storagePath, updatedAt: new Date().toISOString() });
+                setLogoPickerOpen(false);
+              }}
+            />
 
             {/* ============================================
                 ASSIGN BONO MODAL

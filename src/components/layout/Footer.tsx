@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { Mail, Phone, MapPin, Instagram } from 'lucide-react';
 import { useCMS } from '@/hooks/useFirestore';
+import { useBrandingConfig } from '@/hooks/useBrandingConfig';
 
 const footerLinks = [
   { href: '/', label: 'Inicio' },
@@ -20,6 +21,7 @@ const footerLinks = [
 export function Footer() {
   const pathname = usePathname();
   const { cmsContent } = useCMS();
+  const { logoUrl } = useBrandingConfig();
 
   // No mostrar footer en páginas de portal o admin
   const hideFooter = pathname?.startsWith('/portal') || pathname?.startsWith('/admin');
@@ -40,11 +42,12 @@ export function Footer() {
                 className="relative w-14 h-14 flex-shrink-0"
               >
                 <Image
-                  src="/imagenes/logo.jpeg"
+                  src={logoUrl ?? '/imagenes/logo.jpeg'}
                   alt="Focus Club Vallecas"
                   fill
                   className="object-cover rounded-full"
                   sizes="56px"
+                  unoptimized={!!logoUrl}
                 />
               </motion.div>
               <div className="flex flex-col">

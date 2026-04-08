@@ -9,6 +9,7 @@ import { Menu, X, User, LogOut, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { useAuth } from '@/contexts/AuthContext';
+import { useBrandingConfig } from '@/hooks/useBrandingConfig';
 
 const navLinks = [
   { href: '/', label: 'Inicio' },
@@ -24,6 +25,7 @@ export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const pathname = usePathname();
   const { user, userProfile, logout, isAdmin } = useAuth();
+  const { logoUrl } = useBrandingConfig();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -61,12 +63,13 @@ export function Navbar() {
               className="relative w-10 h-10 flex-shrink-0"
             >
               <Image
-                src="/imagenes/logo.jpeg"
+                src={logoUrl ?? '/imagenes/logo.jpeg'}
                 alt="Focus Club Vallecas"
                 fill
                 className="object-cover rounded-full"
                 sizes="40px"
                 priority
+                unoptimized={!!logoUrl}
               />
             </motion.div>
             <div className="flex flex-col">
