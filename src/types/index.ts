@@ -185,11 +185,24 @@ export interface GaleriaContent {
     resultados: { name: string; stat: string; statLabel: string; tag: string; story: string; detail: string }[];
 }
 
+export interface HeroStat {
+    icon: string;
+    value: string;
+    label: string;
+}
+
 export interface CMSContent {
     heroTitle: string;
     heroSubtitle: string;
     heroCTA: string;
     heroImage: string;
+    heroEyebrow?: string;
+    heroTitleStart?: string;
+    heroTitleHighlight?: string;
+    heroCtaPrimaryLink?: string;
+    heroCtaSecondaryText?: string;
+    heroCtaSecondaryLink?: string;
+    heroStats?: HeroStat[];
 
     aboutTitle: string;
     aboutText: string;

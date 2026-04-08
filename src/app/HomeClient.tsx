@@ -3,11 +3,12 @@
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArrowRight, Star, Clock, Users, Award, Dumbbell, Heart, Activity, Apple, Trophy } from 'lucide-react';
+import { ArrowRight, Star, Clock, Activity, Apple, Trophy, Dumbbell, Heart, Users, Award } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
-import type { CMSContent, Service, Testimonial } from '@/types';
+import { DynamicIcon } from '@/components/ui/DynamicIcon';
+import type { CMSContent, Service, Testimonial, HeroStat } from '@/types';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -23,6 +24,13 @@ const itemVariants = {
 };
 
 const ICON_MAP: Record<string, LucideIcon> = { Dumbbell, Trophy, Apple, Activity, Users, Heart };
+
+const DEFAULT_HERO_STATS: HeroStat[] = [
+  { icon: 'Award', value: '15+', label: 'Años de Experiencia' },
+  { icon: 'Users', value: '500+', label: 'Clientes Satisfechos' },
+  { icon: 'Dumbbell', value: '4', label: 'Servicios Premium' },
+  { icon: 'Heart', value: '100%', label: 'Compromiso' },
+];
 
 // ─── Skeleton placeholders ────────────────────────────────────────────────────
 
@@ -111,18 +119,25 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
             >
-              Bienvenido a Focus Club Vallecas
+              {cmsContent.heroEyebrow ?? 'Bienvenido a Focus Club Vallecas'}
             </motion.span>
 
             {/* Hero Title */}
             <motion.h1
-              className="glow-text font-extrabold mb-6 leading-[1.1]"
+              className="font-extrabold mb-6 leading-[1.1]"
               style={{ fontSize: 'clamp(32px, 4.5vw, 58px)', letterSpacing: '-2px' }}
               initial={{ opacity: 0, y: 24 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
             >
-              {cmsContent.heroTitle}
+              {cmsContent.heroTitleStart && cmsContent.heroTitleHighlight ? (
+                <>
+                  <span className="glow-text">{cmsContent.heroTitleStart} </span>
+                  <span className="text-[var(--color-accent-val)]">{cmsContent.heroTitleHighlight}</span>
+                </>
+              ) : (
+                <span className="glow-text">{cmsContent.heroTitle}</span>
+              )}
             </motion.h1>
 
             {/* Hero Subtitle */}
@@ -142,14 +157,14 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.5, duration: 0.6 }}
             >
-              <Link href="/portal">
+              <Link href={cmsContent.heroCtaPrimaryLink ?? '/portal'}>
                 <PremiumButton variant="cta" size="lg" icon={<ArrowRight className="w-5 h-5" />} iconPosition="right">
                   {cmsContent.heroCTA}
                 </PremiumButton>
               </Link>
-              <Link href="/servicios">
+              <Link href={cmsContent.heroCtaSecondaryLink ?? '/servicios'}>
                 <PremiumButton variant="outline" size="lg">
-                  Ver Servicios
+                  {cmsContent.heroCtaSecondaryText ?? 'Ver Servicios'}
                 </PremiumButton>
               </Link>
             </motion.div>
@@ -161,12 +176,7 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
               initial="hidden"
               animate="visible"
             >
-              {[
-                { value: '15+', label: 'Años de Experiencia', icon: Award },
-                { value: '500+', label: 'Clientes Satisfechos', icon: Users },
-                { value: '4', label: 'Servicios Premium', icon: Dumbbell },
-                { value: '100%', label: 'Compromiso', icon: Heart },
-              ].map((stat, i) => (
+              {(cmsContent.heroStats ?? DEFAULT_HERO_STATS).map((stat, i) => (
                 <motion.div
                   key={i}
                   className="flex items-center gap-4"
@@ -176,7 +186,7 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
                     <div className="hidden md:block w-px h-10 bg-[rgba(255,255,255,0.08)] -ml-6 mr-2" />
                   )}
                   <div className="w-10 h-10 rounded-lg bg-[var(--color-accent-dim)] flex items-center justify-center flex-shrink-0">
-                    <stat.icon className="w-5 h-5 text-[var(--color-accent-val)]" />
+                    <DynamicIcon name={stat.icon} className="w-5 h-5 text-[var(--color-accent-val)]" />
                   </div>
                   <div className="text-left">
                     <div className="text-2xl md:text-3xl font-bold text-[var(--color-text-primary)]">{stat.value}</div>

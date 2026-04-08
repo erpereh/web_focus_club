@@ -57,10 +57,11 @@ import { ImageUpload } from '@/components/ui/ImageUpload';
 import { ContextualImageManager } from '@/components/ui/ContextualImageManager';
 import { GalleryManager } from '@/components/admin/GalleryManager';
 import { MediaPicker } from '@/components/admin/MediaPicker';
+import { IconPicker } from '@/components/admin/IconPicker';
 import { useAuth } from '@/contexts/AuthContext';
 import { useMediaLibrary } from '@/hooks/useMediaLibrary';
 import { defaultCMS } from '@/hooks/useFirestore';
-import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono, BrandingConfig } from '@/types';
+import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono, BrandingConfig, HeroStat } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import {
   getAppointments,
@@ -119,6 +120,13 @@ import {
 import { cn } from '@/lib/utils';
 import type { UserProfile } from '@/types';
 
+const DEFAULT_HERO_STATS: HeroStat[] = [
+  { icon: 'Award', value: '15+', label: 'Años de Experiencia' },
+  { icon: 'Users', value: '500+', label: 'Clientes Satisfechos' },
+  { icon: 'Dumbbell', value: '4', label: 'Servicios Premium' },
+  { icon: 'Heart', value: '100%', label: 'Compromiso' },
+];
+
 // --- Make.com Webhook ---
 const WEBHOOK_URL = 'https://hook.eu1.make.com/rnc4rpwq70l52h69qm8m21ekafbffcql';
 
@@ -145,7 +153,7 @@ async function sendWebhook(payload: {
 }
 
 
-type TabType = 'Inicio' | 'appointments' | 'availability' | 'clients' | 'team' | 'services' | 'testimonials' | 'Sandra' | 'Centro' | 'Galeria' | 'Contacto' | 'config';
+type TabType = 'Inicio' | 'appointments' | 'availability' | 'clients' | 'team' | 'services' | 'testimonials' | 'Hero' | 'Sandra' | 'Centro' | 'Galeria' | 'Contacto' | 'config';
 type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
 
 const statusConfig = {
@@ -1155,6 +1163,19 @@ export default function AdminPage() {
             <p className="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider mt-6 mb-3 px-3">CMS</p>
 
             <button
+              onClick={() => switchTab('Hero')}
+              className={cn(
+                'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
+                activeTab === 'Hero'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
+              )}
+            >
+              <ImageIcon className="w-5 h-5" />
+              <span className="font-medium">Hero</span>
+            </button>
+
+            <button
               onClick={() => switchTab('Sandra')}
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
@@ -1189,8 +1210,8 @@ export default function AdminPage() {
                   : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
               )}
             >
-              <ImageIcon className="w-5 h-5" />
-              <span className="font-medium">Galeria</span>
+              <Images className="w-5 h-5" />
+              <span className="font-medium">Galería</span>
             </button>
 
             <button
@@ -1203,7 +1224,7 @@ export default function AdminPage() {
               )}
             >
               <Globe className="w-5 h-5" />
-              <span className="font-medium">Contacto & Hero</span>
+              <span className="font-medium">Contacto</span>
             </button>
           </aside>
 
@@ -2892,6 +2913,168 @@ export default function AdminPage() {
               {/* ============================================
                   CMS - CONTACTO & HERO
                   ============================================ */}
+              {activeTab === 'Hero' && (
+                <motion.div
+                  key="Hero"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                >
+                  <div className="flex items-center justify-between mb-6">
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Hero</h1>
+                    <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveCMS}>
+                      Guardar Cambios
+                    </PremiumButton>
+                  </div>
+
+                  <div className="space-y-6">
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-6 flex items-center gap-2">
+                        <ImageIcon className="w-5 h-5 text-[var(--color-accent-val)]" />
+                        Sección Hero
+                      </h2>
+                      <div className="space-y-5">
+                        {/* Eyebrow */}
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow (texto sobre el título)</label>
+                          <input
+                            type="text"
+                            value={editedContent?.heroEyebrow ?? ''}
+                            onChange={(e) => setEditedContent(prev => prev ? { ...prev, heroEyebrow: e.target.value } as CMSContent : prev)}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            placeholder="Bienvenido a Focus Club Vallecas"
+                          />
+                        </div>
+
+                        {/* Split title */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título (parte normal)</label>
+                            <input
+                              type="text"
+                              value={editedContent?.heroTitleStart ?? ''}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, heroTitleStart: e.target.value } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              placeholder="Transforma Tu"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título (parte destacada)</label>
+                            <input
+                              type="text"
+                              value={editedContent?.heroTitleHighlight ?? ''}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, heroTitleHighlight: e.target.value } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              placeholder="Cuerpo y Mente"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Subtítulo */}
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtítulo</label>
+                          <textarea
+                            value={editedContent?.heroSubtitle || ''}
+                            onChange={(e) => setEditedContent(prev => prev ? { ...prev, heroSubtitle: e.target.value } as CMSContent : prev)}
+                            rows={3}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
+                          />
+                        </div>
+
+                        {/* CTA Principal */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">CTA Principal (texto)</label>
+                            <input
+                              type="text"
+                              value={editedContent?.heroCTA || ''}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, heroCTA: e.target.value } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              placeholder="Solicitar Cita"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">CTA Principal (enlace)</label>
+                            <input
+                              type="text"
+                              value={editedContent?.heroCtaPrimaryLink ?? ''}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, heroCtaPrimaryLink: e.target.value } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              placeholder="/portal"
+                            />
+                          </div>
+                        </div>
+
+                        {/* CTA Secundario */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">CTA Secundario (texto)</label>
+                            <input
+                              type="text"
+                              value={editedContent?.heroCtaSecondaryText ?? ''}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, heroCtaSecondaryText: e.target.value } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              placeholder="Ver Servicios"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">CTA Secundario (enlace)</label>
+                            <input
+                              type="text"
+                              value={editedContent?.heroCtaSecondaryLink ?? ''}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, heroCtaSecondaryLink: e.target.value } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              placeholder="/servicios"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Stats */}
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-3">Estadísticas</label>
+                          <div className="space-y-2">
+                            {(editedContent?.heroStats ?? DEFAULT_HERO_STATS).map((stat, i) => (
+                              <div key={i} className="flex items-center gap-3">
+                                <IconPicker
+                                  value={stat.icon}
+                                  onChange={(icon) => {
+                                    const stats = [...(editedContent?.heroStats ?? DEFAULT_HERO_STATS)];
+                                    stats[i] = { ...stats[i], icon };
+                                    setEditedContent(prev => prev ? { ...prev, heroStats: stats } as CMSContent : prev);
+                                  }}
+                                />
+                                <input
+                                  type="text"
+                                  value={stat.value}
+                                  onChange={(e) => {
+                                    const stats = [...(editedContent?.heroStats ?? DEFAULT_HERO_STATS)];
+                                    stats[i] = { ...stats[i], value: e.target.value };
+                                    setEditedContent(prev => prev ? { ...prev, heroStats: stats } as CMSContent : prev);
+                                  }}
+                                  className="w-20 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+                                  placeholder="15+"
+                                />
+                                <input
+                                  type="text"
+                                  value={stat.label}
+                                  onChange={(e) => {
+                                    const stats = [...(editedContent?.heroStats ?? DEFAULT_HERO_STATS)];
+                                    stats[i] = { ...stats[i], label: e.target.value };
+                                    setEditedContent(prev => prev ? { ...prev, heroStats: stats } as CMSContent : prev);
+                                  }}
+                                  className="flex-1 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+                                  placeholder="Años de Experiencia"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </GlassCard>
+                  </div>
+                </motion.div>
+              )}
+
               {activeTab === 'Contacto' && (
                 <motion.div
                   key="Contacto"
@@ -2900,87 +3083,13 @@ export default function AdminPage() {
                   exit={{ opacity: 0, y: -20 }}
                 >
                   <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Contacto & Hero</h1>
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Contacto</h1>
                     <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveCMS}>
                       Guardar Cambios
                     </PremiumButton>
                   </div>
 
                   <div className="space-y-6">
-                    {/* Hero */}
-                    <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">
-                        <ImageIcon className="w-5 h-5 text-[var(--color-accent-val)]" />
-                        Sección Hero
-                      </h2>
-                      <div className="space-y-4">
-                        <div className="mb-6">
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Imagen de Fondo (Hero)</label>
-                          {isValidImageUrl(editedContent?.heroImage) ? (
-                            <img src={editedContent!.heroImage} alt="Hero" className="w-full max-w-sm h-32 object-cover rounded-xl mb-3 border border-border" />
-                          ) : (
-                            <div className="w-full max-w-sm h-32 rounded-xl mb-3 border border-border bg-muted/30 flex items-center justify-center">
-                              <ImageIcon className="w-8 h-8 text-[var(--color-text-secondary)] opacity-50" />
-                            </div>
-                          )}
-                          <PremiumButton
-                            variant="outline"
-                            size="sm"
-                            icon={<ImageIcon className="w-4 h-4" />}
-                            onClick={() => setActiveImageManager({
-                              folder: 'Hero',
-                              currentUrl: editedContent?.heroImage || undefined,
-                              onSelect: (url) => setEditedContent(prev => prev ? { ...prev, heroImage: url } as CMSContent : prev)
-                            })}
-                          >
-                            Cambiar Imagen Hero
-                          </PremiumButton>
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título Principal</label>
-                          <input
-                            type="text"
-                            value={editedContent?.heroTitle || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return { ...prev, heroTitle: e.target.value } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtítulo</label>
-                          <textarea
-                            value={editedContent?.heroSubtitle || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return { ...prev, heroSubtitle: e.target.value } as CMSContent;
-                              });
-                            }}
-                            rows={3}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto Botón CTA</label>
-                          <input
-                            type="text"
-                            value={editedContent?.heroCTA || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return { ...prev, heroCTA: e.target.value } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          />
-                        </div>
-                      </div>
-                    </GlassCard>
-
                     {/* About Section */}
                     <GlassCard className="p-6">
                       <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">

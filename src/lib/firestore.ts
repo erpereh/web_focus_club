@@ -38,6 +38,7 @@ import type {
     MediaFile,
     GalleryItem,
     BrandingConfig,
+    HeroStat,
 } from '@/types';
 
 // ============================================
@@ -867,4 +868,37 @@ export async function getBrandingConfig(): Promise<BrandingConfig | null> {
 
 export async function updateBrandingConfig(data: Partial<BrandingConfig>): Promise<void> {
     await setDoc(doc(db, 'site_config', 'general'), data, { merge: true });
+}
+
+// ============================================
+// HERO CONFIG
+// ============================================
+
+export interface HeroConfig {
+    heroEyebrow?: string;
+    heroTitleStart?: string;
+    heroTitleHighlight?: string;
+    heroCtaPrimaryLink?: string;
+    heroCtaSecondaryText?: string;
+    heroCtaSecondaryLink?: string;
+    heroStats?: HeroStat[];
+}
+
+export async function getHeroConfig(): Promise<HeroConfig | null> {
+    const snap = await getDoc(doc(db, 'site_content', 'main'));
+    if (!snap.exists()) return null;
+    const d = snap.data();
+    return {
+        heroEyebrow: d.heroEyebrow,
+        heroTitleStart: d.heroTitleStart,
+        heroTitleHighlight: d.heroTitleHighlight,
+        heroCtaPrimaryLink: d.heroCtaPrimaryLink,
+        heroCtaSecondaryText: d.heroCtaSecondaryText,
+        heroCtaSecondaryLink: d.heroCtaSecondaryLink,
+        heroStats: d.heroStats,
+    };
+}
+
+export async function updateHeroConfig(data: Partial<HeroConfig>): Promise<void> {
+    await setDoc(doc(db, 'site_content', 'main'), data, { merge: true });
 }
