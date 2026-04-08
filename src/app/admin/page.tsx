@@ -55,6 +55,7 @@ import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { ImageUpload } from '@/components/ui/ImageUpload';
 import { ContextualImageManager } from '@/components/ui/ContextualImageManager';
+import { GalleryManager } from '@/components/admin/GalleryManager';
 import { useAuth } from '@/contexts/AuthContext';
 import { defaultCMS } from '@/hooks/useFirestore';
 import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono } from '@/types';
@@ -2693,16 +2694,8 @@ export default function AdminPage() {
                   </div>
 
                   <div className="space-y-6">
-                    {/* Imágenes - informativo */}
-                    <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-3 flex items-center gap-2">
-                        <ImageIcon className="w-5 h-5 text-[var(--color-accent-val)]" />
-                        Gestión de Imágenes
-                      </h2>
-                      <p className="text-[var(--color-text-secondary)] text-sm">
-                        La gestión de imágenes estará disponible próximamente mediante Firebase Storage.
-                      </p>
-                    </GlassCard>
+                    {/* Fotos & Vídeos — Media Library integrada */}
+                    <GalleryManager />
 
                     {/* Hero */}
                     <GlassCard className="p-6">
@@ -2801,61 +2794,6 @@ export default function AdminPage() {
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </GlassCard>
-
-                    {/* Transformaciones */}
-                    <GlassCard className="p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Transformaciones</h2>
-                        <PremiumButton
-                          variant="outline"
-                          size="sm"
-                          icon={<Plus className="w-4 h-4" />}
-                          onClick={() => setEditedContent((prev) => {
-                            if (!prev?.galeria) return prev;
-                            return { ...prev, galeria: { ...prev.galeria, transformaciones: [...prev.galeria.transformaciones, { name: '', periodo: '', resultado: '' }] } } as CMSContent;
-                          })}
-                        >
-                          Añadir caso
-                        </PremiumButton>
-                      </div>
-                      <div className="space-y-4">
-                        {(editedContent?.galeria?.transformaciones || []).map((t, i) => (
-                          <div key={i} className="p-4 rounded-xl border border-border bg-muted/10">
-                            <div className="flex items-center justify-between mb-3">
-                              <span className="text-sm font-medium text-[var(--color-text-primary)]">Caso {i + 1}</span>
-                              <button
-                                onClick={() => setEditedContent((prev) => {
-                                  if (!prev?.galeria) return prev;
-                                  const transformaciones = prev.galeria.transformaciones.filter((_, idx) => idx !== i);
-                                  return { ...prev, galeria: { ...prev.galeria, transformaciones } } as CMSContent;
-                                })}
-                                className="p-1 rounded-lg text-red-400 hover:bg-red-400/10 transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                            <div className="grid sm:grid-cols-3 gap-3">
-                              {(['name', 'periodo', 'resultado'] as const).map((field) => (
-                                <div key={field}>
-                                  <label className="block text-xs text-[var(--color-text-secondary)] mb-1 capitalize">{field === 'name' ? 'Nombre' : field === 'periodo' ? 'Período' : 'Resultado'}</label>
-                                  <input
-                                    type="text"
-                                    value={t[field]}
-                                    onChange={(e) => setEditedContent((prev) => {
-                                      if (!prev?.galeria) return prev;
-                                      const transformaciones = [...prev.galeria.transformaciones];
-                                      transformaciones[i] = { ...transformaciones[i], [field]: e.target.value };
-                                      return { ...prev, galeria: { ...prev.galeria, transformaciones } } as CMSContent;
-                                    })}
-                                    className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                                  />
-                                </div>
-                              ))}
                             </div>
                           </div>
                         ))}

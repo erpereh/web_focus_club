@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence, useInView, animate } from 'framer-motion';
 import Image from 'next/image';
 import { Play, X, ChevronLeft, ChevronRight, Quote } from 'lucide-react';
-import type { GaleriaContent } from '@/types';
+import type { GaleriaContent, GalleryItem } from '@/types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,30 +36,6 @@ const STATS_FALLBACK = [
   { value: 200, suffix: '+', label: 'Clientes transformados' },
   { value: 20, suffix: ' años', label: 'De experiencia' },
   { value: 100, suffix: '%', label: 'Compromiso' },
-];
-
-const TRANSFORMACIONES_FALLBACK = [
-  {
-    name: 'María García',
-    periodo: '16 semanas',
-    resultado: '-18 kg',
-    antes: '/imagenes/inventadas/antes-1.svg',
-    despues: '/imagenes/inventadas/despues-1.svg',
-  },
-  {
-    name: 'Carlos Martínez',
-    periodo: '20 semanas',
-    resultado: '+12 kg músculo',
-    antes: '/imagenes/inventadas/antes-2.svg',
-    despues: '/imagenes/inventadas/despues-2.svg',
-  },
-  {
-    name: 'Laura Pérez',
-    periodo: '12 semanas',
-    resultado: '1er puesto',
-    antes: '/imagenes/inventadas/antes-3.svg',
-    despues: '/imagenes/inventadas/despues-3.svg',
-  },
 ];
 
 const TRAINING_FALLBACK: TrainingItem[] = [
@@ -131,59 +107,6 @@ function AnimatedCounter({ value, suffix }: { value: number; suffix: string }) {
   return <span ref={ref}>0{suffix}</span>;
 }
 
-// ─── Before/After Card ────────────────────────────────────────────────────────
-
-function BeforeAfterCard({ item }: { item: (typeof TRANSFORMACIONES_FALLBACK)[0] }) {
-  const [sliderPos, setSliderPos] = useState(50);
-  const cardRef = useRef<HTMLDivElement>(null);
-  const dragging = useRef(false);
-
-  const updateSlider = useCallback((clientX: number) => {
-    if (!cardRef.current) return;
-    const rect = cardRef.current.getBoundingClientRect();
-    const pct = Math.min(100, Math.max(0, ((clientX - rect.left) / rect.width) * 100));
-    setSliderPos(pct);
-  }, []);
-
-  return (
-    <div
-      ref={cardRef}
-      className="relative rounded-3xl overflow-hidden select-none before-after-slider w-full"
-      style={{ aspectRatio: '5/7' }}
-      onMouseDown={(e) => { dragging.current = true; updateSlider(e.clientX); }}
-      onMouseMove={(e) => { if (dragging.current) updateSlider(e.clientX); }}
-      onMouseUp={() => { dragging.current = false; }}
-      onMouseLeave={() => { dragging.current = false; }}
-      onTouchStart={(e) => { dragging.current = true; updateSlider(e.touches[0].clientX); }}
-      onTouchMove={(e) => { if (dragging.current) updateSlider(e.touches[0].clientX); }}
-      onTouchEnd={() => { dragging.current = false; }}
-    >
-      <Image src={item.despues} alt={`Después ${item.name}`} fill unoptimized className="object-cover" />
-      <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${100 - sliderPos}% 0 0)` }}>
-        <Image src={item.antes} alt={`Antes ${item.name}`} fill unoptimized className="object-cover" />
-        <div className="absolute top-4 left-4 bg-black/60 text-white text-xs font-bold px-3 py-1 rounded-full backdrop-blur-sm border border-white/20">
-          ANTES
-        </div>
-      </div>
-      <div className="absolute top-4 right-4 text-white text-xs font-bold px-3 py-1 rounded-full backdrop-blur-sm border border-[var(--color-accent-border)]"
-        style={{ background: 'rgba(45,106,79,0.75)' }}>
-        DESPUÉS
-      </div>
-      <div className="absolute top-0 bottom-0 w-0.5 bg-white/80 shadow-[0_0_8px_rgba(255,255,255,0.8)]"
-        style={{ left: `${sliderPos}%` }} />
-      <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-10 h-10 rounded-full bg-white shadow-lg flex items-center justify-center z-10"
-        style={{ left: `${sliderPos}%` }}>
-        <ChevronLeft className="w-3 h-3 text-gray-800 -mr-0.5" />
-        <ChevronRight className="w-3 h-3 text-gray-800 -ml-0.5" />
-      </div>
-      <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent pointer-events-none">
-        <p className="text-white font-bold text-sm">{item.name}</p>
-        <p className="text-[var(--color-accent-val)] text-xs">{item.resultado} · {item.periodo}</p>
-      </div>
-    </div>
-  );
-}
-
 // ─── Image Carousel ───────────────────────────────────────────────────────────
 
 const slideVariants = {
@@ -221,7 +144,6 @@ function ImageCarousel({
     setCurrent(n);
   }, [current, total]);
 
-  // Auto-advance
   useEffect(() => {
     const t = setInterval(next, 4000);
     return () => clearInterval(t);
@@ -248,13 +170,7 @@ function ImageCarousel({
               if (Math.abs(dx) > 40) dx < 0 ? next() : prev();
             }}
           >
-            <Image
-              src={item.src}
-              alt={item.title}
-              fill
-              unoptimized
-              className="object-cover"
-            />
+            <Image src={item.src} alt={item.title} fill unoptimized className="object-cover" />
             {item.type === 'video' && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="w-14 h-14 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20">
@@ -262,11 +178,9 @@ function ImageCarousel({
                 </div>
               </div>
             )}
-            {/* Overlay on hover / title */}
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent flex items-end p-4 pointer-events-none">
               <p className="text-white font-semibold text-sm">{item.title}</p>
             </div>
-            {/* Click to open lightbox */}
             <button
               className="absolute inset-0 w-full h-full"
               onClick={() => onOpen({ src: item.src, type: item.type, title: item.title })}
@@ -274,8 +188,6 @@ function ImageCarousel({
             />
           </motion.div>
         </AnimatePresence>
-
-        {/* Prev / Next arrows */}
         <button
           onClick={prev}
           className="absolute left-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/50 backdrop-blur-sm border border-white/20 flex items-center justify-center text-white hover:bg-[var(--color-accent-val)]/70 transition-colors"
@@ -289,8 +201,6 @@ function ImageCarousel({
           <ChevronRight className="w-4 h-4" />
         </button>
       </div>
-
-      {/* Dot indicators */}
       <div className="flex justify-center gap-1.5 pt-1">
         {items.map((_, i) => (
           <button
@@ -305,17 +215,134 @@ function ImageCarousel({
   );
 }
 
+// ─── Gallery Slider ───────────────────────────────────────────────────────────
+
+function GallerySlider({
+  items,
+  onOpen,
+}: {
+  items: GalleryItem[];
+  onOpen: (item: LightboxItem) => void;
+}) {
+  const [currentPage, setCurrentPage] = useState(0);
+  const [itemsPerPage, setItemsPerPage] = useState(3);
+  const touchStartX = useRef(0);
+
+  useEffect(() => {
+    const update = () => {
+      const newItems = window.innerWidth >= 640 ? 3 : 1;
+      setItemsPerPage(newItems);
+      setCurrentPage(0);
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  const totalPages = Math.ceil(items.length / itemsPerPage);
+  const gap = 16; // px
+
+  const prevPage = () => setCurrentPage((p) => Math.max(0, p - 1));
+  const nextPage = () => setCurrentPage((p) => Math.min(totalPages - 1, p + 1));
+
+  return (
+    <div className="relative">
+      {/* Arrows */}
+      {totalPages > 1 && (
+        <>
+          <button
+            onClick={prevPage}
+            disabled={currentPage === 0}
+            className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-6 z-10 text-[var(--color-accent-val)] disabled:opacity-20 hover:scale-110 transition-transform"
+            aria-label="Anterior"
+          >
+            <ChevronLeft className="w-8 h-8" />
+          </button>
+          <button
+            onClick={nextPage}
+            disabled={currentPage === totalPages - 1}
+            className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-6 z-10 text-[var(--color-accent-val)] disabled:opacity-20 hover:scale-110 transition-transform"
+            aria-label="Siguiente"
+          >
+            <ChevronRight className="w-8 h-8" />
+          </button>
+        </>
+      )}
+
+      {/* Slider viewport */}
+      <div className="overflow-hidden rounded-2xl">
+        <div
+          className="flex"
+          style={{
+            transform: `translateX(calc(-${currentPage * 100}% - ${currentPage * gap}px))`,
+            transition: 'transform 300ms ease',
+            gap: `${gap}px`,
+          }}
+          onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; }}
+          onTouchEnd={(e) => {
+            const dx = e.changedTouches[0].clientX - touchStartX.current;
+            if (Math.abs(dx) > 50) dx < 0 ? nextPage() : prevPage();
+          }}
+        >
+          {items.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => onOpen({ src: item.url, type: item.type })}
+              className="group relative shrink-0 h-[280px] sm:h-[400px] rounded-2xl overflow-hidden border border-border hover:border-[var(--color-accent-border)] transition-colors duration-300"
+              style={{ width: `calc((100% - ${(itemsPerPage - 1) * gap}px) / ${itemsPerPage})` }}
+              aria-label="Ver imagen"
+            >
+              {item.type === 'image' ? (
+                <img
+                  src={item.url}
+                  alt=""
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                  loading="lazy"
+                />
+              ) : (
+                <div className="w-full h-full bg-black/50 flex items-center justify-center">
+                  <div className="w-14 h-14 rounded-full bg-black/60 backdrop-blur-sm border border-white/20 flex items-center justify-center transition-transform duration-300 group-hover:scale-110">
+                    <Play className="w-6 h-6 text-white ml-0.5" fill="white" />
+                  </div>
+                </div>
+              )}
+              <div className="absolute inset-0 bg-[var(--color-accent-val)]/0 group-hover:bg-[var(--color-accent-val)]/5 transition-colors duration-300 pointer-events-none" />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Dots */}
+      {totalPages > 1 && (
+        <div className="flex justify-center gap-2 mt-5">
+          {Array.from({ length: totalPages }).map((_, i) => (
+            <button
+              key={i}
+              onClick={() => setCurrentPage(i)}
+              className={`h-2 rounded-full transition-all duration-300 ${i === currentPage ? 'w-6 bg-[var(--color-accent-val)]' : 'w-2 bg-white/20 hover:bg-white/40'}`}
+              aria-label={`Página ${i + 1}`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function GaleriaClient({ initialResources, galeriaContent }: { initialResources: CloudinaryResource[]; galeriaContent?: GaleriaContent }) {
+export default function GaleriaClient({
+  initialResources,
+  galeriaContent,
+  galleryItems,
+}: {
+  initialResources: CloudinaryResource[];
+  galeriaContent?: GaleriaContent;
+  galleryItems: GalleryItem[];
+}) {
   const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
 
   const STATS = galeriaContent?.stats ?? STATS_FALLBACK;
-  const TRANSFORMACIONES = (galeriaContent?.transformaciones ?? TRANSFORMACIONES_FALLBACK).map((t, i) => ({
-    ...t,
-    antes: `/imagenes/inventadas/antes-${i + 1}.svg`,
-    despues: `/imagenes/inventadas/despues-${i + 1}.svg`,
-  }));
   const RESULTADOS = (galeriaContent?.resultados ?? RESULTADOS_FALLBACK).map((r, i) => ({
     ...r,
     image: `/imagenes/inventadas/resultado-${i + 1}.svg`,
@@ -329,10 +356,11 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
       }))
     : TRAINING_FALLBACK;
 
-  // Split items into 2 groups for the two carousels
   const mid = Math.ceil(trainingItems.length / 2);
   const carousel1 = trainingItems.slice(0, mid);
   const carousel2 = trainingItems.slice(mid);
+
+  const hasGallery = galleryItems.length > 0;
 
   return (
     <div className="space-y-0">
@@ -347,9 +375,7 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
           >
-            <span className="eyebrow">
-              Nuestra Galería
-            </span>
+            <span className="eyebrow">Nuestra Galería</span>
             <h1 className="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mt-3 mb-6">
               {galeriaContent?.heroTitle ?? 'Resultados Reales'}
             </h1>
@@ -358,7 +384,6 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
               {galeriaContent?.heroSubtitle ?? 'Cada imagen cuenta una historia de esfuerzo, constancia y transformación.'}
             </p>
           </motion.div>
-
           <div className="grid grid-cols-3 gap-4 md:gap-8 max-w-2xl mx-auto mt-12">
             {STATS.map((stat, i) => (
               <motion.div
@@ -379,47 +404,7 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
       </section>
 
 
-      {/* ═══ SECCIÓN 2 · TRANSFORMACIONES ══════════════════════════════ */}
-      <section className="py-24 relative overflow-hidden">
-
-        <div className="container mx-auto px-4 relative z-10">
-          <motion.div
-            className="text-center mb-16"
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.7 }}
-          >
-            <span className="eyebrow">
-              Antes &amp; Después
-            </span>
-            <h2 className="text-4xl md:text-5xl font-black text-[var(--color-text-primary)] mb-4">Transformaciones</h2>
-            <div className="line-accent mx-auto mb-4" />
-            <p className="text-[var(--color-text-secondary)] max-w-xl mx-auto">
-              Arrastra el slider sobre cada imagen para ver el cambio.
-            </p>
-          </motion.div>
-
-          {/* Centered cards — flex wrap on mobile, single row centered on desktop */}
-          <div className="flex flex-wrap justify-center gap-6">
-            {TRANSFORMACIONES.map((item, i) => (
-              <motion.div
-                key={item.name}
-                className="w-full max-w-[300px]"
-                initial={{ opacity: 0, x: i % 2 === 0 ? -60 : 60 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true, margin: '-80px' }}
-                transition={{ duration: 0.7, delay: i * 0.15 }}
-              >
-                <BeforeAfterCard item={item} />
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-
-      {/* ═══ SECCIÓN 3 · ENTRENAMIENTOS (2 Carruseles) ══════════════════ */}
+      {/* ═══ SECCIÓN 2 · ENTRENAMIENTOS (2 Carruseles) ══════════════════ */}
       <section className="py-24 relative">
         <div className="absolute inset-0 bg-[var(--color-bg-surface)]/40" />
         <div className="container mx-auto px-4 relative">
@@ -430,16 +415,13 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
             viewport={{ once: true }}
             transition={{ duration: 0.7 }}
           >
-            <span className="eyebrow">
-              En Acción
-            </span>
+            <span className="eyebrow">En Acción</span>
             <h2 className="text-4xl md:text-5xl font-black text-[var(--color-text-primary)] mb-4">Entrenamientos</h2>
             <div className="line-accent mx-auto mb-4" />
             <p className="text-[var(--color-text-secondary)] max-w-xl mx-auto">
               Imágenes de las sesiones. Pasan automáticamente o navega con las flechas. Haz click para ampliar.
             </p>
           </motion.div>
-
           <motion.div
             className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto"
             initial={{ opacity: 0, y: 30 }}
@@ -447,18 +429,14 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
             viewport={{ once: true }}
             transition={{ duration: 0.6 }}
           >
-            {carousel1.length > 0 && (
-              <ImageCarousel items={carousel1} onOpen={setLightbox} />
-            )}
-            {carousel2.length > 0 && (
-              <ImageCarousel items={carousel2} onOpen={setLightbox} />
-            )}
+            {carousel1.length > 0 && <ImageCarousel items={carousel1} onOpen={setLightbox} />}
+            {carousel2.length > 0 && <ImageCarousel items={carousel2} onOpen={setLightbox} />}
           </motion.div>
         </div>
       </section>
 
 
-      {/* ═══ SECCIÓN 4 · RESULTADOS (Flip Cards) ═══════════════════════ */}
+      {/* ═══ SECCIÓN 3 · RESULTADOS (Flip Cards) ═══════════════════════ */}
       <section className="py-24">
         <div className="container mx-auto px-4">
           <motion.div
@@ -468,16 +446,13 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
             viewport={{ once: true }}
             transition={{ duration: 0.7 }}
           >
-            <span className="eyebrow">
-              Historias Reales
-            </span>
+            <span className="eyebrow">Historias Reales</span>
             <h2 className="text-4xl md:text-5xl font-black text-[var(--color-text-primary)] mb-4">Resultados</h2>
             <div className="line-accent mx-auto mb-4" />
             <p className="text-[var(--color-text-secondary)] max-w-xl mx-auto">
               Pasa el cursor sobre cada tarjeta para descubrir la historia detrás del resultado.
             </p>
           </motion.div>
-
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {RESULTADOS.map((r, i) => (
               <motion.div
@@ -489,7 +464,6 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
                 transition={{ duration: 0.6, delay: i * 0.12 }}
               >
                 <div className="flip-card-inner w-full h-full">
-                  {/* FRONT */}
                   <div className="flip-card-front glass-card flex flex-col items-center justify-center p-6 text-center">
                     <div className="w-16 h-16 rounded-2xl overflow-hidden mb-4 border border-[var(--color-accent-border)]">
                       <Image src={r.image} alt={r.name} width={64} height={64} unoptimized className="w-full h-full object-cover" />
@@ -502,8 +476,6 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
                     </span>
                     <p className="text-white/30 text-xs mt-4">Pasa el cursor →</p>
                   </div>
-
-                  {/* BACK */}
                   <div className="flip-card-back flex flex-col justify-between p-6"
                     style={{ background: 'linear-gradient(135deg, rgba(13,13,13,0.95) 0%, rgba(8,8,8,0.98) 100%)', border: '1px solid var(--color-accent-border)' }}>
                     <Quote className="w-8 h-8 text-[var(--color-accent-val)]/60 mb-3" />
@@ -519,6 +491,29 @@ export default function GaleriaClient({ initialResources, galeriaContent }: { in
           </div>
         </div>
       </section>
+
+
+      {/* ═══ SECCIÓN 4 · GALERÍA (gallery_items activos) ════════════════ */}
+      {hasGallery && (
+        <section className="py-24 relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[var(--color-accent-dim)]/10 to-transparent pointer-events-none" />
+          <div className="container mx-auto px-4 relative">
+            <motion.div
+              className="text-center mb-16"
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.7 }}
+            >
+              <span className="eyebrow">Focus Club</span>
+              <h2 className="text-4xl md:text-5xl font-black text-[var(--color-text-primary)] mb-4">Galería</h2>
+              <div className="line-accent mx-auto" />
+            </motion.div>
+
+            <GallerySlider items={galleryItems} onOpen={setLightbox} />
+          </div>
+        </section>
+      )}
 
 
       {/* ═══ LIGHTBOX ═══════════════════════════════════════════════════ */}

@@ -60,9 +60,10 @@ export interface MediaPickerProps {
     onClose: () => void;
     onSelect: (file: MediaFile) => void;
     filterType?: 'image' | 'video';
+    uploadFolderId?: string | null;
 }
 
-export function MediaPicker({ open, onClose, onSelect, filterType }: MediaPickerProps) {
+export function MediaPicker({ open, onClose, onSelect, filterType, uploadFolderId }: MediaPickerProps) {
     const {
         folders,
         files,
@@ -97,7 +98,9 @@ export function MediaPicker({ open, onClose, onSelect, filterType }: MediaPicker
     const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const picked = Array.from(e.target.files ?? []);
         if (picked.length) {
-            const folderId = selectedFolderId === 'ALL' ? null : selectedFolderId;
+            const folderId = uploadFolderId !== undefined
+                ? uploadFolderId
+                : (selectedFolderId === 'ALL' ? null : selectedFolderId);
             await uploadMultipleFiles(picked, folderId);
             await fetchFiles(selectedFolderId);
         }

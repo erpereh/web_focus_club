@@ -244,3 +244,18 @@ export interface UploadProgress {
     progress: number;
     status: 'uploading' | 'done' | 'error';
 }
+
+// ============================================
+// GALLERY ITEMS
+// ============================================
+
+export interface GalleryItem {
+    id: string;
+    mediaFileId: string;
+    url: string;
+    type: 'image' | 'video';
+    title: string;
+    order: number;
+    active: boolean;
+    createdAt: string;
+}

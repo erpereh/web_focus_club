@@ -36,6 +36,7 @@ import type {
     BonoHistorialEntry,
     MediaFolder,
     MediaFile,
+    GalleryItem,
 } from '@/types';
 
 // ============================================
@@ -759,4 +760,84 @@ export async function updateMediaFile(id: string, data: Partial<MediaFile>): Pro
 
 export async function deleteMediaFileRecord(id: string): Promise<void> {
     await deleteDoc(doc(db, 'media_files', id));
+}
+
+// ============================================
+// GALLERY ITEMS
+// ============================================
+
+function mapGalleryItem(d: { id: string; data: () => Record<string, unknown> }): GalleryItem {
+    const data = d.data();
+    return {
+        id: d.id,
+        mediaFileId: data.mediaFileId as string,
+        url: data.url as string,
+        type: data.type as 'image' | 'video',
+        title: (data.title as string) ?? '',
+        order: (data.order as number) ?? 0,
+        active: (data.active as boolean) ?? true,
+        createdAt: (data.createdAt as { toDate?: () => Date })?.toDate?.().toISOString?.() ?? (data.createdAt as string) ?? new Date().toISOString(),
+    };
+}
+
+export async function getGalleryItems(onlyActive = false): Promise<GalleryItem[]> {
+    const constraints = onlyActive
+        ? [where('active', '==', true), orderBy('order', 'asc')]
+        : [orderBy('order', 'asc')];
+    const snap = await getDocs(query(collection(db, 'gallery_items'), ...constraints));
+    return snap.docs.map(mapGalleryItem);
+}
+
+export async function addGalleryItem(data: Omit<GalleryItem, 'id'>): Promise<string> {
+    const ref = await addDoc(collection(db, 'gallery_items'), {
+        ...data,
+        createdAt: Timestamp.now(),
+    });
+    return ref.id;
+}
+
+export async function updateGalleryItem(id: string, data: Partial<Omit<GalleryItem, 'id'>>): Promise<void> {
+    await updateDoc(doc(db, 'gallery_items', id), data);
+}
+
+export async function deleteGalleryItem(id: string): Promise<void> {
+    await deleteDoc(doc(db, 'gallery_items', id));
+}
+
+export async function reorderGalleryItems(items: { id: string; order: number }[]): Promise<void> {
+    const batch = writeBatch(db);
+    for (const { id, order } of items) {
+        batch.update(doc(db, 'gallery_items', id), { order });
+    }
+    await batch.commit();
+}
+
+export async function getActiveGalleryItemsByDate(): Promise<GalleryItem[]> {
+    const snap = await getDocs(
+        query(collection(db, 'gallery_items'), where('active', '==', true))
+    );
+    return snap.docs
+        .map(mapGalleryItem)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+// ============================================
+// SYSTEM CONFIG
+// ============================================
+
+export async function getOrCreateGalleryFolder(): Promise<{ folderId: string }> {
+    const configRef = doc(db, 'system_config', 'gallery_folder');
+    const configSnap = await getDoc(configRef);
+    if (configSnap.exists()) {
+        return { folderId: configSnap.data().folderId as string };
+    }
+    // Create the media folder doc
+    const folderRef = await addDoc(collection(db, 'media_folders'), {
+        name: 'Galería Pública',
+        parentId: null,
+        createdAt: Timestamp.now(),
+    });
+    // Store the reference in system_config
+    await setDoc(configRef, { folderId: folderRef.id });
+    return { folderId: folderRef.id };
 }

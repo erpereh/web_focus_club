@@ -13,6 +13,7 @@ import {
     addMediaFile,
     updateMediaFile,
     deleteMediaFileRecord,
+    getOrCreateGalleryFolder,
 } from '@/lib/firestore';
 import type { MediaFolder, MediaFile, UploadProgress } from '@/types';
 import { v4 as uuidv4 } from 'uuid';
@@ -54,14 +55,19 @@ export function useMediaLibrary() {
     const [files, setFiles] = useState<MediaFile[]>([]);
     const [loading, setLoading] = useState(false);
     const [uploadQueue, setUploadQueue] = useState<UploadProgress[]>([]);
+    const [galleryFolderId, setGalleryFolderId] = useState<string | null>(null);
 
     // --- FETCH ---
 
     const fetchFolders = useCallback(async () => {
         setLoading(true);
         try {
-            const data = await getMediaFolders();
+            const [data, { folderId }] = await Promise.all([
+                getMediaFolders(),
+                getOrCreateGalleryFolder(),
+            ]);
             setFolders(data);
+            setGalleryFolderId(folderId);
         } finally {
             setLoading(false);
         }
@@ -106,9 +112,12 @@ export function useMediaLibrary() {
     ): Promise<MediaFile> => {
         const ext = file.name.split('.').pop() ?? 'bin';
         const uniqueName = `${uuidv4()}.${ext}`;
-        const storagePath = folderId
-            ? `media/${folderId}/${uniqueName}`
-            : `media/root/${uniqueName}`;
+        const storagePath =
+            folderId && folderId === galleryFolderId
+                ? `public/imagenes/galeria/${uniqueName}`
+                : folderId
+                    ? `media/${folderId}/${uniqueName}`
+                    : `media/root/${uniqueName}`;
 
         const storageRef = ref(storage, storagePath);
         const type: 'image' | 'video' = file.type.startsWith('video/') ? 'video' : 'image';
@@ -214,6 +223,7 @@ export function useMediaLibrary() {
         loading,
         uploadQueue,
         setUploadQueue,
+        galleryFolderId,
         fetchFolders,
         fetchFiles,
         createFolder: handleCreateFolder,

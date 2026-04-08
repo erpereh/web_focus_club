@@ -109,6 +109,18 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ─── GALLERY ITEMS ───
+    match /gallery_items/{itemId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── SYSTEM CONFIG ───
+    match /system_config/{docId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
+
     // ─── FUNCIONES HELPER ───
     function isAdmin() {
       return request.auth != null &&

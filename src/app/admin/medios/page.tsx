@@ -22,6 +22,7 @@ import {
     Menu,
     Check,
     FileImage,
+    Lock,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -123,6 +124,7 @@ function FolderTreeItem({
     renamingId,
     onRenameConfirm,
     onRenameCancel,
+    isProtected,
 }: {
     folder: MediaFolder;
     depth: number;
@@ -134,6 +136,7 @@ function FolderTreeItem({
     renamingId: string | null;
     onRenameConfirm: (id: string, name: string) => void;
     onRenameCancel: () => void;
+    isProtected?: boolean;
 }) {
     const [menuOpen, setMenuOpen] = useState(false);
     const children = allFolders.filter((f) => f.parentId === folder.id);
@@ -170,7 +173,8 @@ function FolderTreeItem({
                     )}
                 </button>
 
-                {/* 3-dot menu */}
+                {/* 3-dot menu (hidden for protected folders) */}
+                {!isProtected && (
                 <div className="relative shrink-0">
                     <button
                         onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
@@ -198,6 +202,7 @@ function FolderTreeItem({
                         </>
                     )}
                 </div>
+                )}
             </div>
 
             {/* Child folders */}
@@ -395,6 +400,7 @@ export default function MediaPage() {
         files,
         loading,
         uploadQueue,
+        galleryFolderId,
         fetchFolders,
         fetchFiles,
         createFolder,
@@ -592,8 +598,34 @@ export default function MediaPage() {
 
                     {/* Folder tree */}
                     <div className="mt-1">
+                        {/* Gallery folder — always first, protected */}
+                        {galleryFolderId && (() => {
+                            const galleryFolder = folders.find((f) => f.id === galleryFolderId);
+                            if (!galleryFolder) return null;
+                            return (
+                                <div key={galleryFolder.id} className="mb-1">
+                                    <div
+                                        className={cn(
+                                            'flex items-center gap-1.5 rounded-lg transition-all text-sm cursor-pointer px-3 py-1.5',
+                                            selectedFolderId === galleryFolder.id
+                                                ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)]'
+                                                : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
+                                        )}
+                                        onClick={() => handleSelectFolder(galleryFolder.id)}
+                                    >
+                                        <Lock className="w-3.5 h-3.5 shrink-0" />
+                                        <span className="flex-1 truncate">{galleryFolder.name}</span>
+                                        <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                                            WEB
+                                        </span>
+                                    </div>
+                                </div>
+                            );
+                        })()}
+
+                        {/* Regular folders */}
                         {folders
-                            .filter((f) => f.parentId === null)
+                            .filter((f) => f.parentId === null && f.id !== galleryFolderId)
                             .map((folder) => (
                                 <FolderTreeItem
                                     key={folder.id}
