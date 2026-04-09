@@ -2,17 +2,10 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-
-    // ─── MEDIA LIBRARY ───
-    // Solo usuarios autenticados pueden leer archivos de media
-    match /media/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-
-    // ─── DEFAULT: denegar todo lo demás ───
+    // CMS and media uploads use persistent Storage URLs.
+    // Keep access simple: any authenticated session can read and write.
     match /{allPaths=**} {
-      allow read, write: if false;
+      allow read, write: if request.auth != null;
     }
   }
 }

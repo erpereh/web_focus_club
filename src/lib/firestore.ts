@@ -17,7 +17,9 @@ import {
     arrayUnion,
     arrayRemove,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { db, storage } from './firebase';
+import { v4 as uuidv4 } from 'uuid';
 import type {
     UserProfile,
     Service,
@@ -143,6 +145,33 @@ export const DEFAULT_GALERIA_CONFIG: GaleriaContent = {
     galleryEyebrow: 'FOCUS CLUB',
     galleryTitle: 'Galeria',
     gallerySubtitle: '',
+};
+
+const DEFAULT_HOME_FIELDS: Pick<
+    CMSContent,
+    | 'heroBackgroundUrl'
+    | 'heroBackgroundType'
+    | 'aboutEyebrow'
+    | 'aboutBadgeOneIcon'
+    | 'aboutBadgeOneText'
+    | 'aboutBadgeTwoIcon'
+    | 'aboutBadgeTwoText'
+    | 'aboutButtonText'
+    | 'aboutButtonLink'
+    | 'aboutCardName'
+    | 'aboutCardRole'
+> = {
+    heroBackgroundUrl: '/imagenes/hero.mp4',
+    heroBackgroundType: 'video',
+    aboutEyebrow: 'Conoce a tu entrenadora',
+    aboutBadgeOneIcon: 'Award',
+    aboutBadgeOneText: 'Certificacion Internacional',
+    aboutBadgeTwoIcon: 'Heart',
+    aboutBadgeTwoText: 'Atencion Personalizada',
+    aboutButtonText: 'Leer mas',
+    aboutButtonLink: '/sandra',
+    aboutCardName: 'Sandra Andujar',
+    aboutCardRole: 'Fundadora & Coach Principal',
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -283,6 +312,23 @@ export function normalizeGaleriaConfig(rawGaleria: unknown): GaleriaContent {
         galleryTitle: asNonEmptyString(raw.galleryTitle, DEFAULT_GALERIA_CONFIG.galleryTitle ?? ''),
         gallerySubtitle: asNonEmptyString(raw.gallerySubtitle, DEFAULT_GALERIA_CONFIG.gallerySubtitle ?? ''),
         transformaciones: Array.isArray(raw.transformaciones) ? (raw.transformaciones as { name: string; periodo: string; resultado: string }[]) : [],
+    };
+}
+
+function normalizeHomeFields(raw: CMSContent): CMSContent {
+    return {
+        ...raw,
+        heroBackgroundUrl: asNonEmptyString(raw.heroBackgroundUrl, DEFAULT_HOME_FIELDS.heroBackgroundUrl ?? '/imagenes/hero.mp4'),
+        heroBackgroundType: raw.heroBackgroundType === 'image' ? 'image' : 'video',
+        aboutEyebrow: asNonEmptyString(raw.aboutEyebrow, DEFAULT_HOME_FIELDS.aboutEyebrow ?? 'Conoce a tu entrenadora'),
+        aboutBadgeOneIcon: asNonEmptyString(raw.aboutBadgeOneIcon, DEFAULT_HOME_FIELDS.aboutBadgeOneIcon ?? 'Award'),
+        aboutBadgeOneText: asNonEmptyString(raw.aboutBadgeOneText, DEFAULT_HOME_FIELDS.aboutBadgeOneText ?? 'Certificacion Internacional'),
+        aboutBadgeTwoIcon: asNonEmptyString(raw.aboutBadgeTwoIcon, DEFAULT_HOME_FIELDS.aboutBadgeTwoIcon ?? 'Heart'),
+        aboutBadgeTwoText: asNonEmptyString(raw.aboutBadgeTwoText, DEFAULT_HOME_FIELDS.aboutBadgeTwoText ?? 'Atencion Personalizada'),
+        aboutButtonText: asNonEmptyString(raw.aboutButtonText, DEFAULT_HOME_FIELDS.aboutButtonText ?? 'Leer mas'),
+        aboutButtonLink: asNonEmptyString(raw.aboutButtonLink, DEFAULT_HOME_FIELDS.aboutButtonLink ?? '/sandra'),
+        aboutCardName: asNonEmptyString(raw.aboutCardName, DEFAULT_HOME_FIELDS.aboutCardName ?? 'Sandra Andujar'),
+        aboutCardRole: asNonEmptyString(raw.aboutCardRole, DEFAULT_HOME_FIELDS.aboutCardRole ?? 'Fundadora & Coach Principal'),
     };
 }
 
@@ -454,11 +500,12 @@ export async function getSiteContent(): Promise<CMSContent | null> {
     const snap = await getDoc(doc(db, 'site_content', SITE_CONTENT_DOC));
     if (!snap.exists()) return null;
     const data = snap.data() as CMSContent & { centro?: unknown; galeria?: unknown };
-    return {
+    const normalized = {
         ...data,
         centro: normalizeCentroConfig(data.centro),
         galeria: normalizeGaleriaConfig(data.galeria),
     } as CMSContent;
+    return normalizeHomeFields(normalized);
 }
 
 export async function updateSiteContent(data: Partial<CMSContent>): Promise<void> {
@@ -1048,6 +1095,100 @@ export async function deleteMediaFileRecord(id: string): Promise<void> {
     await deleteDoc(doc(db, 'media_files', id));
 }
 
+export async function getMediaFileById(id: string): Promise<MediaFile | null> {
+    const snap = await getDoc(doc(db, 'media_files', id));
+    if (!snap.exists()) return null;
+    const data = snap.data();
+    return {
+        id: snap.id,
+        name: data.name,
+        url: data.url,
+        storagePath: data.storagePath,
+        folderId: data.folderId ?? null,
+        type: data.type,
+        size: data.size,
+        createdAt: data.createdAt?.toDate?.().toISOString?.() ?? data.createdAt ?? new Date().toISOString(),
+    };
+}
+
+export async function getMediaFileByUrl(url: string): Promise<MediaFile | null> {
+    const trimmed = url.trim();
+    if (!trimmed) return null;
+    const snap = await getDocs(query(collection(db, 'media_files'), where('url', '==', trimmed)));
+    if (snap.empty) return null;
+    const first = snap.docs[0];
+    const data = first.data();
+    return {
+        id: first.id,
+        name: data.name,
+        url: data.url,
+        storagePath: data.storagePath,
+        folderId: data.folderId ?? null,
+        type: data.type,
+        size: data.size,
+        createdAt: data.createdAt?.toDate?.().toISOString?.() ?? data.createdAt ?? new Date().toISOString(),
+    };
+}
+
+function getExtensionFromPath(path: string, fallbackType: 'image' | 'video'): string {
+    const fromPath = path.split('.').pop()?.toLowerCase();
+    if (fromPath && fromPath.length <= 5) return fromPath;
+    return fallbackType === 'video' ? 'mp4' : 'jpg';
+}
+
+export async function moveMediaAsset(
+    mediaFile: MediaFile,
+    destinationFolderId: string | null,
+    destinationBasePath?: string
+): Promise<MediaFile> {
+    const ext = getExtensionFromPath(mediaFile.storagePath, mediaFile.type);
+    const newStoragePath = destinationBasePath
+        ? `${destinationBasePath}/${uuidv4()}.${ext}`
+        : `media/root/${uuidv4()}.${ext}`;
+
+    if (mediaFile.storagePath === newStoragePath && mediaFile.folderId === destinationFolderId) {
+        return mediaFile;
+    }
+
+    const oldRef = ref(storage, mediaFile.storagePath);
+    const oldUrl = await getDownloadURL(oldRef);
+    const response = await fetch(oldUrl);
+    if (!response.ok) {
+        throw new Error(`No se pudo descargar el asset origen: ${mediaFile.name}`);
+    }
+    const blob = await response.blob();
+    const newRef = ref(storage, newStoragePath);
+    await uploadBytes(newRef, blob, {
+        contentType: blob.type || (mediaFile.type === 'video' ? 'video/mp4' : 'image/jpeg'),
+    });
+    const newUrl = await getDownloadURL(newRef);
+
+    try {
+        await deleteObject(oldRef);
+    } catch {
+        // If the old object is already gone, keep metadata migration.
+    }
+
+    await updateMediaFile(mediaFile.id, {
+        storagePath: newStoragePath,
+        url: newUrl,
+        folderId: destinationFolderId,
+    });
+
+    return {
+        ...mediaFile,
+        storagePath: newStoragePath,
+        url: newUrl,
+        folderId: destinationFolderId,
+    };
+}
+
+export async function moveMediaAssetToGeneralByUrl(url: string): Promise<MediaFile | null> {
+    const media = await getMediaFileByUrl(url);
+    if (!media) return null;
+    return moveMediaAsset(media, null);
+}
+
 // ============================================
 // GALLERY ITEMS
 // ============================================
@@ -1177,6 +1318,21 @@ export async function getOrCreateCentroFolder(): Promise<{ folderId: string }> {
     }
     const folderRef = await addDoc(collection(db, 'media_folders'), {
         name: 'El Centro',
+        parentId: null,
+        createdAt: Timestamp.now(),
+    });
+    await setDoc(configRef, { folderId: folderRef.id });
+    return { folderId: folderRef.id };
+}
+
+export async function getOrCreateHomeFolder(): Promise<{ folderId: string }> {
+    const configRef = doc(db, 'system_config', 'home_folder');
+    const configSnap = await getDoc(configRef);
+    if (configSnap.exists()) {
+        return { folderId: configSnap.data().folderId as string };
+    }
+    const folderRef = await addDoc(collection(db, 'media_folders'), {
+        name: 'Home',
         parentId: null,
         createdAt: Timestamp.now(),
     });

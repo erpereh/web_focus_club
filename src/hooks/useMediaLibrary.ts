@@ -13,10 +13,6 @@ import {
     addMediaFile,
     updateMediaFile,
     deleteMediaFileRecord,
-    getOrCreateGalleryFolder,
-    getOrCreateBrandingFolder,
-    getOrCreateSandraFolder,
-    getOrCreateCentroFolder,
 } from '@/lib/firestore';
 import type { MediaFolder, MediaFile, UploadProgress } from '@/types';
 import { v4 as uuidv4 } from 'uuid';
@@ -58,28 +54,14 @@ export function useMediaLibrary() {
     const [files, setFiles] = useState<MediaFile[]>([]);
     const [loading, setLoading] = useState(false);
     const [uploadQueue, setUploadQueue] = useState<UploadProgress[]>([]);
-    const [galleryFolderId, setGalleryFolderId] = useState<string | null>(null);
-    const [brandingFolderId, setBrandingFolderId] = useState<string | null>(null);
-    const [sandraFolderId, setSandraFolderId] = useState<string | null>(null);
-    const [centroFolderId, setCentroFolderId] = useState<string | null>(null);
 
     // --- FETCH ---
 
     const fetchFolders = useCallback(async () => {
         setLoading(true);
         try {
-            const [data, galleryResult, brandingResult, sandraResult, centroResult] = await Promise.all([
-                getMediaFolders(),
-                getOrCreateGalleryFolder(),
-                getOrCreateBrandingFolder(),
-                getOrCreateSandraFolder(),
-                getOrCreateCentroFolder(),
-            ]);
+            const data = await getMediaFolders();
             setFolders(data);
-            setGalleryFolderId(galleryResult.folderId);
-            setBrandingFolderId(brandingResult.folderId);
-            setSandraFolderId(sandraResult.folderId);
-            setCentroFolderId(centroResult.folderId);
         } finally {
             setLoading(false);
         }
@@ -124,18 +106,8 @@ export function useMediaLibrary() {
     ): Promise<MediaFile> => {
         const ext = file.name.split('.').pop() ?? 'bin';
         const uniqueName = `${uuidv4()}.${ext}`;
-        const storagePath =
-            folderId && folderId === galleryFolderId
-                ? `public/imagenes/galeria/${uniqueName}`
-                : folderId && folderId === brandingFolderId
-                    ? `public/imagenes/branding/${uniqueName}`
-                    : folderId && folderId === sandraFolderId
-                        ? `public/imagenes/sandra/${uniqueName}`
-                        : folderId && folderId === centroFolderId
-                            ? `public/imagenes/el_centro/${uniqueName}`
-                        : folderId
-                        ? `media/${folderId}/${uniqueName}`
-                        : `media/root/${uniqueName}`;
+        // Keep the storage path stable regardless of UI folder moves.
+        const storagePath = `media/root/${uniqueName}`;
 
         const storageRef = ref(storage, storagePath);
         const type: 'image' | 'video' = file.type.startsWith('video/') ? 'video' : 'image';
@@ -174,8 +146,7 @@ export function useMediaLibrary() {
         fileList: File[],
         folderId: string | null
     ): Promise<void> => {
-        const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/quicktime'];
-        const validFiles = fileList.filter((f) => ACCEPTED.includes(f.type));
+        const validFiles = fileList.filter((f) => f.type.startsWith('image/') || f.type.startsWith('video/'));
         if (validFiles.length === 0) return;
 
         setUploadQueue(
@@ -241,10 +212,6 @@ export function useMediaLibrary() {
         loading,
         uploadQueue,
         setUploadQueue,
-        galleryFolderId,
-        brandingFolderId,
-        sandraFolderId,
-        centroFolderId,
         fetchFolders,
         fetchFiles,
         createFolder: handleCreateFolder,

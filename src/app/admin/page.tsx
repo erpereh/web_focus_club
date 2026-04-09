@@ -130,6 +130,7 @@ import {
   expireOverdueBonos,
   getBrandingConfig,
   updateBrandingConfig,
+  getMediaFileByUrl,
 } from '@/lib/firestore';
 import { cn } from '@/lib/utils';
 import type { UserProfile } from '@/types';
@@ -732,7 +733,7 @@ export default function AdminPage() {
   } | null>(null);
 
   // Branding / Logo
-  const { galleryFolderId, brandingFolderId, sandraFolderId, centroFolderId, fetchFolders: fetchMediaFolders } = useMediaLibrary();
+  const { fetchFolders: fetchMediaFolders } = useMediaLibrary();
   const [brandingConfig, setBrandingConfig] = useState<BrandingConfig | null>(null);
   const [logoPickerOpen, setLogoPickerOpen] = useState(false);
   const [sandraPickerOpen, setSandraPickerOpen] = useState(false);
@@ -740,6 +741,8 @@ export default function AdminPage() {
   const [centroPickerIndex, setCentroPickerIndex] = useState<number | null>(null);
   const [galeriaTrainingPickerOpen, setGaleriaTrainingPickerOpen] = useState(false);
   const [galeriaTrainingPickerIndex, setGaleriaTrainingPickerIndex] = useState<number | null>(null);
+  const [heroBackgroundPickerOpen, setHeroBackgroundPickerOpen] = useState(false);
+  const [aboutHomePickerOpen, setAboutHomePickerOpen] = useState(false);
 
   // Autenticación admin
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
@@ -2826,7 +2829,7 @@ export default function AdminPage() {
                 <MediaPicker
                   open={sandraPickerOpen}
                   onClose={() => setSandraPickerOpen(false)}
-                  onSelect={(file) => {
+                  onSelect={async (file) => {
                     setEditedContent((prev) =>
                       prev?.sandra
                         ? { ...prev, sandra: { ...prev.sandra, image: file.url } } as CMSContent
@@ -2834,7 +2837,6 @@ export default function AdminPage() {
                     );
                     setSandraPickerOpen(false);
                   }}
-                  uploadFolderId={sandraFolderId}
                   filterType="image"
                 />
               )}
@@ -3797,7 +3799,35 @@ export default function AdminPage() {
                           />
                         </div>
 
-                        {/* CTA Principal */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Tipo de fondo</label>
+                            <select
+                              value={editedContent?.heroBackgroundType ?? 'video'}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, heroBackgroundType: e.target.value === 'image' ? 'image' : 'video' } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            >
+                              <option value="video">Video</option>
+                              <option value="image">Imagen</option>
+                            </select>
+                          </div>
+                          <div className="sm:col-span-2">
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">URL fondo hero</label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={editedContent?.heroBackgroundUrl ?? ''}
+                                onChange={(e) => setEditedContent(prev => prev ? { ...prev, heroBackgroundUrl: e.target.value } as CMSContent : prev)}
+                                className="flex-1 px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                                placeholder="https://... o /imagenes/hero.mp4"
+                              />
+                              <PremiumButton variant="outline" size="sm" onClick={() => setHeroBackgroundPickerOpen(true)}>
+                                Elegir
+                              </PremiumButton>
+                            </div>
+                          </div>
+                        </div>
+
                         <div className="grid grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm text-[var(--color-text-secondary)] mb-2">CTA Principal (texto)</label>
@@ -3887,6 +3917,88 @@ export default function AdminPage() {
                         </div>
                       </div>
                     </GlassCard>
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Bloque About (Home)</h2>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow</label>
+                          <input type="text" value={editedContent?.aboutEyebrow ?? ''} onChange={(e) => setEditedContent(prev => prev ? { ...prev, aboutEyebrow: e.target.value } as CMSContent : prev)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo</label>
+                            <input type="text" value={editedContent?.aboutTitle ?? ''} onChange={(e) => setEditedContent(prev => prev ? { ...prev, aboutTitle: e.target.value } as CMSContent : prev)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Imagen</label>
+                            <div className="flex items-center gap-3 rounded-xl border border-border bg-input/40 p-3">
+                              {isValidImageUrl(editedContent?.aboutImage) ? (
+                                <img
+                                  src={editedContent!.aboutImage}
+                                  alt="Preview About Home"
+                                  className="h-14 w-14 rounded-lg object-cover border border-border shrink-0"
+                                />
+                              ) : (
+                                <div className="h-14 w-14 rounded-lg border border-border bg-muted/30 flex items-center justify-center shrink-0">
+                                  <ImageIcon className="w-5 h-5 text-[var(--color-text-secondary)] opacity-50" />
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm text-[var(--color-text-primary)] truncate">
+                                  {editedContent?.aboutImage ? 'Imagen seleccionada' : 'Ninguna imagen seleccionada'}
+                                </p>
+                                <p className="text-xs text-[var(--color-text-secondary)] truncate">
+                                  {editedContent?.aboutImage ?? 'Selecciona una imagen desde la biblioteca de medios'}
+                                </p>
+                              </div>
+                              <PremiumButton variant="outline" size="sm" onClick={() => setAboutHomePickerOpen(true)}>
+                                Elegir
+                              </PremiumButton>
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto</label>
+                          <textarea value={editedContent?.aboutText ?? ''} onChange={(e) => setEditedContent(prev => prev ? { ...prev, aboutText: e.target.value } as CMSContent : prev)} rows={3} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Badge 1 icono</label>
+                            <IconPicker value={editedContent?.aboutBadgeOneIcon ?? 'Award'} onChange={(icon) => setEditedContent(prev => prev ? { ...prev, aboutBadgeOneIcon: icon } as CMSContent : prev)} />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Badge 1 texto</label>
+                            <input type="text" value={editedContent?.aboutBadgeOneText ?? ''} onChange={(e) => setEditedContent(prev => prev ? { ...prev, aboutBadgeOneText: e.target.value } as CMSContent : prev)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Badge 2 icono</label>
+                            <IconPicker value={editedContent?.aboutBadgeTwoIcon ?? 'Heart'} onChange={(icon) => setEditedContent(prev => prev ? { ...prev, aboutBadgeTwoIcon: icon } as CMSContent : prev)} />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Badge 2 texto</label>
+                            <input type="text" value={editedContent?.aboutBadgeTwoText ?? ''} onChange={(e) => setEditedContent(prev => prev ? { ...prev, aboutBadgeTwoText: e.target.value } as CMSContent : prev)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto boton</label>
+                            <input type="text" value={editedContent?.aboutButtonText ?? ''} onChange={(e) => setEditedContent(prev => prev ? { ...prev, aboutButtonText: e.target.value } as CMSContent : prev)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Enlace boton</label>
+                            <input type="text" value={editedContent?.aboutButtonLink ?? ''} onChange={(e) => setEditedContent(prev => prev ? { ...prev, aboutButtonLink: e.target.value } as CMSContent : prev)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Nombre tarjeta</label>
+                            <input type="text" value={editedContent?.aboutCardName ?? ''} onChange={(e) => setEditedContent(prev => prev ? { ...prev, aboutCardName: e.target.value } as CMSContent : prev)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Cargo tarjeta</label>
+                            <input type="text" value={editedContent?.aboutCardRole ?? ''} onChange={(e) => setEditedContent(prev => prev ? { ...prev, aboutCardRole: e.target.value } as CMSContent : prev)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                          </div>
+                        </div>
+                      </div>
+                    </GlassCard>
                   </div>
                 </motion.div>
               )}
@@ -3929,7 +4041,14 @@ export default function AdminPage() {
                             onClick={() => setActiveImageManager({
                               folder: 'Nosotros',
                               currentUrl: editedContent?.aboutImage || undefined,
-                              onSelect: (url) => setEditedContent(prev => prev ? { ...prev, aboutImage: url } as CMSContent : prev)
+                              onSelect: async (url) => {
+                                const file = await getMediaFileByUrl(url);
+                                if (!file) {
+                                  setEditedContent(prev => prev ? { ...prev, aboutImage: url } as CMSContent : prev);
+                                  return;
+                                }
+                                setEditedContent(prev => prev ? { ...prev, aboutImage: file.url } as CMSContent : prev);
+                              }
                             })}
                           >
                             Cambiar Imagen
@@ -5033,7 +5152,6 @@ export default function AdminPage() {
               open={logoPickerOpen}
               onClose={() => setLogoPickerOpen(false)}
               filterType="image"
-              uploadFolderId={brandingFolderId}
               onSelect={async (file) => {
                 await updateBrandingConfig({
                   logoUrl: file.url,
@@ -5052,8 +5170,7 @@ export default function AdminPage() {
                 setCentroPickerIndex(null);
               }}
               filterType="image"
-              uploadFolderId={centroFolderId}
-              onSelect={(file) => {
+              onSelect={async (file) => {
                 if (centroPickerIndex === null) return;
                 setEditedContent((prev) => {
                   if (!prev) return prev;
@@ -5073,8 +5190,7 @@ export default function AdminPage() {
                 setGaleriaTrainingPickerOpen(false);
                 setGaleriaTrainingPickerIndex(null);
               }}
-              uploadFolderId={galleryFolderId}
-              onSelect={(file) => {
+              onSelect={async (file) => {
                 if (galeriaTrainingPickerIndex === null) return;
                 setEditedContent((prev) => {
                   if (!prev) return prev;
@@ -5089,6 +5205,29 @@ export default function AdminPage() {
                 });
                 setGaleriaTrainingPickerOpen(false);
                 setGaleriaTrainingPickerIndex(null);
+              }}
+            />
+
+            <MediaPicker
+              open={heroBackgroundPickerOpen}
+              onClose={() => setHeroBackgroundPickerOpen(false)}
+              onSelect={async (file) => {
+                setEditedContent((prev) => prev ? {
+                  ...prev,
+                  heroBackgroundUrl: file.url,
+                  heroBackgroundType: file.type,
+                } as CMSContent : prev);
+                setHeroBackgroundPickerOpen(false);
+              }}
+            />
+
+            <MediaPicker
+              open={aboutHomePickerOpen}
+              onClose={() => setAboutHomePickerOpen(false)}
+              filterType="image"
+              onSelect={async (file) => {
+                setEditedContent((prev) => prev ? { ...prev, aboutImage: file.url } as CMSContent : prev);
+                setAboutHomePickerOpen(false);
               }}
             />
 
@@ -5808,4 +5947,6 @@ export default function AdminPage() {
     </div >
   );
 }
+
+
 

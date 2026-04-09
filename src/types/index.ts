@@ -288,6 +288,8 @@ export interface CMSContent {
     heroSubtitle: string;
     heroCTA: string;
     heroImage: string;
+    heroBackgroundUrl?: string;
+    heroBackgroundType?: 'video' | 'image';
     heroEyebrow?: string;
     heroTitleStart?: string;
     heroTitleHighlight?: string;
@@ -296,9 +298,18 @@ export interface CMSContent {
     heroCtaSecondaryLink?: string;
     heroStats?: HeroStat[];
 
+    aboutEyebrow?: string;
     aboutTitle: string;
     aboutText: string;
     aboutImage: string;
+    aboutBadgeOneIcon?: string;
+    aboutBadgeOneText?: string;
+    aboutBadgeTwoIcon?: string;
+    aboutBadgeTwoText?: string;
+    aboutButtonText?: string;
+    aboutButtonLink?: string;
+    aboutCardName?: string;
+    aboutCardRole?: string;
 
     sandra: SandraData;
     centro: CentroData;

@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArrowRight, Star, Clock, Activity, Apple, Trophy, Dumbbell, Heart, Users, Award } from 'lucide-react';
+import { ArrowRight, Star, Clock, Activity, Apple, Trophy, Dumbbell, Heart, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
@@ -82,6 +82,18 @@ interface HomeClientProps {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function HomeClient({ initialCMS: cmsContent, initialServices: services, initialTestimonials: testimonials }: HomeClientProps) {
+  const heroBackgroundType = cmsContent.heroBackgroundType === 'image' ? 'image' : 'video';
+  const heroBackgroundUrl = cmsContent.heroBackgroundUrl ?? '/imagenes/hero.mp4';
+  const aboutEyebrow = cmsContent.aboutEyebrow ?? 'Conoce a tu entrenadora';
+  const aboutButtonText = cmsContent.aboutButtonText ?? 'Leer mas';
+  const aboutButtonLink = cmsContent.aboutButtonLink ?? '/sandra';
+  const aboutBadgeOneIcon = cmsContent.aboutBadgeOneIcon ?? 'Award';
+  const aboutBadgeOneText = cmsContent.aboutBadgeOneText ?? 'Certificacion Internacional';
+  const aboutBadgeTwoIcon = cmsContent.aboutBadgeTwoIcon ?? 'Heart';
+  const aboutBadgeTwoText = cmsContent.aboutBadgeTwoText ?? 'Atencion Personalizada';
+  const aboutCardName = cmsContent.aboutCardName ?? 'Sandra Andujar';
+  const aboutCardRole = cmsContent.aboutCardRole ?? 'Fundadora & Coach Principal';
+
   return (
     <div className="min-h-screen">
 
@@ -89,17 +101,27 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
           HERO SECTION
           ═══════════════════════════════════════════════════════════════════ */}
       <section className="relative min-h-screen flex items-center justify-center overflow-hidden -mt-20">
-        {/* Video Background */}
+        {/* Hero Background */}
         <div className="absolute inset-0">
-          <video
-            autoPlay
-            muted
-            loop
-            playsInline
-            className="object-cover w-full h-full opacity-40"
-          >
-            <source src="/imagenes/hero.mp4" type="video/mp4" />
-          </video>
+          {heroBackgroundType === 'video' ? (
+            <video
+              autoPlay
+              muted
+              loop
+              playsInline
+              className="object-cover w-full h-full opacity-40"
+            >
+              <source src={heroBackgroundUrl} type="video/mp4" />
+            </video>
+          ) : (
+            <Image
+              src={heroBackgroundUrl}
+              alt="Fondo hero Focus Club Vallecas"
+              fill
+              priority
+              className="object-cover w-full h-full opacity-40"
+            />
+          )}
           <div className="absolute inset-0 bg-[var(--color-bg-base)]/85" />
           <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-base)] via-transparent to-[var(--color-bg-base)]/50" />
         </div>
@@ -226,7 +248,7 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
               transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
             >
               <span className="eyebrow">
-                Conoce a tu entrenadora
+                {aboutEyebrow}
               </span>
               <h2 className="text-2xl md:text-3xl font-bold text-[var(--color-text-primary)] mt-3 mb-4">
                 {cmsContent.aboutTitle}
@@ -238,20 +260,20 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
               <div className="flex flex-wrap gap-3">
                 <div className="flex items-center gap-2">
                   <div className="w-9 h-9 rounded-lg bg-[var(--color-accent-dim)] flex items-center justify-center">
-                    <Award className="w-4 h-4 text-[var(--color-accent-val)]" />
+                    <DynamicIcon name={aboutBadgeOneIcon} className="w-4 h-4 text-[var(--color-accent-val)]" />
                   </div>
-                  <span className="text-sm text-[var(--color-text-secondary)]">Certificación Internacional</span>
+                  <span className="text-sm text-[var(--color-text-secondary)]">{aboutBadgeOneText}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-9 h-9 rounded-lg bg-[var(--color-accent-dim)] flex items-center justify-center">
-                    <Heart className="w-4 h-4 text-[var(--color-accent-val)]" />
+                    <DynamicIcon name={aboutBadgeTwoIcon} className="w-4 h-4 text-[var(--color-accent-val)]" />
                   </div>
-                  <span className="text-sm text-[var(--color-text-secondary)]">Atención Personalizada</span>
+                  <span className="text-sm text-[var(--color-text-secondary)]">{aboutBadgeTwoText}</span>
                 </div>
               </div>
-              <Link href="/sandra" className="inline-block mt-6">
+              <Link href={aboutButtonLink} className="inline-block mt-6">
                 <PremiumButton variant="outline" icon={<ArrowRight className="w-4 h-4" />} iconPosition="right">
-                  Leer más
+                  {aboutButtonText}
                 </PremiumButton>
               </Link>
             </motion.div>
@@ -266,16 +288,16 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
               <div className="rounded-3xl overflow-hidden card-glass p-2">
                 <div className="relative rounded-2xl overflow-hidden">
                   <Image
-                    src="https://firebasestorage.googleapis.com/v0/b/focus-club-f73b8.firebasestorage.app/o/public%2Fimagenes%2Fsandra.jpg?alt=media&token=b0af9bd2-add1-4e06-9e08-ee48e03fafe9"
-                    alt="Sandra Andújar — Fundadora & Coach Principal de Focus Club Vallecas"
+                    src={cmsContent.aboutImage}
+                    alt={`${aboutCardName} - ${aboutCardRole}`}
                     width={600}
                     height={800}
                     className="w-full h-auto object-cover object-top"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg-base)]/80 via-transparent to-transparent" />
                   <div className="absolute bottom-0 left-0 right-0 p-4 text-center">
-                    <p className="text-[var(--color-text-primary)] font-semibold">Sandra Andújar</p>
-                    <p className="text-[var(--color-accent-val)] text-sm">Fundadora & Coach Principal</p>
+                    <p className="text-[var(--color-text-primary)] font-semibold">{aboutCardName}</p>
+                    <p className="text-[var(--color-accent-val)] text-sm">{aboutCardRole}</p>
                   </div>
                 </div>
               </div>

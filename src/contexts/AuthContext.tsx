@@ -16,31 +16,6 @@ import { getUserProfile, createUserProfile, updateUserProfile } from '@/lib/fire
 import type { UserProfile } from '@/types';
 
 // ============================================
-// MODO DESARROLLO - Usuario de prueba
-// ============================================
-const DEV_MODE = process.env.NODE_ENV === 'development';
-const DEV_USER_EMAIL = 'admin@test.com';
-const DEV_USER_PASSWORD = 'admin123';
-
-const DEV_USER_PROFILE: UserProfile = {
-    uid: 'dev-admin-001',
-    email: DEV_USER_EMAIL,
-    name: 'Admin Test',
-    phone: '123456789',
-    role: 'admin',
-    isTrainer: true,
-    createdAt: new Date().toISOString(),
-};
-
-// Mock de FirebaseUser para desarrollo
-const DEV_FIREBASE_USER = {
-    uid: 'dev-admin-001',
-    email: DEV_USER_EMAIL,
-    emailVerified: true,
-    displayName: 'Admin Test',
-} as FirebaseUser;
-
-// ============================================
 // TIPOS
 // ============================================
 
@@ -118,13 +93,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // ============================================
 
     const login = async (email: string, password: string): Promise<LoginResult> => {
-        // Modo desarrollo: login con usuario de prueba
-        if (DEV_MODE && email === DEV_USER_EMAIL && password === DEV_USER_PASSWORD) {
-            setUser(DEV_FIREBASE_USER);
-            setUserProfile(DEV_USER_PROFILE);
-            return { success: true, message: 'Login exitoso (modo desarrollo)' };
-        }
-
         try {
             const cred = await signInWithEmailAndPassword(auth, email, password);
 
@@ -325,12 +293,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // ============================================
 
     const logout = async () => {
-        // En modo desarrollo con usuario de prueba, solo limpiar estado
-        if (DEV_MODE && user?.uid === DEV_FIREBASE_USER.uid) {
-            setUser(null);
-            setUserProfile(null);
-            return;
-        }
         await signOut(auth);
         setUser(null);
         setUserProfile(null);

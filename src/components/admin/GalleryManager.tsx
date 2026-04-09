@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
     DndContext,
     closestCenter,
@@ -36,7 +36,6 @@ import {
     updateGalleryItem,
     deleteGalleryItem,
     reorderGalleryItems,
-    updateMediaFile,
 } from '@/lib/firestore';
 import { useMediaLibrary } from '@/hooks/useMediaLibrary';
 import type { GalleryItem, MediaFile } from '@/types';
@@ -162,19 +161,14 @@ export function GalleryManager() {
     const [loading, setLoading] = useState(true);
     const [pickerOpen, setPickerOpen] = useState(false);
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-    const { galleryFolderId, fetchFolders } = useMediaLibrary();
+    const { fetchFolders } = useMediaLibrary();
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
         useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
     );
 
-    useEffect(() => {
-        loadItems();
-        fetchFolders();
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-    const loadItems = async () => {
+    const loadItems = useCallback(async () => {
         setLoading(true);
         try {
             const data = await getGalleryItems(false);
@@ -182,13 +176,14 @@ export function GalleryManager() {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        loadItems();
+        fetchFolders();
+    }, [fetchFolders, loadItems]);
 
     const handleSelect = async (file: MediaFile) => {
-        // Ensure file is in the gallery folder
-        if (galleryFolderId && file.folderId !== galleryFolderId) {
-            await updateMediaFile(file.id, { folderId: galleryFolderId });
-        }
         const maxOrder = items.length > 0 ? Math.max(...items.map((i) => i.order)) : -1;
         const newItem: Omit<GalleryItem, 'id'> = {
             mediaFileId: file.id,
@@ -296,7 +291,6 @@ export function GalleryManager() {
                 open={pickerOpen}
                 onClose={() => setPickerOpen(false)}
                 onSelect={(file) => { handleSelect(file); setPickerOpen(false); }}
-                uploadFolderId={galleryFolderId}
             />
 
             {/* Delete confirmation */}

@@ -23,3 +23,77 @@
 └──────────────────────┴────────────────────────────┴────────────────┴──────────────────────┘
 [info] 
 [info] 1 project(s) total.
+[debug] [2026-04-09T21:34:49.565Z] ----------------------------------------------------------------------
+[debug] [2026-04-09T21:34:49.568Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\Perez\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy --only storage
+[debug] [2026-04-09T21:34:49.569Z] CLI Version:   15.6.0
+[debug] [2026-04-09T21:34:49.569Z] Platform:      win32
+[debug] [2026-04-09T21:34:49.569Z] Node Version:  v22.20.0
+[debug] [2026-04-09T21:34:49.569Z] Time:          Thu Apr 09 2026 23:34:49 GMT+0200 (hora de verano de Europa central)
+[debug] [2026-04-09T21:34:49.569Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-04-09T21:34:52.027Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-09T21:34:52.028Z] > authorizing via signed-in user (infofocusclub2026@gmail.com)
+[debug] [2026-04-09T21:34:52.029Z] [iam] checking project focus-club-f73b8 for permissions ["firebase.projects.get","firebaserules.releases.create","firebaserules.releases.update","firebaserules.rulesets.create"]
+[debug] [2026-04-09T21:34:52.030Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:52.031Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:52.032Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/focus-club-f73b8:testIamPermissions [none]
+[debug] [2026-04-09T21:34:52.032Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/focus-club-f73b8:testIamPermissions  x-goog-user-project=focus-club-f73b8
+[debug] [2026-04-09T21:34:52.032Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/focus-club-f73b8:testIamPermissions {"permissions":["firebase.projects.get","firebaserules.releases.create","firebaserules.releases.update","firebaserules.rulesets.create"]}
+[debug] [2026-04-09T21:34:52.727Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/focus-club-f73b8:testIamPermissions 200
+[debug] [2026-04-09T21:34:52.727Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/focus-club-f73b8:testIamPermissions {"permissions":["firebase.projects.get","firebaserules.releases.create","firebaserules.releases.update","firebaserules.rulesets.create"]}
+[info] 
+[info] === Deploying to 'focus-club-f73b8'...
+[info] 
+[info] i  deploying storage 
+[info] i  storage: ensuring required API firebasestorage.googleapis.com is enabled... 
+[debug] [2026-04-09T21:34:52.730Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:52.730Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:52.730Z] >>> [apiv2][query] GET https://serviceusage.googleapis.com/v1/projects/focus-club-f73b8/services/firebasestorage.googleapis.com [none]
+[debug] [2026-04-09T21:34:52.730Z] >>> [apiv2][(partial)header] GET https://serviceusage.googleapis.com/v1/projects/focus-club-f73b8/services/firebasestorage.googleapis.com  x-goog-user-project=focus-club-f73b8
+[debug] [2026-04-09T21:34:53.546Z] <<< [apiv2][status] GET https://serviceusage.googleapis.com/v1/projects/focus-club-f73b8/services/firebasestorage.googleapis.com 200
+[debug] [2026-04-09T21:34:53.546Z] <<< [apiv2][body] GET https://serviceusage.googleapis.com/v1/projects/focus-club-f73b8/services/firebasestorage.googleapis.com [omitted]
+[info] +  storage: required API firebasestorage.googleapis.com is enabled 
+[debug] [2026-04-09T21:34:53.550Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:53.550Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:53.550Z] >>> [apiv2][query] GET https://firebasestorage.googleapis.com/v1alpha/projects/focus-club-f73b8/defaultBucket [none]
+[debug] [2026-04-09T21:34:54.617Z] <<< [apiv2][status] GET https://firebasestorage.googleapis.com/v1alpha/projects/focus-club-f73b8/defaultBucket 200
+[debug] [2026-04-09T21:34:54.617Z] <<< [apiv2][body] GET https://firebasestorage.googleapis.com/v1alpha/projects/focus-club-f73b8/defaultBucket {"name":"projects/focus-club-f73b8/defaultBucket","location":"US-CENTRAL1","bucket":{"name":"projects/focus-club-f73b8/buckets/focus-club-f73b8.firebasestorage.app"},"storageClass":"REGIONAL"}
+[info] i  firebase.storage: checking storage.rules for compilation errors... 
+[debug] [2026-04-09T21:34:54.618Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:54.619Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:54.619Z] >>> [apiv2][query] POST https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8:test [none]
+[debug] [2026-04-09T21:34:54.619Z] >>> [apiv2][body] POST https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8:test [omitted]
+[debug] [2026-04-09T21:34:55.382Z] <<< [apiv2][status] POST https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8:test 200
+[debug] [2026-04-09T21:34:55.383Z] <<< [apiv2][body] POST https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8:test {}
+[info] +  firebase.storage: rules file storage.rules compiled successfully 
+[debug] [2026-04-09T21:34:55.383Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:55.383Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:55.384Z] >>> [apiv2][query] GET https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8/releases pageSize=10&pageToken=
+[debug] [2026-04-09T21:34:56.095Z] <<< [apiv2][status] GET https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8/releases 200
+[debug] [2026-04-09T21:34:56.095Z] <<< [apiv2][body] GET https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8/releases {"releases":[{"name":"projects/focus-club-f73b8/releases/cloud.firestore","rulesetName":"projects/focus-club-f73b8/rulesets/04ddb393-b0c3-42c8-add6-adcf32cc98a6","createTime":"2026-03-02T08:59:57.379744Z","updateTime":"2026-04-08T15:28:21.993058Z"},{"name":"projects/focus-club-f73b8/releases/firebase.storage/focus-club-f73b8.firebasestorage.app","rulesetName":"projects/focus-club-f73b8/rulesets/b197d5a1-4f0f-42f9-94ec-6474c6e12567","createTime":"2026-04-07T21:10:46.882437Z","updateTime":"2026-04-07T21:10:46.882437Z"}]}
+[debug] [2026-04-09T21:34:56.104Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:56.104Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:56.104Z] >>> [apiv2][query] GET https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8/rulesets/b197d5a1-4f0f-42f9-94ec-6474c6e12567 [none]
+[debug] [2026-04-09T21:34:56.380Z] <<< [apiv2][status] GET https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8/rulesets/b197d5a1-4f0f-42f9-94ec-6474c6e12567 200
+[debug] [2026-04-09T21:34:56.380Z] <<< [apiv2][body] GET https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8/rulesets/b197d5a1-4f0f-42f9-94ec-6474c6e12567 [omitted]
+[info] i  storage: uploading rules storage.rules... 
+[debug] [2026-04-09T21:34:56.381Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:56.381Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:56.381Z] >>> [apiv2][query] POST https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8/rulesets [none]
+[debug] [2026-04-09T21:34:56.381Z] >>> [apiv2][body] POST https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8/rulesets [omitted]
+[debug] [2026-04-09T21:34:57.139Z] <<< [apiv2][status] POST https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8/rulesets 200
+[debug] [2026-04-09T21:34:57.140Z] <<< [apiv2][body] POST https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8/rulesets {"name":"projects/focus-club-f73b8/rulesets/4b612727-e22e-452a-aaef-4c5c304cf8b7","source":{"files":[{"content":"rules_version = '2';\n\nservice firebase.storage {\n  match /b/{bucket}/o {\n    // CMS and media uploads use persistent Storage URLs.\n    // Keep access simple: any authenticated session can read and write.\n    match /{allPaths=**} {\n      allow read, write: if request.auth != null;\n    }\n  }\n}\n","name":"storage.rules"}]},"createTime":"2026-04-09T21:34:57.517103Z","metadata":{"services":["firebase.storage"]}}
+[debug] [2026-04-09T21:34:57.140Z] [rules] created ruleset projects/focus-club-f73b8/rulesets/4b612727-e22e-452a-aaef-4c5c304cf8b7
+[debug] [2026-04-09T21:34:57.140Z] [rules] releasing firebase.storage/focus-club-f73b8.firebasestorage.app with ruleset projects/focus-club-f73b8/rulesets/4b612727-e22e-452a-aaef-4c5c304cf8b7
+[debug] [2026-04-09T21:34:57.140Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:57.140Z] Checked if tokens are valid: true, expires at: 1775772571763
+[debug] [2026-04-09T21:34:57.140Z] >>> [apiv2][query] PATCH https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8/releases/firebase.storage/focus-club-f73b8.firebasestorage.app [none]
+[debug] [2026-04-09T21:34:57.141Z] >>> [apiv2][body] PATCH https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8/releases/firebase.storage/focus-club-f73b8.firebasestorage.app {"release":{"name":"projects/focus-club-f73b8/releases/firebase.storage/focus-club-f73b8.firebasestorage.app","rulesetName":"projects/focus-club-f73b8/rulesets/4b612727-e22e-452a-aaef-4c5c304cf8b7"}}
+[debug] [2026-04-09T21:34:57.922Z] <<< [apiv2][status] PATCH https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8/releases/firebase.storage/focus-club-f73b8.firebasestorage.app 200
+[debug] [2026-04-09T21:34:57.922Z] <<< [apiv2][body] PATCH https://firebaserules.googleapis.com/v1/projects/focus-club-f73b8/releases/firebase.storage/focus-club-f73b8.firebasestorage.app {"name":"projects/focus-club-f73b8/releases/firebase.storage/focus-club-f73b8.firebasestorage.app","rulesetName":"projects/focus-club-f73b8/rulesets/4b612727-e22e-452a-aaef-4c5c304cf8b7","createTime":"2026-04-07T21:10:46.882437Z","updateTime":"2026-04-09T21:34:58.291016Z"}
+[debug] [2026-04-09T21:34:57.923Z] [rules] updated release projects/focus-club-f73b8/releases/firebase.storage/focus-club-f73b8.firebasestorage.app
+[info] +  storage: released rules storage.rules to firebase.storage 
+[info] 
+[info] +  Deploy complete! 
+[info] 
+[info] Project Console: https://console.firebase.google.com/project/focus-club-f73b8/overview

@@ -22,7 +22,6 @@ import {
     Menu,
     Check,
     FileImage,
-    Lock,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -400,10 +399,6 @@ export default function MediaPage() {
         files,
         loading,
         uploadQueue,
-        galleryFolderId,
-        brandingFolderId,
-        sandraFolderId,
-        centroFolderId,
         fetchFolders,
         fetchFiles,
         createFolder,
@@ -601,108 +596,9 @@ export default function MediaPage() {
 
                     {/* Folder tree */}
                     <div className="mt-1">
-                        {/* Gallery folder — always first, protected */}
-                        {galleryFolderId && (() => {
-                            const galleryFolder = folders.find((f) => f.id === galleryFolderId);
-                            if (!galleryFolder) return null;
-                            return (
-                                <div key={galleryFolder.id} className="mb-1">
-                                    <div
-                                        className={cn(
-                                            'flex items-center gap-1.5 rounded-lg transition-all text-sm cursor-pointer px-3 py-1.5',
-                                            selectedFolderId === galleryFolder.id
-                                                ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)]'
-                                                : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
-                                        )}
-                                        onClick={() => handleSelectFolder(galleryFolder.id)}
-                                    >
-                                        <Lock className="w-3.5 h-3.5 shrink-0" />
-                                        <span className="flex-1 truncate">{galleryFolder.name}</span>
-                                        <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
-                                            WEB
-                                        </span>
-                                    </div>
-                                </div>
-                            );
-                        })()}
-
-                        {/* Branding folder — second, protected */}
-                        {brandingFolderId && (() => {
-                            const brandingFolder = folders.find((f) => f.id === brandingFolderId);
-                            if (!brandingFolder) return null;
-                            return (
-                                <div key={brandingFolder.id} className="mb-1">
-                                    <div
-                                        className={cn(
-                                            'flex items-center gap-1.5 rounded-lg transition-all text-sm cursor-pointer px-3 py-1.5',
-                                            selectedFolderId === brandingFolder.id
-                                                ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)]'
-                                                : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
-                                        )}
-                                        onClick={() => handleSelectFolder(brandingFolder.id)}
-                                    >
-                                        <Lock className="w-3.5 h-3.5 shrink-0" />
-                                        <span className="flex-1 truncate">{brandingFolder.name}</span>
-                                        <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
-                                            GLOBAL
-                                        </span>
-                                    </div>
-                                </div>
-                            );
-                        })()}
-
-                        {/* Sandra folder — third, protected */}
-                        {sandraFolderId && (() => {
-                            const sandraFolder = folders.find((f) => f.id === sandraFolderId);
-                            if (!sandraFolder) return null;
-                            return (
-                                <div key={sandraFolder.id} className="mb-1">
-                                    <div
-                                        className={cn(
-                                            'flex items-center gap-1.5 rounded-lg transition-all text-sm cursor-pointer px-3 py-1.5',
-                                            selectedFolderId === sandraFolder.id
-                                                ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)]'
-                                                : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
-                                        )}
-                                        onClick={() => handleSelectFolder(sandraFolder.id)}
-                                    >
-                                        <Lock className="w-3.5 h-3.5 shrink-0" />
-                                        <span className="flex-1 truncate">{sandraFolder.name}</span>
-                                        <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
-                                            SANDRA
-                                        </span>
-                                    </div>
-                                </div>
-                            );
-                        })()}
-
-                        {centroFolderId && (() => {
-                            const centroFolder = folders.find((f) => f.id === centroFolderId);
-                            if (!centroFolder) return null;
-                            return (
-                                <div key={centroFolder.id} className="mb-1">
-                                    <div
-                                        className={cn(
-                                            'flex items-center gap-1.5 rounded-lg transition-all text-sm cursor-pointer px-3 py-1.5',
-                                            selectedFolderId === centroFolder.id
-                                                ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)]'
-                                                : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
-                                        )}
-                                        onClick={() => handleSelectFolder(centroFolder.id)}
-                                    >
-                                        <Lock className="w-3.5 h-3.5 shrink-0" />
-                                        <span className="flex-1 truncate">{centroFolder.name}</span>
-                                        <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
-                                            CENTRO
-                                        </span>
-                                    </div>
-                                </div>
-                            );
-                        })()}
-
-                        {/* Regular folders */}
+                        {/* Folders */}
                         {folders
-                            .filter((f) => f.parentId === null && f.id !== galleryFolderId && f.id !== brandingFolderId && f.id !== sandraFolderId && f.id !== centroFolderId)
+                            .filter((f) => f.parentId === null)
                             .map((folder) => (
                                 <FolderTreeItem
                                     key={folder.id}
@@ -750,7 +646,7 @@ export default function MediaPage() {
                                 type="file"
                                 ref={fileInputRef}
                                 multiple
-                                accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime"
+                                accept="image/*,video/*"
                                 className="hidden"
                                 onChange={handleFileInputChange}
                             />
