@@ -800,7 +800,8 @@ export default function AdminPage() {
     await updateSiteContent(editedContent);
     await addActivityLog({ action: 'cms_contacto_updated', adminEmail: user?.email || 'unknown' });
     await refreshData();
-    alert('✅ Cambios guardados correctamente');
+    const t = toast({ title: 'Contenido actualizado', description: 'Los cambios se han guardado correctamente.' });
+    setTimeout(() => t.dismiss(), 3500);
   };
 
   // Manejar guardado de Sandra
@@ -809,7 +810,8 @@ export default function AdminPage() {
     await updateSandraDataFS(editedContent.sandra);
     await addActivityLog({ action: 'cms_sandra_updated', adminEmail: user?.email || 'unknown' });
     await refreshData();
-    alert('✅ Datos de Sandra actualizados');
+    const t = toast({ title: 'Sandra actualizada', description: 'Los cambios se han guardado correctamente.' });
+    setTimeout(() => t.dismiss(), 3500);
   };
 
   // Manejar guardado del Centro
@@ -818,7 +820,8 @@ export default function AdminPage() {
     await updateCentroConfigFS(editedContent.centro);
     await addActivityLog({ action: 'cms_centro_updated', adminEmail: user?.email || 'unknown' });
     await refreshData();
-    toast({ title: 'Centro actualizado', description: 'Los cambios se han guardado correctamente.' });
+    const t = toast({ title: 'Centro actualizado', description: 'Los cambios se han guardado correctamente.' });
+    setTimeout(() => t.dismiss(), 3500);
   };
 
   // Manejar guardado de la Galería
@@ -827,7 +830,8 @@ export default function AdminPage() {
     await updateGaleriaDataFS(editedContent.galeria);
     await addActivityLog({ action: 'cms_galeria_updated', adminEmail: user?.email || 'unknown' });
     await refreshData();
-    alert('✅ Datos de la Galería actualizados');
+    const t = toast({ title: 'Galeria actualizada', description: 'Los cambios se han guardado correctamente.' });
+    setTimeout(() => t.dismiss(), 3500);
   };
 
   // Manejar guardado de servicios (CMS)
@@ -849,7 +853,8 @@ export default function AdminPage() {
     }));
     await addActivityLog({ action: 'services_updated', adminEmail: user?.email || 'unknown' });
     await refreshData();
-    alert('✅ Servicios actualizados');
+    const t = toast({ title: 'Servicios actualizados', description: 'Los cambios se han guardado correctamente.' });
+    setTimeout(() => t.dismiss(), 3500);
   };
 
   // Servicios helpers (inline)
