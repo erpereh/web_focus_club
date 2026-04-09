@@ -1,0 +1,25 @@
+[debug] [2026-04-09T14:19:01.998Z] ----------------------------------------------------------------------
+[debug] [2026-04-09T14:19:02.000Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\Perez\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js projects:list --json
+[debug] [2026-04-09T14:19:02.000Z] CLI Version:   15.6.0
+[debug] [2026-04-09T14:19:02.001Z] Platform:      win32
+[debug] [2026-04-09T14:19:02.001Z] Node Version:  v22.20.0
+[debug] [2026-04-09T14:19:02.001Z] Time:          Thu Apr 09 2026 16:19:02 GMT+0200 (hora de verano de Europa central)
+[debug] [2026-04-09T14:19:02.001Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-04-09T14:19:02.003Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-04-09T14:19:02.231Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-04-09T14:19:02.231Z] > authorizing via signed-in user (infofocusclub2026@gmail.com)
+[debug] [2026-04-09T14:19:02.233Z] Checked if tokens are valid: true, expires at: 1775747173756
+[debug] [2026-04-09T14:19:02.233Z] Checked if tokens are valid: true, expires at: 1775747173756
+[debug] [2026-04-09T14:19:02.234Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects pageSize=1000
+[debug] [2026-04-09T14:19:02.462Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2026-04-09T14:19:02.462Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}
+[debug] [2026-04-09T14:19:02.652Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects 200
+[debug] [2026-04-09T14:19:02.652Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects [omitted]
+[info] ┌──────────────────────┬────────────────────────────┬────────────────┬──────────────────────┐
+│ Project Display Name │ Project ID                 │ Project Number │ Resource Location ID │
+├──────────────────────┼────────────────────────────┼────────────────┼──────────────────────┤
+│ focus club           │ focus-club-f73b8 (current) │ 1555015411     │ [Not specified]      │
+└──────────────────────┴────────────────────────────┴────────────────┴──────────────────────┘
+[info] 
+[info] 1 project(s) total.
