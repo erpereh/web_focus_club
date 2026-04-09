@@ -23,6 +23,9 @@ export interface Service {
     features?: string[];
     order?: number;
     icon?: string;
+    ctaText?: string;
+    ctaLink?: string;
+    active?: boolean;
 }
 
 export interface TimeSlot {
@@ -239,6 +242,9 @@ export interface CMSContent {
 
     servicesTitle: string;
     servicesSubtitle: string;
+    servicesEyebrow?: string;
+    servicesFaqsTitle?: string;
+    servicesFaqs?: { question: string; answer: string }[];
 
     testimonialsTitle: string;
 

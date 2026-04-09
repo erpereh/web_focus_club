@@ -51,6 +51,11 @@ import {
   Minus,
   History,
   GripVertical,
+  ChevronDown,
+  ChevronUp,
+  Layers,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
@@ -59,6 +64,7 @@ import { ContextualImageManager } from '@/components/ui/ContextualImageManager';
 import { GalleryManager } from '@/components/admin/GalleryManager';
 import { MediaPicker } from '@/components/admin/MediaPicker';
 import { IconPicker } from '@/components/admin/IconPicker';
+import { DynamicIcon } from '@/components/ui/DynamicIcon';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -157,7 +163,7 @@ async function sendWebhook(payload: {
 }
 
 
-type TabType = 'Inicio' | 'appointments' | 'availability' | 'clients' | 'team' | 'services' | 'testimonials' | 'Hero' | 'Sandra' | 'Centro' | 'Galeria' | 'Contacto' | 'config';
+type TabType = 'Inicio' | 'appointments' | 'availability' | 'clients' | 'team' | 'testimonials' | 'Hero' | 'Sandra' | 'Centro' | 'Servicios' | 'Galeria' | 'Contacto' | 'config';
 type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
 
 const statusConfig = {
@@ -246,6 +252,169 @@ function SortableTimelineItem({
   );
 }
 
+// ─── Sortable Service Item (accordion) ───────────────────────────────────────
+function SortableServiceItem({
+  service,
+  expanded,
+  onToggle,
+  onUpdate,
+  onRemove,
+  onUpdateFeature,
+  onRemoveFeature,
+  onAddFeature,
+}: {
+  service: import('@/types').Service;
+  expanded: boolean;
+  onToggle: () => void;
+  onUpdate: (field: string, value: unknown) => void;
+  onRemove: () => void;
+  onUpdateFeature: (i: number, val: string) => void;
+  onRemoveFeature: (i: number) => void;
+  onAddFeature: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: service.id });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  const inputCls = 'px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm w-full';
+
+  return (
+    <div ref={setNodeRef} style={style} className="rounded-xl border border-border bg-[var(--color-bg-card)] overflow-hidden mb-3">
+      {/* Header row */}
+      <div className="flex items-center gap-3 p-4">
+        <button type="button" {...attributes} {...listeners} className="cursor-grab text-[var(--color-text-muted)] hover:text-white touch-none flex-shrink-0">
+          <GripVertical className="w-4 h-4" />
+        </button>
+        <IconPicker value={service.icon ?? 'Dumbbell'} onChange={(icon) => onUpdate('icon', icon)} />
+        <input
+          type="text"
+          value={service.title ?? ''}
+          onChange={(e) => onUpdate('title', e.target.value)}
+          placeholder="Título del servicio"
+          className="flex-1 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+        />
+        {/* Active toggle */}
+        <button
+          type="button"
+          onClick={() => onUpdate('active', service.active === false ? true : false)}
+          title={service.active === false ? 'Mostrar en web' : 'Ocultar en web'}
+          className={`p-2 rounded-xl flex-shrink-0 transition-colors ${service.active === false ? 'text-[var(--color-text-muted)] hover:text-[var(--color-accent-val)]' : 'text-[var(--color-accent-val)] hover:text-[var(--color-text-muted)]'}`}
+        >
+          {service.active === false ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+        </button>
+        {/* Expand toggle */}
+        <button type="button" onClick={onToggle} className="p-2 text-[var(--color-text-secondary)] hover:text-white rounded-xl flex-shrink-0">
+          {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </button>
+        {/* Delete */}
+        <button type="button" onClick={onRemove} className="p-2 text-destructive hover:bg-destructive/10 rounded-xl flex-shrink-0">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Expandable body */}
+      {expanded && (
+        <div className="px-4 pb-4 space-y-4 border-t border-border pt-4">
+          {/* Descripción */}
+          <div>
+            <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Descripción</label>
+            <textarea
+              value={service.description ?? ''}
+              onChange={(e) => onUpdate('description', e.target.value)}
+              rows={3}
+              className={`${inputCls} resize-none`}
+              placeholder="Descripción del servicio..."
+            />
+          </div>
+          {/* Duración + Precio */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Duración</label>
+              <input type="text" value={service.duration ?? ''} onChange={(e) => onUpdate('duration', e.target.value)} placeholder="Ej: 1 hora" className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Precio</label>
+              <input type="text" value={service.price ?? ''} onChange={(e) => onUpdate('price', e.target.value)} placeholder="Ej: Desde 50€" className={inputCls} />
+            </div>
+          </div>
+          {/* Features */}
+          <div>
+            <label className="block text-xs text-[var(--color-text-secondary)] mb-2">Características (checks verdes)</label>
+            <div className="space-y-2">
+              {(service.features ?? []).map((f, i) => (
+                <div key={i} className="flex gap-2">
+                  <input type="text" value={f} onChange={(e) => onUpdateFeature(i, e.target.value)} className={inputCls} placeholder="Característica..." />
+                  <button type="button" onClick={() => onRemoveFeature(i)} className="p-2 text-destructive hover:bg-destructive/10 rounded-xl flex-shrink-0">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={onAddFeature}
+              className="mt-2 flex items-center gap-1 text-sm text-[var(--color-accent-val)] hover:text-[var(--color-text-primary)] transition-colors"
+            >
+              <Plus className="w-4 h-4" /> Añadir característica
+            </button>
+          </div>
+          {/* CTA */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Texto botón CTA</label>
+              <input type="text" value={service.ctaText ?? ''} onChange={(e) => onUpdate('ctaText', e.target.value)} placeholder="Reservar" className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Enlace CTA</label>
+              <input type="text" value={service.ctaLink ?? ''} onChange={(e) => onUpdate('ctaLink', e.target.value)} placeholder="/portal" className={inputCls} />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Sortable FAQ Item ────────────────────────────────────────────────────────
+function SortableFaqItem({
+  faq,
+  index,
+  onUpdate,
+  onRemove,
+}: {
+  faq: { question: string; answer: string };
+  index: number;
+  onUpdate: (field: 'question' | 'answer', val: string) => void;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: index.toString() });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  return (
+    <div ref={setNodeRef} style={style} className="p-4 rounded-xl bg-muted/30 border border-border space-y-2 mb-2">
+      <div className="flex items-center gap-2">
+        <button type="button" {...attributes} {...listeners} className="cursor-grab text-[var(--color-text-muted)] hover:text-white touch-none flex-shrink-0">
+          <GripVertical className="w-4 h-4" />
+        </button>
+        <input
+          type="text"
+          value={faq.question ?? ''}
+          onChange={(e) => onUpdate('question', e.target.value)}
+          placeholder="Pregunta..."
+          className="flex-1 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+        />
+        <button type="button" onClick={onRemove} className="p-2 text-destructive hover:bg-destructive/10 rounded-xl flex-shrink-0">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+      <textarea
+        value={faq.answer ?? ''}
+        onChange={(e) => onUpdate('answer', e.target.value)}
+        rows={2}
+        placeholder="Respuesta..."
+        className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none text-sm"
+      />
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const { user, userProfile, loading: authLoading, login, loginWithGoogle, logout, resetPassword, refreshUserProfile, isAdmin } = useAuth();
   const pathname = usePathname();
@@ -295,16 +464,9 @@ export default function AdminPage() {
 
   // CMS Edit States
   const [editedContent, setEditedContent] = useState<CMSContent | null>(null);
-  const [editingService, setEditingService] = useState<Service | null>(null);
+  const [editedServices, setEditedServices] = useState<Service[]>([]);
+  const [expandedServiceId, setExpandedServiceId] = useState<string | null>(null);
   const [editingTestimonial, setEditingTestimonial] = useState<Testimonial | null>(null);
-  const [newService, setNewService] = useState<Omit<Service, 'id'>>({
-    title: '',
-    description: '',
-    duration: '',
-    price: '',
-    features: [],
-    order: 0,
-  });
   const [newTestimonial, setNewTestimonial] = useState<Omit<Testimonial, 'id' | 'approved'>>({
     name: '',
     role: '',
@@ -381,6 +543,7 @@ export default function AdminPage() {
     ]);
     setAppointments(appts);
     setServices(svcs);
+    setEditedServices(svcs);
     setTestimonials(tests);
     setClients(usersList);
     setBlockedSlots(blocked);
@@ -586,25 +749,84 @@ export default function AdminPage() {
     alert('✅ Datos de la Galería actualizados');
   };
 
-  // Manejar guardado de servicio
-  const handleSaveService = async () => {
-    if (editingService) {
-      const isNew = editingService.id.startsWith('new-');
-      if (isNew) {
-        await addServiceFS({
-          title: editingService.title,
-          description: editingService.description,
-          duration: editingService.duration,
-          price: editingService.price,
-          features: editingService.features,
-          order: services.length + 1,
-        });
-      } else {
-        await updateServiceFS(editingService.id, editingService);
-      }
-      await addActivityLog({ action: isNew ? 'service_created' : 'service_updated', adminEmail: user?.email || 'unknown', details: editingService.title });
-      await refreshData();
-      setEditingService(null);
+  // Manejar guardado de servicios (CMS)
+  const handleSaveServicios = async () => {
+    if (!editedContent) return;
+    // 1. Guardar header + FAQs en site_content/main
+    await updateSiteContent(editedContent);
+    // 2. Detectar eliminados y borrarlos
+    const originalIds = services.map(s => s.id);
+    const keptIds = editedServices.filter(s => !s.id.startsWith('new-')).map(s => s.id);
+    const toDelete = originalIds.filter(id => !keptIds.includes(id));
+    await Promise.all(toDelete.map(id => deleteServiceFS(id)));
+    // 3. Añadir nuevos y actualizar existentes (con orden actualizado)
+    await Promise.all(editedServices.map((s, i) => {
+      const { id, ...data } = s;
+      const withOrder = { ...data, order: i + 1 };
+      if (id.startsWith('new-')) return addServiceFS(withOrder);
+      return updateServiceFS(id, withOrder);
+    }));
+    await addActivityLog({ action: 'services_updated', adminEmail: user?.email || 'unknown' });
+    await refreshData();
+    alert('✅ Servicios actualizados');
+  };
+
+  // Servicios helpers (inline)
+  const updateServiceField = (id: string, field: keyof Service, value: unknown) => {
+    setEditedServices(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s));
+  };
+  const updateServiceFeature = (id: string, i: number, val: string) => {
+    setEditedServices(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      const features = [...(s.features ?? [])];
+      features[i] = val;
+      return { ...s, features };
+    }));
+  };
+  const removeServiceFeature = (id: string, i: number) => {
+    setEditedServices(prev => prev.map(s => s.id !== id ? s : { ...s, features: (s.features ?? []).filter((_, j) => j !== i) }));
+  };
+  const addServiceFeature = (id: string) => {
+    setEditedServices(prev => prev.map(s => s.id !== id ? s : { ...s, features: [...(s.features ?? []), ''] }));
+  };
+  const removeEditedService = (id: string) => {
+    setEditedServices(prev => prev.filter(s => s.id !== id));
+    setExpandedServiceId(prev => prev === id ? null : prev);
+  };
+  const addNewService = () => {
+    const newId = `new-${Date.now()}`;
+    const newSvc: Service = { id: newId, title: '', description: '', duration: '', price: '', icon: 'Dumbbell', features: [], ctaText: 'Reservar', ctaLink: '/portal', active: true, order: editedServices.length + 1 };
+    setEditedServices(prev => [...prev, newSvc]);
+    setExpandedServiceId(newId);
+  };
+  const handleServiceDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (active.id !== over?.id) {
+      const oldIndex = editedServices.findIndex(s => s.id === active.id);
+      const newIndex = editedServices.findIndex(s => s.id === over!.id);
+      setEditedServices(arrayMove(editedServices, oldIndex, newIndex));
+    }
+  };
+
+  // FAQs helpers
+  const updateFaq = (i: number, field: 'question' | 'answer', val: string) => {
+    const faqs = [...(editedContent?.servicesFaqs ?? [])];
+    faqs[i] = { ...faqs[i], [field]: val };
+    setEditedContent(prev => prev ? { ...prev, servicesFaqs: faqs } as CMSContent : prev);
+  };
+  const removeFaq = (i: number) => {
+    setEditedContent(prev => prev ? { ...prev, servicesFaqs: (prev.servicesFaqs ?? []).filter((_, j) => j !== i) } as CMSContent : prev);
+  };
+  const addFaq = () => {
+    setEditedContent(prev => prev ? { ...prev, servicesFaqs: [...(prev.servicesFaqs ?? []), { question: '', answer: '' }] } as CMSContent : prev);
+  };
+  const handleFaqDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (active.id !== over?.id) {
+      const oldIndex = Number(active.id);
+      const newIndex = Number(over!.id);
+      const newFaqs = arrayMove(editedContent!.servicesFaqs!, oldIndex, newIndex);
+      setEditedContent(prev => prev ? { ...prev, servicesFaqs: newFaqs } as CMSContent : prev);
     }
   };
 
@@ -1173,20 +1395,6 @@ export default function AdminPage() {
             <p className="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider mt-6 mb-3 px-3">Gestión</p>
 
             <button
-              onClick={() => switchTab('services')}
-              className={cn(
-                'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
-                activeTab === 'services'
-                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
-                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
-              )}
-            >
-              <Award className="w-5 h-5" />
-              <span className="font-medium">Servicios</span>
-              <span className="ml-auto text-xs text-[var(--color-text-secondary)]">{stats.services}</span>
-            </button>
-
-            <button
               onClick={() => switchTab('testimonials')}
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
@@ -1265,6 +1473,19 @@ export default function AdminPage() {
             >
               <MapPin className="w-5 h-5" />
               <span className="font-medium">El Centro</span>
+            </button>
+
+            <button
+              onClick={() => switchTab('Servicios')}
+              className={cn(
+                'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
+                activeTab === 'Servicios'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
+              )}
+            >
+              <Layers className="w-5 h-5" />
+              <span className="font-medium">Servicios</span>
             </button>
 
             <button
@@ -2040,85 +2261,6 @@ export default function AdminPage() {
               )}
 
               {/* ============================================
-                  SERVICES
-                  ============================================ */}
-              {activeTab === 'services' && (
-                <motion.div
-                  key="services"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                >
-                  <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Gestión de Servicios</h1>
-                    <PremiumButton
-                      variant="cta"
-                      icon={<Plus className="w-4 h-4" />}
-                      onClick={() => setEditingService({
-                        id: `new-${Date.now()}`,
-                        title: '',
-                        description: '',
-                        duration: '',
-                        price: '',
-                        features: [],
-                        order: services.length + 1,
-                      })}
-                    >
-                      Nuevo Servicio
-                    </PremiumButton>
-                  </div>
-
-                  <div className="grid gap-4">
-                    {services.map((service) => (
-                      <GlassCard key={service.id} className="p-6">
-                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                          <div className="flex-1">
-                            <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-1">{service.title}</h3>
-                            <p className="text-[var(--color-text-secondary)] text-sm mb-3">{service.description}</p>
-                            <div className="flex flex-wrap gap-4 text-sm">
-                              <span className="text-[var(--color-accent-val)]">{service.price}</span>
-                              <span className="text-[var(--color-text-secondary)]">Duración: {service.duration}</span>
-                            </div>
-                            {service.features && service.features.length > 0 && (
-                              <div className="flex flex-wrap gap-2 mt-3">
-                                {service.features.map((feature, i) => (
-                                  <span key={i} className="px-2 py-1 text-xs bg-[var(--color-accent-dim)] text-[var(--color-text-primary)] rounded">
-                                    {feature}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex gap-2">
-                            <PremiumButton
-                              variant="ghost"
-                              size="sm"
-                              icon={<Edit3 className="w-4 h-4" />}
-                              onClick={() => setEditingService(service)}
-                            >
-                              Editar
-                            </PremiumButton>
-                            <PremiumButton
-                              variant="ghost"
-                              size="sm"
-                              icon={<Trash2 className="w-4 h-4" />}
-                              onClick={async () => {
-                                if (confirm('¿Eliminar este servicio?')) {
-                                  await deleteServiceFS(service.id);
-                                  await refreshData();
-                                }
-                              }}
-                              className="text-destructive"
-                            />
-                          </div>
-                        </div>
-                      </GlassCard>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-
-              {/* ============================================
                   TESTIMONIALS
                   ============================================ */}
               {activeTab === 'testimonials' && (
@@ -2880,6 +3022,126 @@ export default function AdminPage() {
                         </PremiumButton>
                       </div>
                     </GlassCard>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* ============================================
+                  CMS - SERVICIOS
+                  ============================================ */}
+              {activeTab === 'Servicios' && (
+                <motion.div
+                  key="Servicios"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                >
+                  <div className="flex items-center justify-between mb-6">
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Servicios</h1>
+                    <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveServicios}>
+                      Guardar Cambios
+                    </PremiumButton>
+                  </div>
+
+                  <div className="space-y-6">
+
+                    {/* === HEADER DE LA SECCIÓN === */}
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Header de la sección</h2>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow</label>
+                          <input
+                            type="text"
+                            value={editedContent?.servicesEyebrow ?? ''}
+                            onChange={(e) => setEditedContent(prev => prev ? { ...prev, servicesEyebrow: e.target.value } as CMSContent : prev)}
+                            placeholder="NUESTROS SERVICIOS"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título</label>
+                          <input
+                            type="text"
+                            value={editedContent?.servicesTitle ?? ''}
+                            onChange={(e) => setEditedContent(prev => prev ? { ...prev, servicesTitle: e.target.value } as CMSContent : prev)}
+                            placeholder="Servicios Especializados"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtítulo / descripción</label>
+                          <input
+                            type="text"
+                            value={editedContent?.servicesSubtitle ?? ''}
+                            onChange={(e) => setEditedContent(prev => prev ? { ...prev, servicesSubtitle: e.target.value } as CMSContent : prev)}
+                            placeholder="Programas diseñados para atletas..."
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                          />
+                        </div>
+                      </div>
+                    </GlassCard>
+
+                    {/* === SERVICIOS === */}
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Servicios</h2>
+                      <DndContext collisionDetection={closestCenter} onDragEnd={handleServiceDragEnd}>
+                        <SortableContext items={editedServices.map(s => s.id)} strategy={verticalListSortingStrategy}>
+                          {editedServices.map((service) => (
+                            <SortableServiceItem
+                              key={service.id}
+                              service={service}
+                              expanded={expandedServiceId === service.id}
+                              onToggle={() => setExpandedServiceId(prev => prev === service.id ? null : service.id)}
+                              onUpdate={(field, value) => updateServiceField(service.id, field as keyof Service, value)}
+                              onRemove={() => removeEditedService(service.id)}
+                              onUpdateFeature={(i, val) => updateServiceFeature(service.id, i, val)}
+                              onRemoveFeature={(i) => removeServiceFeature(service.id, i)}
+                              onAddFeature={() => addServiceFeature(service.id)}
+                            />
+                          ))}
+                        </SortableContext>
+                      </DndContext>
+                      <div className="mt-3">
+                        <PremiumButton variant="outline" size="sm" icon={<Plus className="w-4 h-4" />} onClick={addNewService}>
+                          Añadir servicio
+                        </PremiumButton>
+                      </div>
+                    </GlassCard>
+
+                    {/* === FAQs === */}
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Preguntas Frecuentes (FAQs)</h2>
+                      <div className="mb-4">
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título de la sección</label>
+                        <input
+                          type="text"
+                          value={editedContent?.servicesFaqsTitle ?? ''}
+                          onChange={(e) => setEditedContent(prev => prev ? { ...prev, servicesFaqsTitle: e.target.value } as CMSContent : prev)}
+                          placeholder="Preguntas Frecuentes"
+                          className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                        />
+                      </div>
+                      <DndContext collisionDetection={closestCenter} onDragEnd={handleFaqDragEnd}>
+                        <SortableContext items={(editedContent?.servicesFaqs ?? []).map((_, i) => i.toString())} strategy={verticalListSortingStrategy}>
+                          {(editedContent?.servicesFaqs ?? []).map((faq, i) => (
+                            <SortableFaqItem
+                              key={i}
+                              faq={faq}
+                              index={i}
+                              onUpdate={(field, val) => updateFaq(i, field, val)}
+                              onRemove={() => removeFaq(i)}
+                            />
+                          ))}
+                        </SortableContext>
+                      </DndContext>
+                      <div className="mt-3">
+                        <PremiumButton variant="outline" size="sm" icon={<Plus className="w-4 h-4" />} onClick={addFaq}>
+                          Añadir pregunta
+                        </PremiumButton>
+                      </div>
+                    </GlassCard>
+
                   </div>
                 </motion.div>
               )}
@@ -4950,149 +5212,6 @@ export default function AdminPage() {
                           </>
                         );
                       })()}
-                    </GlassCard>
-                  </motion.div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* ============================================
-                SERVICE EDIT MODAL
-                ============================================ */}
-            <AnimatePresence>
-              {editingService && (
-                <motion.div
-                  key="service-edit-modal"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-                  onClick={() => setEditingService(null)}
-                >
-                  <motion.div
-                    initial={{ scale: 0.95, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.95, opacity: 0 }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-full max-w-2xl max-h-[90vh] overflow-y-auto"
-                  >
-                    <GlassCard className="p-6">
-                      <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-1">
-                        {editingService.id.startsWith('new-') ? 'Nuevo Servicio' : 'Editar Servicio'}
-                      </h2>
-                      <p className="text-sm text-[var(--color-text-secondary)] mb-6">
-                        {editingService.id.startsWith('new-') ? 'Crea un nuevo servicio' : `Editando: ${editingService.title}`}
-                      </p>
-
-                      <div className="space-y-4">
-                        <div className="grid sm:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título *</label>
-                            <input
-                              type="text"
-                              value={editingService.title}
-                              onChange={(e) => setEditingService({ ...editingService, title: e.target.value })}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                              placeholder="Entrenamiento Personal"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Duración *</label>
-                            <input
-                              type="text"
-                              value={editingService.duration}
-                              onChange={(e) => setEditingService({ ...editingService, duration: e.target.value })}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                              placeholder="60 min"
-                            />
-                          </div>
-                        </div>
-                        <div className="grid sm:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Precio</label>
-                            <input
-                              type="text"
-                              value={editingService.price || ''}
-                              onChange={(e) => setEditingService({ ...editingService, price: e.target.value })}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                              placeholder="Desde 50€"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Icono (nombre Lucide)</label>
-                            <input
-                              type="text"
-                              value={editingService.icon || ''}
-                              onChange={(e) => setEditingService({ ...editingService, icon: e.target.value })}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                              placeholder="Dumbbell, Trophy, Apple…"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Descripción</label>
-                          <textarea
-                            value={editingService.description}
-                            onChange={(e) => setEditingService({ ...editingService, description: e.target.value })}
-                            rows={3}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
-                            placeholder="Descripción del servicio…"
-                          />
-                        </div>
-                        <div>
-                          <div className="flex items-center justify-between mb-2">
-                            <label className="block text-sm text-[var(--color-text-secondary)]">Características</label>
-                            <button
-                              onClick={() => setEditingService({ ...editingService, features: [...(editingService.features || []), ''] })}
-                              className="text-xs text-[var(--color-accent-val)] hover:underline flex items-center gap-1"
-                            >
-                              <Plus className="w-3 h-3" /> Añadir
-                            </button>
-                          </div>
-                          <div className="space-y-2">
-                            {(editingService.features || []).map((feat, i) => (
-                              <div key={i} className="flex gap-2">
-                                <input
-                                  type="text"
-                                  value={feat}
-                                  onChange={(e) => {
-                                    const feats = [...(editingService.features || [])];
-                                    feats[i] = e.target.value;
-                                    setEditingService({ ...editingService, features: feats });
-                                  }}
-                                  className="flex-1 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                                  placeholder="Característica…"
-                                />
-                                <button
-                                  onClick={() => setEditingService({ ...editingService, features: (editingService.features || []).filter((_, idx) => idx !== i) })}
-                                  className="p-2 rounded-xl text-red-400 hover:bg-red-400/10 transition-colors"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Orden</label>
-                          <input
-                            type="number"
-                            value={editingService.order ?? 0}
-                            onChange={(e) => setEditingService({ ...editingService, order: Number(e.target.value) })}
-                            className="w-32 px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            min={0}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex gap-3 mt-6 justify-end">
-                        <PremiumButton variant="outline" onClick={() => setEditingService(null)}>
-                          Cancelar
-                        </PremiumButton>
-                        <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveService}>
-                          Guardar Servicio
-                        </PremiumButton>
-                      </div>
                     </GlassCard>
                   </motion.div>
                 </motion.div>

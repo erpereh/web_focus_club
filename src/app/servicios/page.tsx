@@ -2,15 +2,18 @@
 
 import { motion } from 'framer-motion';
 import Link from 'next/link';
-import { Clock, CheckCircle, ArrowRight, Dumbbell, Activity, Heart, Apple, Trophy, Users } from 'lucide-react';
+import { Clock, CheckCircle, ArrowRight } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
+import { DynamicIcon } from '@/components/ui/DynamicIcon';
 import { useServices, useCMS } from '@/hooks/useFirestore';
-import type { LucideIcon } from 'lucide-react';
 
-const ICON_MAP: Record<string, LucideIcon> = {
-  Dumbbell, Activity, Heart, Apple, Trophy, Users,
-};
+const DEFAULT_FAQS = [
+  { question: '¿Cuál es la duración recomendada para una primera sesión?', answer: 'Recomendamos sesiones de 60 minutos para poder realizar una evaluación completa y entender tus objetivos.' },
+  { question: '¿Necesito tener experiencia previa?', answer: 'No, nuestros programas están diseñados para todos los niveles, desde principiantes hasta atletas avanzados.' },
+  { question: '¿Cómo funciona el bono de entrenamiento?', answer: 'El bono mensual se adquiere directamente en el gimnasio. Incluye 1 sesión de 1 hora semanal o 2 sesiones de 30 minutos, adaptándose a tu disponibilidad.' },
+  { question: '¿Cuál es la política de cancelación?', answer: 'Pedimos al menos 24 horas de antelación para cualquier cambio o cancelación sin coste.' },
+];
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -29,6 +32,9 @@ export default function ServiciosPage() {
   const { services } = useServices();
   const { cmsContent } = useCMS();
 
+  const activeServices = services.filter(s => s.active !== false);
+  const faqs = cmsContent.servicesFaqs?.length ? cmsContent.servicesFaqs : DEFAULT_FAQS;
+
   return (
     <div className="min-h-screen">
       {/* Hero Section */}
@@ -42,7 +48,7 @@ export default function ServiciosPage() {
             transition={{ duration: 0.6 }}
           >
             <span className="eyebrow">
-              Nuestros Servicios
+              {cmsContent.servicesEyebrow ?? 'Nuestros Servicios'}
             </span>
             <h1 className="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mt-3 mb-6">
               {cmsContent.servicesTitle}
@@ -64,54 +70,56 @@ export default function ServiciosPage() {
             initial="hidden"
             animate="visible"
           >
-            {services.map((service) => {
-              const Icon = (service.icon && ICON_MAP[service.icon]) || Dumbbell;
-              return (
-                <motion.div key={service.id} id={service.id} variants={itemVariants}>
-                  <GlassCard className="h-full group">
-                    <div className="flex flex-col md:flex-row gap-6">
-                      <div className="flex-shrink-0">
-                        <div className="w-16 h-16 rounded-2xl bg-[var(--color-accent-dim)] flex items-center justify-center group-hover:shadow-glow transition-shadow">
-                          <Icon className="w-8 h-8 text-[var(--color-accent-val)]" />
-                        </div>
-                      </div>
-                      <div className="flex-1">
-                        <h2 className="text-2xl font-bold text-[var(--color-text-primary)] group-hover:text-[var(--color-accent-val)] transition-colors mb-3">
-                          {service.title}
-                        </h2>
-                        <p className="text-[var(--color-text-secondary)] mb-4">
-                          {service.description}
-                        </p>
-                        <div className="flex items-center gap-2 text-[var(--color-text-secondary)] text-sm mb-4">
-                          <Clock className="w-4 h-4 text-[var(--color-accent-val)]" />
-                          <span>Duración: {service.duration}</span>
-                        </div>
-                        {service.features && service.features.length > 0 && (
-                          <div className="space-y-2 mb-6">
-                            {service.features.map((feature, i) => (
-                              <div key={i} className="flex items-center gap-2">
-                                <CheckCircle className="w-4 h-4 text-[var(--color-accent-val)] flex-shrink-0" />
-                                <span className="text-[var(--color-text-primary)] text-sm">{feature}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        <Link href="/portal">
-                          <PremiumButton
-                            variant="outline"
-                            size="sm"
-                            icon={<ArrowRight className="w-4 h-4" />}
-                            iconPosition="right"
-                          >
-                            Reservar
-                          </PremiumButton>
-                        </Link>
+            {activeServices.map((service) => (
+              <motion.div key={service.id} id={service.id} variants={itemVariants}>
+                <GlassCard className="h-full group">
+                  <div className="flex flex-col md:flex-row gap-6">
+                    <div className="flex-shrink-0">
+                      <div className="w-16 h-16 rounded-2xl bg-[var(--color-accent-dim)] flex items-center justify-center group-hover:shadow-glow transition-shadow">
+                        <DynamicIcon name={service.icon ?? 'Dumbbell'} className="w-8 h-8 text-[var(--color-accent-val)]" />
                       </div>
                     </div>
-                  </GlassCard>
-                </motion.div>
-              );
-            })}
+                    <div className="flex-1">
+                      <h2 className="text-2xl font-bold text-[var(--color-text-primary)] group-hover:text-[var(--color-accent-val)] transition-colors mb-3">
+                        {service.title}
+                      </h2>
+                      <p className="text-[var(--color-text-secondary)] mb-4">
+                        {service.description}
+                      </p>
+                      <div className="flex items-center gap-4 text-sm mb-4">
+                        <span className="flex items-center gap-2 text-[var(--color-text-secondary)]">
+                          <Clock className="w-4 h-4 text-[var(--color-accent-val)]" />
+                          {service.duration}
+                        </span>
+                        {service.price && (
+                          <span className="text-[var(--color-accent-val)] font-medium">{service.price}</span>
+                        )}
+                      </div>
+                      {service.features && service.features.length > 0 && (
+                        <div className="space-y-2 mb-6">
+                          {service.features.map((feature, i) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <CheckCircle className="w-4 h-4 text-[var(--color-accent-val)] flex-shrink-0" />
+                              <span className="text-[var(--color-text-primary)] text-sm">{feature}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <Link href={service.ctaLink ?? '/portal'}>
+                        <PremiumButton
+                          variant="outline"
+                          size="sm"
+                          icon={<ArrowRight className="w-4 h-4" />}
+                          iconPosition="right"
+                        >
+                          {service.ctaText ?? 'Reservar'}
+                        </PremiumButton>
+                      </Link>
+                    </div>
+                  </div>
+                </GlassCard>
+              </motion.div>
+            ))}
           </motion.div>
         </div>
       </section>
@@ -125,29 +133,14 @@ export default function ServiciosPage() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
           >
-            <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)]">Preguntas Frecuentes</h2>
+            <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)]">
+              {cmsContent.servicesFaqsTitle ?? 'Preguntas Frecuentes'}
+            </h2>
             <div className="line-accent mx-auto mt-3" />
           </motion.div>
 
           <div className="max-w-2xl mx-auto space-y-4">
-            {[
-              {
-                q: '¿Cuál es la duración recomendada para una primera sesión?',
-                a: 'Recomendamos sesiones de 60 minutos para poder realizar una evaluación completa y entender tus objetivos.',
-              },
-              {
-                q: '¿Necesito tener experiencia previa?',
-                a: 'No, nuestros programas están diseñados para todos los niveles, desde principiantes hasta atletas avanzados.',
-              },
-              {
-                q: '¿Cómo funciona el bono de entrenamiento?',
-                a: 'El bono mensual se adquiere directamente en el gimnasio. Incluye 1 sesión de 1 hora semanal o 2 sesiones de 30 minutos, adaptándose a tu disponibilidad.',
-              },
-              {
-                q: '¿Cuál es la política de cancelación?',
-                a: 'Pedimos al menos 24 horas de antelación para cualquier cambio o cancelación sin coste.',
-              },
-            ].map((faq, index) => (
+            {faqs.map((faq, index) => (
               <motion.div
                 key={index}
                 initial={{ opacity: 0, y: 20 }}
@@ -156,8 +149,8 @@ export default function ServiciosPage() {
                 transition={{ delay: index * 0.1 }}
               >
                 <GlassCard className="p-6">
-                  <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">{faq.q}</h3>
-                  <p className="text-[var(--color-text-secondary)] text-sm">{faq.a}</p>
+                  <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">{faq.question}</h3>
+                  <p className="text-[var(--color-text-secondary)] text-sm">{faq.answer}</p>
                 </GlassCard>
               </motion.div>
             ))}
