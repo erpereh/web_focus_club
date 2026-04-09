@@ -127,21 +127,43 @@ export interface SandraData {
     ctaButtonLink?: string;
 }
 
-export interface CentroData {
+export interface CentroZona {
+    image: string;
+    title: string;
+    description: string;
+    active?: boolean;
+}
+
+export interface CentroFeature {
+    icon: string;
+    title: string;
+    description: string;
+}
+
+export interface CentroConfig {
+    eyebrow: string;
     title: string;
     subtitle: string;
     description: string;
-    features: {
-        icon: string;
-        title: string;
-        description: string;
-    }[];
-    gallery: string[];
-    schedule: {
-        weekdays: string;
-        saturday: string;
-    };
+    zonasTitle: string;
+    zonasSubtitle: string;
+    zonas: CentroZona[];
+    featuresTitle: string;
+    featuresSubtitle: string;
+    features: CentroFeature[];
+    locationEyebrow: string;
+    locationTitle: string;
+    address: string;
+    schedule: string;
+    phone: string;
+    email: string;
+    ctaText: string;
+    ctaLink: string;
+    mapUrl: string;
 }
+
+// Backward-compatible alias used across the app.
+export type CentroData = CentroConfig;
 
 export interface SiteConfig {
     startHour: number;         // ej: 8

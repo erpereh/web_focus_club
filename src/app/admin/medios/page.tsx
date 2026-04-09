@@ -403,6 +403,7 @@ export default function MediaPage() {
         galleryFolderId,
         brandingFolderId,
         sandraFolderId,
+        centroFolderId,
         fetchFolders,
         fetchFiles,
         createFolder,
@@ -675,9 +676,33 @@ export default function MediaPage() {
                             );
                         })()}
 
+                        {centroFolderId && (() => {
+                            const centroFolder = folders.find((f) => f.id === centroFolderId);
+                            if (!centroFolder) return null;
+                            return (
+                                <div key={centroFolder.id} className="mb-1">
+                                    <div
+                                        className={cn(
+                                            'flex items-center gap-1.5 rounded-lg transition-all text-sm cursor-pointer px-3 py-1.5',
+                                            selectedFolderId === centroFolder.id
+                                                ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)]'
+                                                : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
+                                        )}
+                                        onClick={() => handleSelectFolder(centroFolder.id)}
+                                    >
+                                        <Lock className="w-3.5 h-3.5 shrink-0" />
+                                        <span className="flex-1 truncate">{centroFolder.name}</span>
+                                        <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                                            CENTRO
+                                        </span>
+                                    </div>
+                                </div>
+                            );
+                        })()}
+
                         {/* Regular folders */}
                         {folders
-                            .filter((f) => f.parentId === null && f.id !== galleryFolderId && f.id !== brandingFolderId && f.id !== sandraFolderId)
+                            .filter((f) => f.parentId === null && f.id !== galleryFolderId && f.id !== brandingFolderId && f.id !== sandraFolderId && f.id !== centroFolderId)
                             .map((folder) => (
                                 <FolderTreeItem
                                     key={folder.id}

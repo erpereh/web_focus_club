@@ -71,7 +71,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { useAuth } from '@/contexts/AuthContext';
 import { useMediaLibrary } from '@/hooks/useMediaLibrary';
 import { defaultCMS } from '@/hooks/useFirestore';
-import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono, BrandingConfig, HeroStat, SandraAchievement, SandraValue } from '@/types';
+import { toast } from '@/hooks/use-toast';
+import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono, BrandingConfig, HeroStat, SandraAchievement, SandraValue, CentroConfig } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import {
   getAppointments,
@@ -90,7 +91,8 @@ import {
   getSiteContent,
   updateSiteContent,
   updateSandraData as updateSandraDataFS,
-  updateCentroData as updateCentroDataFS,
+  updateCentroConfig as updateCentroConfigFS,
+  getCentroConfig as getCentroConfigFS,
   updateGaleriaData as updateGaleriaDataFS,
   getUsers,
   getUserProfile,
@@ -415,6 +417,78 @@ function SortableFaqItem({
   );
 }
 
+function SortableCentroZonaItem({
+  zona,
+  index,
+  onUpdate,
+  onRemove,
+  onToggleActive,
+  onPickImage,
+}: {
+  zona: CentroConfig['zonas'][number];
+  index: number;
+  onUpdate: (field: 'title' | 'description', val: string) => void;
+  onRemove: () => void;
+  onToggleActive: () => void;
+  onPickImage: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: index.toString() });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  return (
+    <div ref={setNodeRef} style={style} className="p-4 rounded-xl bg-muted/30 border border-border space-y-3">
+      <div className="flex items-center gap-2">
+        <button type="button" {...attributes} {...listeners} className="cursor-grab text-[var(--color-text-muted)] hover:text-white touch-none">
+          <GripVertical className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onPickImage}
+          className="w-16 h-16 rounded-xl border border-border overflow-hidden bg-input flex items-center justify-center hover:border-[var(--color-accent-val)] transition-colors"
+        >
+          {zona.image ? (
+            <img src={zona.image} alt={zona.title || `Zona ${index + 1}`} className="w-full h-full object-cover" />
+          ) : (
+            <ImageIcon className="w-5 h-5 text-[var(--color-text-secondary)]" />
+          )}
+        </button>
+        <div className="flex-1 grid sm:grid-cols-2 gap-2">
+          <input
+            type="text"
+            value={zona.title ?? ''}
+            onChange={(e) => onUpdate('title', e.target.value)}
+            placeholder="Titulo de zona"
+            className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+          />
+          <div className="flex items-center gap-2 justify-end">
+            <button
+              type="button"
+              onClick={onToggleActive}
+              className={cn(
+                'px-3 py-2 rounded-xl text-xs border transition-colors',
+                zona.active === false
+                  ? 'text-[var(--color-text-secondary)] border-border hover:text-[var(--color-text-primary)]'
+                  : 'text-[var(--color-accent-val)] border-[var(--color-accent-border)] bg-[var(--color-accent-dim)]'
+              )}
+            >
+              {zona.active === false ? 'Inactiva' : 'Activa'}
+            </button>
+            <button type="button" onClick={onRemove} className="p-2 text-destructive hover:bg-destructive/10 rounded-xl">
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+      <textarea
+        value={zona.description ?? ''}
+        onChange={(e) => onUpdate('description', e.target.value)}
+        rows={2}
+        placeholder="Descripcion"
+        className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none text-sm"
+      />
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const { user, userProfile, loading: authLoading, login, loginWithGoogle, logout, resetPassword, refreshUserProfile, isAdmin } = useAuth();
   const pathname = usePathname();
@@ -482,10 +556,12 @@ export default function AdminPage() {
   } | null>(null);
 
   // Branding / Logo
-  const { brandingFolderId, sandraFolderId, fetchFolders: fetchMediaFolders } = useMediaLibrary();
+  const { brandingFolderId, sandraFolderId, centroFolderId, fetchFolders: fetchMediaFolders } = useMediaLibrary();
   const [brandingConfig, setBrandingConfig] = useState<BrandingConfig | null>(null);
   const [logoPickerOpen, setLogoPickerOpen] = useState(false);
   const [sandraPickerOpen, setSandraPickerOpen] = useState(false);
+  const [centroPickerOpen, setCentroPickerOpen] = useState(false);
+  const [centroPickerIndex, setCentroPickerIndex] = useState<number | null>(null);
 
   // Autenticación admin
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
@@ -530,7 +606,7 @@ export default function AdminPage() {
 
   // Cargar datos desde Firestore
   const refreshData = async () => {
-    const [appts, svcs, tests, cms, usersList, blocked, trainersList, config, branding] = await Promise.all([
+    const [appts, svcs, tests, cms, usersList, blocked, trainersList, config, branding, centroConfig] = await Promise.all([
       getAppointments(),
       getServices(),
       getTestimonials(),
@@ -540,6 +616,7 @@ export default function AdminPage() {
       getTrainers(),
       getSiteConfig(),
       getBrandingConfig(),
+      getCentroConfigFS(),
     ]);
     setAppointments(appts);
     setServices(svcs);
@@ -553,7 +630,11 @@ export default function AdminPage() {
     setEditBonoConfig(config.bonoExpirationMonths || 1);
     setBrandingConfig(branding);
     if (cms) {
-      const mergedCms = { ...cms, galeria: cms.galeria ?? defaultCMS.galeria };
+      const mergedCms = {
+        ...cms,
+        galeria: cms.galeria ?? defaultCMS.galeria,
+        centro: centroConfig ?? defaultCMS.centro,
+      };
       // Normalize Sandra achievements: if Firestore still has old string[] format, reset to []
       if (
         mergedCms.sandra?.achievements?.length > 0 &&
@@ -734,10 +815,10 @@ export default function AdminPage() {
   // Manejar guardado del Centro
   const handleSaveCentro = async () => {
     if (!editedContent) return;
-    await updateCentroDataFS(editedContent.centro);
+    await updateCentroConfigFS(editedContent.centro);
     await addActivityLog({ action: 'cms_centro_updated', adminEmail: user?.email || 'unknown' });
     await refreshData();
-    alert('✅ Datos del Centro actualizados');
+    toast({ title: 'Centro actualizado', description: 'Los cambios se han guardado correctamente.' });
   };
 
   // Manejar guardado de la Galería
@@ -827,6 +908,67 @@ export default function AdminPage() {
       const newIndex = Number(over!.id);
       const newFaqs = arrayMove(editedContent!.servicesFaqs!, oldIndex, newIndex);
       setEditedContent(prev => prev ? { ...prev, servicesFaqs: newFaqs } as CMSContent : prev);
+    }
+  };
+
+  const updateCentroField = (field: keyof CentroConfig, value: unknown) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        centro: {
+          ...prev.centro,
+          [field]: value,
+        },
+      } as CMSContent;
+    });
+  };
+
+  const updateCentroZonaField = (index: number, field: 'title' | 'description', value: string) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const zonas = [...(prev.centro?.zonas ?? [])];
+      zonas[index] = { ...zonas[index], [field]: value };
+      return { ...prev, centro: { ...prev.centro, zonas } } as CMSContent;
+    });
+  };
+
+  const toggleCentroZonaActive = (index: number) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const zonas = [...(prev.centro?.zonas ?? [])];
+      const current = zonas[index] ?? { image: '', title: '', description: '', active: true };
+      zonas[index] = { ...current, active: current.active === false ? true : false };
+      return { ...prev, centro: { ...prev.centro, zonas } } as CMSContent;
+    });
+  };
+
+  const removeCentroZona = (index: number) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const zonas = (prev.centro?.zonas ?? []).filter((_, i) => i !== index);
+      return { ...prev, centro: { ...prev.centro, zonas } } as CMSContent;
+    });
+  };
+
+  const addCentroZona = () => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const zonas = [...(prev.centro?.zonas ?? []), { image: '', title: '', description: '', active: true }];
+      return { ...prev, centro: { ...prev.centro, zonas } } as CMSContent;
+    });
+  };
+
+  const handleCentroZonasDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (active.id !== over?.id) {
+      setEditedContent((prev) => {
+        if (!prev) return prev;
+        const zonas = prev.centro?.zonas ?? [];
+        const oldIndex = Number(active.id);
+        const newIndex = Number(over?.id);
+        return { ...prev, centro: { ...prev.centro, zonas: arrayMove(zonas, oldIndex, newIndex) } } as CMSContent;
+      });
     }
   };
 
@@ -2818,214 +2960,171 @@ export default function AdminPage() {
                   </div>
 
                   <div className="space-y-6">
-                    {/* Basic Info */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Información del Centro</h2>
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título</label>
-                          <input
-                            type="text"
-                            value={editedContent?.centro?.title || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return {
-                                  ...prev,
-                                  centro: { ...prev.centro, title: e.target.value }
-                                } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtítulo</label>
-                          <input
-                            type="text"
-                            value={editedContent?.centro?.subtitle || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return {
-                                  ...prev,
-                                  centro: { ...prev.centro, subtitle: e.target.value }
-                                } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Descripción</label>
-                          <textarea
-                            value={editedContent?.centro?.description || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return {
-                                  ...prev,
-                                  centro: { ...prev.centro, description: e.target.value }
-                                } as CMSContent;
-                              });
-                            }}
-                            rows={3}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
-                          />
-                        </div>
-                      </div>
-                    </GlassCard>
-
-                    {/* Schedule */}
-                    <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Horario</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Header</h2>
                       <div className="grid sm:grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Lunes a Viernes</label>
-                          <input
-                            type="text"
-                            value={editedContent?.centro?.schedule?.weekdays || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev?.centro) return prev;
-                                return {
-                                  ...prev,
-                                  centro: {
-                                    ...prev.centro,
-                                    schedule: { ...prev.centro.schedule, weekdays: e.target.value }
-                                  }
-                                } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            placeholder="7:00 - 21:00"
-                          />
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow</label>
+                          <input type="text" value={editedContent?.centro?.eyebrow ?? ''} onChange={(e) => updateCentroField('eyebrow', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
                         </div>
                         <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Sábados</label>
-                          <input
-                            type="text"
-                            value={editedContent?.centro?.schedule?.saturday || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev?.centro) return prev;
-                                return {
-                                  ...prev,
-                                  centro: {
-                                    ...prev.centro,
-                                    schedule: { ...prev.centro.schedule, saturday: e.target.value }
-                                  }
-                                } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            placeholder="9:00 - 14:00"
-                          />
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo</label>
+                          <input type="text" value={editedContent?.centro?.title ?? ''} onChange={(e) => updateCentroField('title', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
                         </div>
+                      </div>
+                      <div className="mt-4">
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtitulo</label>
+                        <input type="text" value={editedContent?.centro?.subtitle ?? ''} onChange={(e) => updateCentroField('subtitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                      </div>
+                      <div className="mt-4">
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Descripcion principal</label>
+                        <textarea value={editedContent?.centro?.description ?? ''} onChange={(e) => updateCentroField('description', e.target.value)} rows={4} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none" />
                       </div>
                     </GlassCard>
 
-                    {/* Features */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Características</h2>
-                      <div className="space-y-4">
-                        {(editedContent?.centro?.features || []).map((feature, index) => (
-                          <div key={index} className="p-4 rounded-xl bg-muted/30 border border-border">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Nuestras Zonas</h2>
+                      <div className="grid sm:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo de seccion</label>
+                          <input type="text" value={editedContent?.centro?.zonasTitle ?? ''} onChange={(e) => updateCentroField('zonasTitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtitulo de seccion</label>
+                          <input type="text" value={editedContent?.centro?.zonasSubtitle ?? ''} onChange={(e) => updateCentroField('zonasSubtitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                      </div>
+                      <DndContext collisionDetection={closestCenter} onDragEnd={handleCentroZonasDragEnd}>
+                        <SortableContext items={(editedContent?.centro?.zonas ?? []).map((_, i) => i.toString())} strategy={verticalListSortingStrategy}>
+                          <div className="space-y-3">
+                            {(editedContent?.centro?.zonas ?? []).map((zona, index) => (
+                              <SortableCentroZonaItem
+                                key={index}
+                                zona={zona}
+                                index={index}
+                                onUpdate={(field, value) => updateCentroZonaField(index, field, value)}
+                                onRemove={() => removeCentroZona(index)}
+                                onToggleActive={() => toggleCentroZonaActive(index)}
+                                onPickImage={() => {
+                                  setCentroPickerIndex(index);
+                                  setCentroPickerOpen(true);
+                                }}
+                              />
+                            ))}
+                          </div>
+                        </SortableContext>
+                      </DndContext>
+                      <PremiumButton variant="outline" size="sm" icon={<Plus className="w-4 h-4" />} onClick={addCentroZona} className="mt-4">
+                        Anadir zona
+                      </PremiumButton>
+                    </GlassCard>
+
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Por que elegirnos?</h2>
+                      <div className="grid sm:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo de seccion</label>
+                          <input type="text" value={editedContent?.centro?.featuresTitle ?? ''} onChange={(e) => updateCentroField('featuresTitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtitulo de seccion</label>
+                          <input type="text" value={editedContent?.centro?.featuresSubtitle ?? ''} onChange={(e) => updateCentroField('featuresSubtitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                      </div>
+                      <div className="space-y-3">
+                        {(editedContent?.centro?.features ?? []).map((feature, index) => (
+                          <div key={index} className="p-4 rounded-xl bg-muted/30 border border-border space-y-2">
                             <div className="grid sm:grid-cols-3 gap-3">
-                              <input
-                                type="text"
-                                value={feature.icon}
-                                onChange={(e) => {
-                                  setEditedContent((prev) => {
-                                    if (!prev?.centro) return prev;
-                                    const newFeatures = [...(prev.centro.features || [])];
-                                    newFeatures[index] = { ...newFeatures[index], icon: e.target.value };
-                                    return {
-                                      ...prev,
-                                      centro: { ...prev.centro, features: newFeatures }
-                                    } as CMSContent;
-                                  });
-                                }}
-                                placeholder="Icono (Sparkles, Shield, Zap, Users)"
-                                className="px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                              />
-                              <input
-                                type="text"
-                                value={feature.title}
-                                onChange={(e) => {
-                                  setEditedContent((prev) => {
-                                    if (!prev?.centro) return prev;
-                                    const newFeatures = [...(prev.centro.features || [])];
-                                    newFeatures[index] = { ...newFeatures[index], title: e.target.value };
-                                    return {
-                                      ...prev,
-                                      centro: { ...prev.centro, features: newFeatures }
-                                    } as CMSContent;
-                                  });
-                                }}
-                                placeholder="Título"
-                                className="px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                              />
-                              <div className="flex gap-2">
-                                <input
-                                  type="text"
-                                  value={feature.description}
-                                  onChange={(e) => {
-                                    setEditedContent((prev) => {
-                                      if (!prev?.centro) return prev;
-                                      const newFeatures = [...(prev.centro.features || [])];
-                                      newFeatures[index] = { ...newFeatures[index], description: e.target.value };
-                                      return {
-                                        ...prev,
-                                        centro: { ...prev.centro, features: newFeatures }
-                                      } as CMSContent;
-                                    });
+                              <div>
+                                <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Icono</label>
+                                <IconPicker
+                                  value={feature.icon ?? 'Sparkles'}
+                                  onChange={(icon) => {
+                                    const features = [...(editedContent?.centro?.features ?? [])];
+                                    features[index] = { ...features[index], icon };
+                                    updateCentroField('features', features);
                                   }}
-                                  placeholder="Descripción"
-                                  className="flex-1 px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                                 />
-                                <button
-                                  onClick={() => {
-                                    setEditedContent((prev) => {
-                                      if (!prev?.centro) return prev;
-                                      const newFeatures = (prev.centro.features || []).filter((_, i) => i !== index);
-                                      return {
-                                        ...prev,
-                                        centro: { ...prev.centro, features: newFeatures }
-                                      } as CMSContent;
-                                    });
-                                  }}
-                                  className="p-2 text-destructive hover:bg-destructive/10 rounded-lg"
-                                >
+                              </div>
+                              <div>
+                                <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Titulo</label>
+                                <input type="text" value={feature.title ?? ''} onChange={(e) => {
+                                  const features = [...(editedContent?.centro?.features ?? [])];
+                                  features[index] = { ...features[index], title: e.target.value };
+                                  updateCentroField('features', features);
+                                }} className="w-full px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                              </div>
+                              <div className="flex items-end justify-end">
+                                <button type="button" onClick={() => {
+                                  const features = (editedContent?.centro?.features ?? []).filter((_, i) => i !== index);
+                                  updateCentroField('features', features);
+                                }} className="p-2 text-destructive hover:bg-destructive/10 rounded-lg">
                                   <Trash2 className="w-4 h-4" />
                                 </button>
                               </div>
                             </div>
+                            <textarea value={feature.description ?? ''} onChange={(e) => {
+                              const features = [...(editedContent?.centro?.features ?? [])];
+                              features[index] = { ...features[index], description: e.target.value };
+                              updateCentroField('features', features);
+                            }} rows={2} className="w-full px-3 py-2 rounded-lg bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none" />
                           </div>
                         ))}
-                        <PremiumButton
-                          variant="outline"
-                          size="sm"
-                          icon={<Plus className="w-4 h-4" />}
-                          onClick={() => setEditedContent((prev) => {
-                            if (!prev?.centro) return prev;
-                            return {
-                              ...prev,
-                              centro: {
-                                ...prev.centro,
-                                features: [...(prev.centro.features || []), { icon: '', title: '', description: '' }]
-                              }
-                            } as CMSContent;
-                          })}
-                        >
-                          Añadir Característica
-                        </PremiumButton>
+                      </div>
+                      <PremiumButton variant="outline" size="sm" icon={<Plus className="w-4 h-4" />} onClick={() => {
+                        const features = [...(editedContent?.centro?.features ?? []), { icon: 'Sparkles', title: '', description: '' }];
+                        updateCentroField('features', features);
+                      }} className="mt-4">
+                        Anadir feature
+                      </PremiumButton>
+                    </GlassCard>
+
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Como llegar</h2>
+                      <div className="grid sm:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow</label>
+                          <input type="text" value={editedContent?.centro?.locationEyebrow ?? ''} onChange={(e) => updateCentroField('locationEyebrow', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo</label>
+                          <input type="text" value={editedContent?.centro?.locationTitle ?? ''} onChange={(e) => updateCentroField('locationTitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                      </div>
+                      <div className="grid sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Direccion</label>
+                          <input type="text" value={editedContent?.centro?.address ?? ''} onChange={(e) => updateCentroField('address', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Horario</label>
+                          <input type="text" value={editedContent?.centro?.schedule ?? ''} onChange={(e) => updateCentroField('schedule', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Telefono</label>
+                          <input type="text" value={editedContent?.centro?.phone ?? ''} onChange={(e) => updateCentroField('phone', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Email</label>
+                          <input type="text" value={editedContent?.centro?.email ?? ''} onChange={(e) => updateCentroField('email', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto CTA</label>
+                          <input type="text" value={editedContent?.centro?.ctaText ?? ''} onChange={(e) => updateCentroField('ctaText', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Enlace CTA</label>
+                          <input type="text" value={editedContent?.centro?.ctaLink ?? ''} onChange={(e) => updateCentroField('ctaLink', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                      </div>
+                      <div className="mt-4">
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Map URL (iframe src)</label>
+                        <textarea value={editedContent?.centro?.mapUrl ?? ''} onChange={(e) => updateCentroField('mapUrl', e.target.value)} rows={3} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none" />
                       </div>
                     </GlassCard>
                   </div>
                 </motion.div>
               )}
-
               {/* ============================================
                   CMS - SERVICIOS
                   ============================================ */}
@@ -4662,6 +4761,28 @@ export default function AdminPage() {
                 });
                 setBrandingConfig({ logoUrl: file.url, logoStoragePath: file.storagePath, updatedAt: new Date().toISOString() });
                 setLogoPickerOpen(false);
+              }}
+            />
+
+            <MediaPicker
+              open={centroPickerOpen}
+              onClose={() => {
+                setCentroPickerOpen(false);
+                setCentroPickerIndex(null);
+              }}
+              filterType="image"
+              uploadFolderId={centroFolderId}
+              onSelect={(file) => {
+                if (centroPickerIndex === null) return;
+                setEditedContent((prev) => {
+                  if (!prev) return prev;
+                  const zonas = [...(prev.centro?.zonas ?? [])];
+                  if (!zonas[centroPickerIndex]) return prev;
+                  zonas[centroPickerIndex] = { ...zonas[centroPickerIndex], image: file.url };
+                  return { ...prev, centro: { ...prev.centro, zonas } } as CMSContent;
+                });
+                setCentroPickerOpen(false);
+                setCentroPickerIndex(null);
               }}
             />
 

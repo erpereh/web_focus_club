@@ -16,6 +16,7 @@ import {
     getOrCreateGalleryFolder,
     getOrCreateBrandingFolder,
     getOrCreateSandraFolder,
+    getOrCreateCentroFolder,
 } from '@/lib/firestore';
 import type { MediaFolder, MediaFile, UploadProgress } from '@/types';
 import { v4 as uuidv4 } from 'uuid';
@@ -60,22 +61,25 @@ export function useMediaLibrary() {
     const [galleryFolderId, setGalleryFolderId] = useState<string | null>(null);
     const [brandingFolderId, setBrandingFolderId] = useState<string | null>(null);
     const [sandraFolderId, setSandraFolderId] = useState<string | null>(null);
+    const [centroFolderId, setCentroFolderId] = useState<string | null>(null);
 
     // --- FETCH ---
 
     const fetchFolders = useCallback(async () => {
         setLoading(true);
         try {
-            const [data, galleryResult, brandingResult, sandraResult] = await Promise.all([
+            const [data, galleryResult, brandingResult, sandraResult, centroResult] = await Promise.all([
                 getMediaFolders(),
                 getOrCreateGalleryFolder(),
                 getOrCreateBrandingFolder(),
                 getOrCreateSandraFolder(),
+                getOrCreateCentroFolder(),
             ]);
             setFolders(data);
             setGalleryFolderId(galleryResult.folderId);
             setBrandingFolderId(brandingResult.folderId);
             setSandraFolderId(sandraResult.folderId);
+            setCentroFolderId(centroResult.folderId);
         } finally {
             setLoading(false);
         }
@@ -127,6 +131,8 @@ export function useMediaLibrary() {
                     ? `public/imagenes/branding/${uniqueName}`
                     : folderId && folderId === sandraFolderId
                         ? `public/imagenes/sandra/${uniqueName}`
+                        : folderId && folderId === centroFolderId
+                            ? `public/imagenes/el_centro/${uniqueName}`
                         : folderId
                         ? `media/${folderId}/${uniqueName}`
                         : `media/root/${uniqueName}`;
@@ -238,6 +244,7 @@ export function useMediaLibrary() {
         galleryFolderId,
         brandingFolderId,
         sandraFolderId,
+        centroFolderId,
         fetchFolders,
         fetchFiles,
         createFolder: handleCreateFolder,

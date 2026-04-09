@@ -25,6 +25,9 @@ import type {
     Testimonial,
     CMSContent,
     SandraData,
+    CentroConfig,
+    CentroFeature,
+    CentroZona,
     CentroData,
     GaleriaContent,
     TimeSlot,
@@ -40,6 +43,138 @@ import type {
     BrandingConfig,
     HeroStat,
 } from '@/types';
+
+const DEFAULT_CENTRO_ZONAS: CentroZona[] = [
+    {
+        title: 'Entrada',
+        description: 'Acceso exclusivo al centro, disenado para que tu experiencia comience desde el primer paso.',
+        image: 'https://firebasestorage.googleapis.com/v0/b/focus-club-f73b8.firebasestorage.app/o/public%2Fimagenes%2Fel_centro%2Fentrada.jpeg?alt=media&token=220c18a8-87af-49a6-a0dd-68480c729ffe',
+        active: true,
+    },
+    {
+        title: 'Zona de Entrenamiento',
+        description: 'Espacio equipado con todo lo necesario para tus sesiones de entrenamiento funcional y cardio.',
+        image: 'https://firebasestorage.googleapis.com/v0/b/focus-club-f73b8.firebasestorage.app/o/public%2Fimagenes%2Fel_centro%2Fgym1.jpeg?alt=media&token=b1d33f31-9880-4be9-8346-38958e78aac2',
+        active: true,
+    },
+    {
+        title: 'Zona de Musculacion',
+        description: 'Area dedicada al trabajo de fuerza con maquinaria y pesos libres de calidad profesional.',
+        image: 'https://firebasestorage.googleapis.com/v0/b/focus-club-f73b8.firebasestorage.app/o/public%2Fimagenes%2Fel_centro%2Fgym3.jpeg?alt=media&token=19fdea88-575f-4adb-8d78-36457177b04b',
+        active: true,
+    },
+    {
+        title: 'Bano',
+        description: 'Instalaciones limpias y bien equipadas para que puedas asearte comodamente tras tu sesion.',
+        image: 'https://firebasestorage.googleapis.com/v0/b/focus-club-f73b8.firebasestorage.app/o/public%2Fimagenes%2Fel_centro%2Fba%C3%B1o.jpeg?alt=media&token=d4053e23-1633-416f-b708-56b0202f3bac',
+        active: true,
+    },
+];
+
+const DEFAULT_CENTRO_FEATURES: CentroFeature[] = [
+    { icon: 'Sparkles', title: 'Equipamiento Premium', description: 'Marcas lideres en fitness y bienestar.' },
+    { icon: 'Shield', title: 'Higiene Total', description: 'Protocolos estrictos de limpieza y desinfeccion.' },
+    { icon: 'Zap', title: 'Tecnologia Avanzada', description: 'Herramientas de analisis y seguimiento.' },
+    { icon: 'Users', title: 'Espacio Exclusivo', description: 'Solo citas previas, sin aglomeraciones.' },
+];
+
+export const DEFAULT_CENTRO_CONFIG: CentroConfig = {
+    eyebrow: 'NUESTRAS INSTALACIONES',
+    title: 'El Centro',
+    subtitle: 'Un espacio disenado para tu transformacion.',
+    description: 'Cada detalle ha sido pensado para ofrecerte la mejor experiencia. Un espacio exclusivo donde el entrenamiento personalizado, la privacidad y la calidad se fusionan.',
+    zonasTitle: 'Nuestras Zonas',
+    zonasSubtitle: 'Espacios pensados para cada etapa de tu entrenamiento',
+    zonas: DEFAULT_CENTRO_ZONAS,
+    featuresTitle: 'Por que elegirnos?',
+    featuresSubtitle: 'Detalles que marcan la diferencia',
+    features: DEFAULT_CENTRO_FEATURES,
+    locationEyebrow: 'UBICACION',
+    locationTitle: 'Como llegar',
+    address: 'Focus Club Vallecas',
+    schedule: 'Lunes a Viernes: 7:00 - 21:00 | Sabados: 9:00 - 14:00',
+    phone: '+34 689 93 33 39',
+    email: 'infofocusclub2026@gmail.com',
+    ctaText: 'Reservar Visita',
+    ctaLink: '/portal',
+    mapUrl: 'https://maps.google.com/maps?q=C.+de+Pe%C3%B1aranda+de+Bracamonte+69+Local+4,Villa+de+Vallecas,28051+Madrid&output=embed',
+};
+
+function asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function asNonEmptyString(value: unknown, fallback: string): string {
+    return typeof value === 'string' && value.trim().length > 0 ? value : fallback;
+}
+
+export function normalizeCentroConfig(rawCentro: unknown): CentroConfig {
+    const raw = asRecord(rawCentro);
+    const scheduleRaw = raw.schedule;
+    let normalizedSchedule = DEFAULT_CENTRO_CONFIG.schedule;
+    if (typeof scheduleRaw === 'string' && scheduleRaw.trim()) {
+        normalizedSchedule = scheduleRaw;
+    } else if (scheduleRaw && typeof scheduleRaw === 'object') {
+        const scheduleObj = asRecord(scheduleRaw);
+        const weekdays = typeof scheduleObj.weekdays === 'string' ? scheduleObj.weekdays.trim() : '';
+        const saturday = typeof scheduleObj.saturday === 'string' ? scheduleObj.saturday.trim() : '';
+        if (weekdays || saturday) {
+            normalizedSchedule = [weekdays ? `Lunes a Viernes: ${weekdays}` : '', saturday ? `Sabados: ${saturday}` : '']
+                .filter(Boolean)
+                .join(' | ');
+        }
+    }
+
+    const featuresRaw = Array.isArray(raw.features) ? raw.features : [];
+    const normalizedFeatures = featuresRaw
+        .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+        .map((item) => ({
+            icon: asNonEmptyString(item.icon, 'Sparkles'),
+            title: asNonEmptyString(item.title, ''),
+            description: asNonEmptyString(item.description, ''),
+        }))
+        .filter((item) => item.title || item.description);
+
+    const zonasRaw = Array.isArray(raw.zonas) ? raw.zonas : [];
+    let normalizedZonas: CentroZona[];
+    if (zonasRaw.length > 0) {
+        normalizedZonas = zonasRaw
+            .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+            .map((item) => ({
+                image: asNonEmptyString(item.image, ''),
+                title: asNonEmptyString(item.title, ''),
+                description: asNonEmptyString(item.description, ''),
+                active: item.active === false ? false : true,
+            }))
+            .filter((item) => item.image || item.title || item.description);
+    } else if (Array.isArray(raw.gallery)) {
+        normalizedZonas = DEFAULT_CENTRO_ZONAS.map((zona) => ({ ...zona }));
+    } else {
+        normalizedZonas = DEFAULT_CENTRO_ZONAS.map((zona) => ({ ...zona }));
+    }
+
+    return {
+        eyebrow: asNonEmptyString(raw.eyebrow, DEFAULT_CENTRO_CONFIG.eyebrow),
+        title: asNonEmptyString(raw.title, DEFAULT_CENTRO_CONFIG.title),
+        subtitle: asNonEmptyString(raw.subtitle, DEFAULT_CENTRO_CONFIG.subtitle),
+        description: asNonEmptyString(raw.description, DEFAULT_CENTRO_CONFIG.description),
+        zonasTitle: asNonEmptyString(raw.zonasTitle, DEFAULT_CENTRO_CONFIG.zonasTitle),
+        zonasSubtitle: asNonEmptyString(raw.zonasSubtitle, DEFAULT_CENTRO_CONFIG.zonasSubtitle),
+        zonas: normalizedZonas.length > 0 ? normalizedZonas : DEFAULT_CENTRO_ZONAS.map((zona) => ({ ...zona })),
+        featuresTitle: asNonEmptyString(raw.featuresTitle, DEFAULT_CENTRO_CONFIG.featuresTitle),
+        featuresSubtitle: asNonEmptyString(raw.featuresSubtitle, DEFAULT_CENTRO_CONFIG.featuresSubtitle),
+        features: normalizedFeatures.length > 0 ? normalizedFeatures : DEFAULT_CENTRO_FEATURES.map((feature) => ({ ...feature })),
+        locationEyebrow: asNonEmptyString(raw.locationEyebrow, DEFAULT_CENTRO_CONFIG.locationEyebrow),
+        locationTitle: asNonEmptyString(raw.locationTitle, DEFAULT_CENTRO_CONFIG.locationTitle),
+        address: asNonEmptyString(raw.address, DEFAULT_CENTRO_CONFIG.address),
+        schedule: asNonEmptyString(normalizedSchedule, DEFAULT_CENTRO_CONFIG.schedule),
+        phone: asNonEmptyString(raw.phone, DEFAULT_CENTRO_CONFIG.phone),
+        email: asNonEmptyString(raw.email, DEFAULT_CENTRO_CONFIG.email),
+        ctaText: asNonEmptyString(raw.ctaText, DEFAULT_CENTRO_CONFIG.ctaText),
+        ctaLink: asNonEmptyString(raw.ctaLink, DEFAULT_CENTRO_CONFIG.ctaLink),
+        mapUrl: asNonEmptyString(raw.mapUrl, DEFAULT_CENTRO_CONFIG.mapUrl),
+    };
+}
 
 // ============================================
 // USUARIOS
@@ -207,7 +342,12 @@ const SITE_CONTENT_DOC = 'main';
 
 export async function getSiteContent(): Promise<CMSContent | null> {
     const snap = await getDoc(doc(db, 'site_content', SITE_CONTENT_DOC));
-    return snap.exists() ? (snap.data() as CMSContent) : null;
+    if (!snap.exists()) return null;
+    const data = snap.data() as CMSContent & { centro?: unknown };
+    return {
+        ...data,
+        centro: normalizeCentroConfig(data.centro),
+    } as CMSContent;
 }
 
 export async function updateSiteContent(data: Partial<CMSContent>): Promise<void> {
@@ -222,12 +362,26 @@ export async function updateSandraData(data: Partial<SandraData>): Promise<void>
     });
 }
 
-export async function updateCentroData(data: Partial<CentroData>): Promise<void> {
-    const current = await getSiteContent();
-    if (!current) return;
-    await updateDoc(doc(db, 'site_content', SITE_CONTENT_DOC), {
-        centro: { ...current.centro, ...data },
+export async function getCentroConfig(): Promise<CentroConfig | null> {
+    const snap = await getDoc(doc(db, 'site_content', SITE_CONTENT_DOC));
+    if (!snap.exists()) return null;
+    return normalizeCentroConfig((snap.data() as { centro?: unknown }).centro);
+}
+
+export async function updateCentroConfig(data: Partial<CentroConfig>): Promise<void> {
+    const current = await getCentroConfig();
+    const base = current ?? DEFAULT_CENTRO_CONFIG;
+    const merged = normalizeCentroConfig({
+        ...base,
+        ...data,
+        zonas: data.zonas ?? base.zonas,
+        features: data.features ?? base.features,
     });
+    await setDoc(doc(db, 'site_content', SITE_CONTENT_DOC), { centro: merged }, { merge: true });
+}
+
+export async function updateCentroData(data: Partial<CentroData>): Promise<void> {
+    await updateCentroConfig(data as Partial<CentroConfig>);
 }
 
 export async function updateGaleriaData(data: GaleriaContent): Promise<void> {
@@ -878,6 +1032,21 @@ export async function getOrCreateSandraFolder(): Promise<{ folderId: string }> {
     }
     const folderRef = await addDoc(collection(db, 'media_folders'), {
         name: 'Sandra',
+        parentId: null,
+        createdAt: Timestamp.now(),
+    });
+    await setDoc(configRef, { folderId: folderRef.id });
+    return { folderId: folderRef.id };
+}
+
+export async function getOrCreateCentroFolder(): Promise<{ folderId: string }> {
+    const configRef = doc(db, 'system_config', 'centro_folder');
+    const configSnap = await getDoc(configRef);
+    if (configSnap.exists()) {
+        return { folderId: configSnap.data().folderId as string };
+    }
+    const folderRef = await addDoc(collection(db, 'media_folders'), {
+        name: 'El Centro',
         parentId: null,
         createdAt: Timestamp.now(),
     });
