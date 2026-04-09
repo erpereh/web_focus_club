@@ -73,7 +73,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useMediaLibrary } from '@/hooks/useMediaLibrary';
 import { defaultCMS } from '@/hooks/useFirestore';
 import { toast } from '@/hooks/use-toast';
-import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono, BrandingConfig, HeroStat, SandraAchievement, SandraValue, CentroConfig, GaleriaTrainingItem, GaleriaResultado, GaleriaStat } from '@/types';
+import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, ContactoConfig, ContactoCard, BlockedSlot, Trainer, SiteConfig, Bono, BrandingConfig, HeroStat, SandraAchievement, SandraValue, CentroConfig, GaleriaTrainingItem, GaleriaResultado, GaleriaStat } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import {
   getAppointments,
@@ -130,7 +130,7 @@ import {
   expireOverdueBonos,
   getBrandingConfig,
   updateBrandingConfig,
-  getMediaFileByUrl,
+
 } from '@/lib/firestore';
 import { cn } from '@/lib/utils';
 import type { UserProfile } from '@/types';
@@ -662,6 +662,131 @@ function SortableGaleriaResultadoItem({
         <input type="text" value={resultado.label ?? ''} onChange={(e) => onUpdate('label', e.target.value)} placeholder="Etiqueta" className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm" />
       </div>
       <textarea value={resultado.achievement ?? ''} onChange={(e) => onUpdate('achievement', e.target.value)} placeholder="Descripcion del resultado" rows={2} className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none text-sm" />
+    </div>
+  );
+}
+
+function SortableContactoCardItem({
+  card,
+  index,
+  onUpdate,
+  onRemove,
+  onToggleActive,
+}: {
+  card: ContactoCard;
+  index: number;
+  onUpdate: (field: 'icon' | 'title' | 'content' | 'linkText' | 'linkUrl', val: string) => void;
+  onRemove: () => void;
+  onToggleActive: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: index.toString() });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+
+  return (
+    <div ref={setNodeRef} style={style} className="p-4 rounded-xl bg-muted/30 border border-border space-y-3">
+      <div className="flex items-start gap-3">
+        <button type="button" {...attributes} {...listeners} className="cursor-grab text-[var(--color-text-muted)] hover:text-white touch-none mt-3">
+          <GripVertical className="w-4 h-4" />
+        </button>
+        <div className="w-16 shrink-0">
+          <label className="block text-xs text-[var(--color-text-secondary)] mb-2">Icono</label>
+          <IconPicker value={card.icon ?? 'MapPin'} onChange={(icon) => onUpdate('icon', icon)} />
+        </div>
+        <div className="flex-1 grid sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Titulo</label>
+            <input
+              type="text"
+              value={card.title ?? ''}
+              onChange={(e) => onUpdate('title', e.target.value)}
+              placeholder="Titulo"
+              className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onToggleActive}
+              className={cn(
+                'px-3 py-2 rounded-xl text-xs border transition-colors mt-5',
+                card.active === false
+                  ? 'text-[var(--color-text-secondary)] border-border hover:text-[var(--color-text-primary)]'
+                  : 'text-[var(--color-accent-val)] border-[var(--color-accent-border)] bg-[var(--color-accent-dim)]'
+              )}
+            >
+              {card.active === false ? 'Inactiva' : 'Activa'}
+            </button>
+            <button type="button" onClick={onRemove} className="p-2 text-destructive hover:bg-destructive/10 rounded-xl mt-5">
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Contenido</label>
+        <textarea
+          value={card.content ?? ''}
+          onChange={(e) => onUpdate('content', e.target.value)}
+          rows={2}
+          placeholder="Contenido de la tarjeta"
+          className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none text-sm"
+        />
+      </div>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Texto enlace</label>
+          <input
+            type="text"
+            value={card.linkText ?? ''}
+            onChange={(e) => onUpdate('linkText', e.target.value)}
+            placeholder="Enviar mensaje directo"
+            className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-[var(--color-text-secondary)] mb-1">URL enlace</label>
+          <input
+            type="text"
+            value={card.linkUrl ?? ''}
+            onChange={(e) => onUpdate('linkUrl', e.target.value)}
+            placeholder="https://... | tel:... | mailto:..."
+            className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SortableContactoSubjectItem({
+  subject,
+  index,
+  onUpdate,
+  onRemove,
+}: {
+  subject: string;
+  index: number;
+  onUpdate: (val: string) => void;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: index.toString() });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+
+  return (
+    <div ref={setNodeRef} style={style} className="p-3 rounded-xl bg-muted/30 border border-border flex items-center gap-2">
+      <button type="button" {...attributes} {...listeners} className="cursor-grab text-[var(--color-text-muted)] hover:text-white touch-none">
+        <GripVertical className="w-4 h-4" />
+      </button>
+      <input
+        type="text"
+        value={subject ?? ''}
+        onChange={(e) => onUpdate(e.target.value)}
+        placeholder="Asunto"
+        className="flex-1 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+      />
+      <button type="button" onClick={onRemove} className="p-2 text-destructive hover:bg-destructive/10 rounded-xl">
+        <Trash2 className="w-4 h-4" />
+      </button>
     </div>
   );
 }
@@ -1297,6 +1422,110 @@ export default function AdminPage() {
         if (!prev) return prev;
         const resultados = prev.galeria?.resultados ?? [];
         return { ...prev, galeria: { ...prev.galeria, resultados: arrayMove(resultados, Number(active.id), Number(over?.id)) } } as CMSContent;
+      });
+    }
+  };
+
+  const updateContactoField = (field: keyof ContactoConfig, value: unknown) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        contacto: {
+          ...(prev.contacto ?? defaultCMS.contacto!),
+          [field]: value,
+        },
+      } as CMSContent;
+    });
+  };
+
+  const updateContactoCardField = (index: number, field: 'icon' | 'title' | 'content' | 'linkText' | 'linkUrl', value: string) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const contacto = prev.contacto ?? defaultCMS.contacto!;
+      const cards = [...(contacto.cards ?? [])];
+      cards[index] = { ...cards[index], [field]: value };
+      return { ...prev, contacto: { ...contacto, cards } } as CMSContent;
+    });
+  };
+
+  const addContactoCard = () => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const contacto = prev.contacto ?? defaultCMS.contacto!;
+      const cards = [...(contacto.cards ?? []), { icon: 'MapPin', title: '', content: '', linkText: '', linkUrl: '', active: true }];
+      return { ...prev, contacto: { ...contacto, cards } } as CMSContent;
+    });
+  };
+
+  const removeContactoCard = (index: number) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const contacto = prev.contacto ?? defaultCMS.contacto!;
+      const cards = (contacto.cards ?? []).filter((_, i) => i !== index);
+      return { ...prev, contacto: { ...contacto, cards } } as CMSContent;
+    });
+  };
+
+  const toggleContactoCardActive = (index: number) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const contacto = prev.contacto ?? defaultCMS.contacto!;
+      const cards = [...(contacto.cards ?? [])];
+      const current = cards[index] ?? { icon: 'MapPin', title: '', content: '', linkText: '', linkUrl: '', active: true };
+      cards[index] = { ...current, active: current.active === false ? true : false };
+      return { ...prev, contacto: { ...contacto, cards } } as CMSContent;
+    });
+  };
+
+  const handleContactoCardsDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (active.id !== over?.id) {
+      setEditedContent((prev) => {
+        if (!prev) return prev;
+        const contacto = prev.contacto ?? defaultCMS.contacto!;
+        const cards = contacto.cards ?? [];
+        return { ...prev, contacto: { ...contacto, cards: arrayMove(cards, Number(active.id), Number(over?.id)) } } as CMSContent;
+      });
+    }
+  };
+
+  const updateContactoSubject = (index: number, value: string) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const contacto = prev.contacto ?? defaultCMS.contacto!;
+      const subjects = [...(contacto.subjects ?? [])];
+      subjects[index] = value;
+      return { ...prev, contacto: { ...contacto, subjects } } as CMSContent;
+    });
+  };
+
+  const addContactoSubject = () => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const contacto = prev.contacto ?? defaultCMS.contacto!;
+      const subjects = [...(contacto.subjects ?? []), ''];
+      return { ...prev, contacto: { ...contacto, subjects } } as CMSContent;
+    });
+  };
+
+  const removeContactoSubject = (index: number) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const contacto = prev.contacto ?? defaultCMS.contacto!;
+      const subjects = (contacto.subjects ?? []).filter((_, i) => i !== index);
+      return { ...prev, contacto: { ...contacto, subjects } } as CMSContent;
+    });
+  };
+
+  const handleContactoSubjectsDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (active.id !== over?.id) {
+      setEditedContent((prev) => {
+        if (!prev) return prev;
+        const contacto = prev.contacto ?? defaultCMS.contacto!;
+        const subjects = contacto.subjects ?? [];
+        return { ...prev, contacto: { ...contacto, subjects: arrayMove(subjects, Number(active.id), Number(over?.id)) } } as CMSContent;
       });
     }
   };
@@ -4018,283 +4247,138 @@ export default function AdminPage() {
                   </div>
 
                   <div className="space-y-6">
-                    {/* About Section */}
                     <GlassCard className="p-6">
                       <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">
-                        <ImageIcon className="w-5 h-5 text-[var(--color-accent-val)]" />
-                        Sección Sobre Nosotros
+                        <Mail className="w-5 h-5 text-[var(--color-accent-val)]" />
+                        Header
                       </h2>
-                      <div className="space-y-4">
-                        <div className="mb-6">
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Imagen Representativa</label>
-                          {isValidImageUrl(editedContent?.aboutImage) ? (
-                            <img src={editedContent!.aboutImage} alt="About" className="w-full max-w-sm h-32 object-cover rounded-xl mb-3 border border-border" />
-                          ) : (
-                            <div className="w-full max-w-sm h-32 rounded-xl mb-3 border border-border bg-muted/30 flex items-center justify-center">
-                              <ImageIcon className="w-8 h-8 text-[var(--color-text-secondary)] opacity-50" />
-                            </div>
-                          )}
-                          <PremiumButton
-                            variant="outline"
-                            size="sm"
-                            icon={<ImageIcon className="w-4 h-4" />}
-                            onClick={() => setActiveImageManager({
-                              folder: 'Nosotros',
-                              currentUrl: editedContent?.aboutImage || undefined,
-                              onSelect: async (url) => {
-                                const file = await getMediaFileByUrl(url);
-                                if (!file) {
-                                  setEditedContent(prev => prev ? { ...prev, aboutImage: url } as CMSContent : prev);
-                                  return;
-                                }
-                                setEditedContent(prev => prev ? { ...prev, aboutImage: file.url } as CMSContent : prev);
-                              }
-                            })}
-                          >
-                            Cambiar Imagen
-                          </PremiumButton>
+                      <div className="grid sm:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow</label>
+                          <input type="text" value={editedContent?.contacto?.heroEyebrow ?? ''} onChange={(e) => updateContactoField('heroEyebrow', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
                         </div>
                         <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título Sobre Nosotros</label>
-                          <input
-                            type="text"
-                            value={editedContent?.aboutTitle || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return { ...prev, aboutTitle: e.target.value } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          />
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo</label>
+                          <input type="text" value={editedContent?.contacto?.heroTitle ?? ''} onChange={(e) => updateContactoField('heroTitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
                         </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto Principal</label>
-                          <textarea
-                            value={editedContent?.aboutText || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return { ...prev, aboutText: e.target.value } as CMSContent;
-                              });
-                            }}
-                            rows={4}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
-                          />
+                        <div className="sm:col-span-3">
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtitulo</label>
+                          <textarea value={editedContent?.contacto?.heroSubtitle ?? ''} onChange={(e) => updateContactoField('heroSubtitle', e.target.value)} rows={2} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none" />
                         </div>
                       </div>
                     </GlassCard>
 
-                    {/* Services Section */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Sección Servicios</h2>
-                      <div className="grid sm:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título</label>
-                          <input
-                            type="text"
-                            value={editedContent?.servicesTitle || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return { ...prev, servicesTitle: e.target.value } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtítulo</label>
-                          <input
-                            type="text"
-                            value={editedContent?.servicesSubtitle || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return { ...prev, servicesSubtitle: e.target.value } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          />
-                        </div>
+                      <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Tarjetas de contacto</h2>
+                        <button type="button" onClick={addContactoCard} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-sm border border-[var(--color-accent-border)]">
+                          <Plus className="w-4 h-4" /> Anadir tarjeta
+                        </button>
                       </div>
+                      <DndContext collisionDetection={closestCenter} onDragEnd={handleContactoCardsDragEnd}>
+                        <SortableContext items={(editedContent?.contacto?.cards ?? []).map((_, i) => i.toString())} strategy={verticalListSortingStrategy}>
+                          <div className="space-y-3">
+                            {(editedContent?.contacto?.cards ?? []).map((card, index) => (
+                              <SortableContactoCardItem
+                                key={`contact-card-${index}`}
+                                card={card}
+                                index={index}
+                                onUpdate={(field, value) => updateContactoCardField(index, field, value)}
+                                onRemove={() => removeContactoCard(index)}
+                                onToggleActive={() => toggleContactoCardActive(index)}
+                              />
+                            ))}
+                          </div>
+                        </SortableContext>
+                      </DndContext>
                     </GlassCard>
 
-                    {/* CTA Section */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Sección CTA Final</h2>
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título</label>
-                          <input
-                            type="text"
-                            value={editedContent?.ctaTitle || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return { ...prev, ctaTitle: e.target.value } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto</label>
-                          <textarea
-                            value={editedContent?.ctaSubtitle || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return { ...prev, ctaSubtitle: e.target.value } as CMSContent;
-                              });
-                            }}
-                            rows={3}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
-                          />
-                        </div>
-                      </div>
-                    </GlassCard>
-
-                    {/* Contact Information */}
-                    <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Información de Contacto</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Formulario</h2>
                       <div className="space-y-4">
                         <div className="grid sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2 flex items-center gap-2">
-                              <Phone className="w-4 h-4" /> Teléfono
-                            </label>
-                            <input
-                              type="text"
-                              value={editedContent?.phone || ''}
-                              onChange={(e) => {
-                                setEditedContent((prev) => {
-                                  if (!prev) return prev;
-                                  return {
-                                    ...prev,
-                                    phone: e.target.value
-                                  } as CMSContent;
-                                });
-                              }}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            />
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo de formulario</label>
+                            <input type="text" value={editedContent?.contacto?.formTitle ?? ''} onChange={(e) => updateContactoField('formTitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
                           </div>
                           <div>
-                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2 flex items-center gap-2">
-                              <Mail className="w-4 h-4" /> Email
-                            </label>
-                            <input
-                              type="email"
-                              value={editedContent?.email || ''}
-                              onChange={(e) => {
-                                setEditedContent((prev) => {
-                                  if (!prev) return prev;
-                                  return {
-                                    ...prev,
-                                    email: e.target.value
-                                  } as CMSContent;
-                                });
-                              }}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            />
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtitulo de formulario</label>
+                            <input type="text" value={editedContent?.contacto?.formSubtitle ?? ''} onChange={(e) => updateContactoField('formSubtitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
                           </div>
                         </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2 flex items-center gap-2">
-                            <MapPin className="w-4 h-4" /> Dirección
-                          </label>
-                          <textarea
-                            value={editedContent?.address || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return {
-                                  ...prev,
-                                  address: e.target.value
-                                } as CMSContent;
-                              });
-                            }}
-                            rows={2}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
-                          />
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div><label className="block text-sm text-[var(--color-text-secondary)] mb-2">Nombre label</label><input type="text" value={editedContent?.contacto?.nameLabel ?? ''} onChange={(e) => updateContactoField('nameLabel', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" /></div>
+                          <div><label className="block text-sm text-[var(--color-text-secondary)] mb-2">Nombre placeholder</label><input type="text" value={editedContent?.contacto?.namePlaceholder ?? ''} onChange={(e) => updateContactoField('namePlaceholder', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" /></div>
+                        </div>
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div><label className="block text-sm text-[var(--color-text-secondary)] mb-2">Email label</label><input type="text" value={editedContent?.contacto?.emailLabel ?? ''} onChange={(e) => updateContactoField('emailLabel', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" /></div>
+                          <div><label className="block text-sm text-[var(--color-text-secondary)] mb-2">Email placeholder</label><input type="text" value={editedContent?.contacto?.emailPlaceholder ?? ''} onChange={(e) => updateContactoField('emailPlaceholder', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" /></div>
+                        </div>
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div><label className="block text-sm text-[var(--color-text-secondary)] mb-2">Telefono label</label><input type="text" value={editedContent?.contacto?.phoneLabel ?? ''} onChange={(e) => updateContactoField('phoneLabel', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" /></div>
+                          <div><label className="block text-sm text-[var(--color-text-secondary)] mb-2">Telefono placeholder</label><input type="text" value={editedContent?.contacto?.phonePlaceholder ?? ''} onChange={(e) => updateContactoField('phonePlaceholder', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" /></div>
+                        </div>
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div><label className="block text-sm text-[var(--color-text-secondary)] mb-2">Asunto label</label><input type="text" value={editedContent?.contacto?.subjectLabel ?? ''} onChange={(e) => updateContactoField('subjectLabel', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" /></div>
+                          <div><label className="block text-sm text-[var(--color-text-secondary)] mb-2">Asunto placeholder</label><input type="text" value={editedContent?.contacto?.subjectPlaceholder ?? ''} onChange={(e) => updateContactoField('subjectPlaceholder', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" /></div>
+                        </div>
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div><label className="block text-sm text-[var(--color-text-secondary)] mb-2">Mensaje label</label><input type="text" value={editedContent?.contacto?.messageLabel ?? ''} onChange={(e) => updateContactoField('messageLabel', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" /></div>
+                          <div><label className="block text-sm text-[var(--color-text-secondary)] mb-2">Mensaje placeholder</label><input type="text" value={editedContent?.contacto?.messagePlaceholder ?? ''} onChange={(e) => updateContactoField('messagePlaceholder', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" /></div>
                         </div>
                       </div>
                     </GlassCard>
 
-                    {/* Testimonials & Footer */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Testimonios y Footer</h2>
+                      <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Asuntos del formulario</h2>
+                        <button type="button" onClick={addContactoSubject} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-sm border border-[var(--color-accent-border)]">
+                          <Plus className="w-4 h-4" /> Anadir asunto
+                        </button>
+                      </div>
+                      <DndContext collisionDetection={closestCenter} onDragEnd={handleContactoSubjectsDragEnd}>
+                        <SortableContext items={(editedContent?.contacto?.subjects ?? []).map((_, i) => i.toString())} strategy={verticalListSortingStrategy}>
+                          <div className="space-y-3">
+                            {(editedContent?.contacto?.subjects ?? []).map((subject, index) => (
+                              <SortableContactoSubjectItem
+                                key={`contact-subject-${index}`}
+                                subject={subject}
+                                index={index}
+                                onUpdate={(value) => updateContactoSubject(index, value)}
+                                onRemove={() => removeContactoSubject(index)}
+                              />
+                            ))}
+                          </div>
+                        </SortableContext>
+                      </DndContext>
+                    </GlassCard>
+
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">CTA y mensaje de exito</h2>
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título de la sección Testimonios</label>
-                          <input
-                            type="text"
-                            value={editedContent?.testimonialsTitle || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return { ...prev, testimonialsTitle: e.target.value } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          />
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto boton enviar</label>
+                          <input type="text" value={editedContent?.contacto?.submitText ?? ''} onChange={(e) => updateContactoField('submitText', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
                         </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto del footer</label>
-                          <input
-                            type="text"
-                            value={editedContent?.footerText || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return { ...prev, footerText: e.target.value } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          />
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div><label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo exito</label><input type="text" value={editedContent?.contacto?.successTitle ?? ''} onChange={(e) => updateContactoField('successTitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" /></div>
+                          <div><label className="block text-sm text-[var(--color-text-secondary)] mb-2">Mensaje exito</label><input type="text" value={editedContent?.contacto?.successMessage ?? ''} onChange={(e) => updateContactoField('successMessage', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" /></div>
                         </div>
                       </div>
                     </GlassCard>
 
-                    {/* Social Media */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Redes Sociales</h2>
-                      <div className="grid sm:grid-cols-2 gap-4">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Mapa</h2>
+                      <div className="space-y-4">
                         <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Instagram (URL)</label>
-                          <input
-                            type="url"
-                            value={editedContent?.socialInstagram || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return {
-                                  ...prev,
-                                  socialInstagram: e.target.value
-                                } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            placeholder="https://instagram.com/tu-usuario"
-                          />
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">URL del mapa embebido</label>
+                          <textarea value={editedContent?.contacto?.mapUrl ?? ''} onChange={(e) => updateContactoField('mapUrl', e.target.value)} rows={3} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none" />
                         </div>
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">WhatsApp (Número)</label>
-                          <input
-                            type="text"
-                            value={editedContent?.whatsapp || ''}
-                            onChange={(e) => {
-                              setEditedContent((prev) => {
-                                if (!prev) return prev;
-                                return {
-                                  ...prev,
-                                  whatsapp: e.target.value
-                                } as CMSContent;
-                              });
-                            }}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            placeholder="+34600000000"
-                          />
+                        <div className="rounded-xl border border-border bg-muted/20 p-3">
+                          <p className="text-xs text-[var(--color-text-secondary)] mb-2">Preview</p>
+                          <div className="relative aspect-video rounded-xl overflow-hidden bg-black/30">
+                            <iframe src={editedContent?.contacto?.mapUrl ?? ''} className="absolute inset-0 w-full h-full" style={{ border: 0 }} loading="lazy" title="Mapa contacto preview" />
+                          </div>
                         </div>
                       </div>
                     </GlassCard>

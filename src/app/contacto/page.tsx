@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { MapPin, Phone, Mail, Clock, Send, MessageCircle, CheckCircle } from 'lucide-react';
+import { CheckCircle, Send } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
+import { DynamicIcon } from '@/components/ui/DynamicIcon';
 import { useCMS } from '@/hooks/useFirestore';
 
 const containerVariants = {
@@ -22,6 +23,7 @@ const itemVariants = {
 
 export default function ContactoPage() {
   const { cmsContent } = useCMS();
+  const contacto = cmsContent.contacto!;
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -33,7 +35,6 @@ export default function ContactoPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate form submission
     setSubmitted(true);
     setTimeout(() => {
       setSubmitted(false);
@@ -48,9 +49,10 @@ export default function ContactoPage() {
     }));
   };
 
+  const visibleCards = (contacto.cards ?? []).filter((card) => card.active !== false);
+
   return (
     <div className="min-h-screen">
-      {/* Hero Section */}
       <section className="relative py-20 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-accent-dim)] to-transparent" />
         <div className="container mx-auto px-4">
@@ -60,102 +62,54 @@ export default function ContactoPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
           >
-            <span className="eyebrow">
-              Contacto
-            </span>
+            <span className="eyebrow">{contacto.heroEyebrow}</span>
             <h1 className="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mt-3 mb-6">
-              ¿Hablamos?
+              {contacto.heroTitle}
             </h1>
             <p className="text-[var(--color-text-secondary)] text-lg">
-              Estamos aquí para responder tus preguntas y ayudarte a comenzar tu transformación.
+              {contacto.heroSubtitle}
             </p>
           </motion.div>
         </div>
       </section>
 
-      {/* Contact Section */}
       <section className="py-12">
         <div className="container mx-auto px-4">
           <div className="grid lg:grid-cols-3 gap-8">
-            {/* Contact Info */}
             <motion.div
               className="lg:col-span-1 space-y-6"
               variants={containerVariants}
               initial="hidden"
               animate="visible"
             >
-              {[
-                {
-                  icon: MapPin,
-                  title: 'Dirección',
-                  content: cmsContent.address,
-                  action: 'https://maps.app.goo.gl/EHFk2xEh9xwHBaDKA',
-                },
-                {
-                  icon: Phone,
-                  title: 'Teléfono',
-                  content: cmsContent.phone,
-                  action: `tel:${cmsContent.phone}`,
-                },
-                {
-                  icon: Mail,
-                  title: 'Email',
-                  content: cmsContent.email,
-                  action: `mailto:${cmsContent.email}`,
-                },
-                {
-                  icon: Clock,
-                  title: 'Horario',
-                  content: 'L-V: 7:00-21:00 | S: 9:00-14:00',
-                  action: null,
-                },
-              ].map((item, index) => (
-                <motion.div key={index} variants={itemVariants}>
-                  <GlassCard className="flex items-start gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-[var(--color-accent-dim)] flex items-center justify-center flex-shrink-0">
-                      <item.icon className="w-6 h-6 text-[var(--color-accent-val)]" />
+              {visibleCards.map((card, index) => (
+                <motion.div key={`${card.title}-${index}`} variants={itemVariants}>
+                  <GlassCard className={card.title.toLowerCase().includes('whatsapp') ? 'bg-gradient-to-r from-green-900/30 to-green-800/20 border-green-500/20' : 'flex items-start gap-4'}>
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${card.title.toLowerCase().includes('whatsapp') ? 'bg-green-500/20' : 'bg-[var(--color-accent-dim)]'}`}>
+                      <DynamicIcon
+                        name={card.icon}
+                        className={`w-6 h-6 ${card.title.toLowerCase().includes('whatsapp') ? 'text-green-400' : 'text-[var(--color-accent-val)]'}`}
+                      />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-[var(--color-text-primary)] mb-1">{item.title}</h3>
-                      {item.action ? (
+                      <h3 className="font-semibold text-[var(--color-text-primary)] mb-1">{card.title}</h3>
+                      <p className="text-[var(--color-text-secondary)] text-sm">{card.content}</p>
+                      {card.linkUrl && (
                         <a
-                          href={item.action}
-                          className="text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)] transition-colors text-sm"
+                          href={card.linkUrl}
+                          target={card.linkUrl.startsWith('http') ? '_blank' : undefined}
+                          rel={card.linkUrl.startsWith('http') ? 'noopener noreferrer' : undefined}
+                          className={`inline-block mt-2 text-sm transition-colors ${card.title.toLowerCase().includes('whatsapp') ? 'text-green-400 hover:text-green-300' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-accent-val)]'}`}
                         >
-                          {item.content}
+                          {card.linkText || card.linkUrl}
                         </a>
-                      ) : (
-                        <p className="text-[var(--color-text-secondary)] text-sm">{item.content}</p>
                       )}
                     </div>
                   </GlassCard>
                 </motion.div>
               ))}
-
-              {/* WhatsApp Card */}
-              <motion.div variants={itemVariants}>
-                <GlassCard className="bg-gradient-to-r from-green-900/30 to-green-800/20 border-green-500/20">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-green-500/20 flex items-center justify-center">
-                      <MessageCircle className="w-6 h-6 text-green-400" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-[var(--color-text-primary)] mb-1">WhatsApp</h3>
-                      <a
-                        href={`https://wa.me/${cmsContent.whatsapp.replace(/\D/g, '')}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-green-400 hover:text-green-300 transition-colors text-sm"
-                      >
-                        Enviar mensaje directo
-                      </a>
-                    </div>
-                  </div>
-                </GlassCard>
-              </motion.div>
             </motion.div>
 
-            {/* Contact Form */}
             <motion.div
               className="lg:col-span-2"
               initial={{ opacity: 0, x: 30 }}
@@ -173,18 +127,24 @@ export default function ContactoPage() {
                       <CheckCircle className="w-8 h-8 text-[var(--color-accent-val)]" />
                     </div>
                     <h3 className="text-xl font-semibold text-[var(--color-text-primary)] mb-2">
-                      ¡Mensaje enviado!
+                      {contacto.successTitle}
                     </h3>
                     <p className="text-[var(--color-text-secondary)]">
-                      Te responderemos lo antes posible.
+                      {contacto.successMessage}
                     </p>
                   </motion.div>
                 ) : (
                   <form onSubmit={handleSubmit} className="space-y-6">
+                    {(contacto.formTitle || contacto.formSubtitle) && (
+                      <div>
+                        {contacto.formTitle && <h2 className="text-xl font-semibold text-[var(--color-text-primary)] mb-2">{contacto.formTitle}</h2>}
+                        {contacto.formSubtitle && <p className="text-[var(--color-text-secondary)] text-sm">{contacto.formSubtitle}</p>}
+                      </div>
+                    )}
                     <div className="grid sm:grid-cols-2 gap-6">
                       <div>
                         <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
-                          Nombre completo
+                          {contacto.nameLabel}
                         </label>
                         <input
                           type="text"
@@ -193,12 +153,12 @@ export default function ContactoPage() {
                           onChange={handleChange}
                           required
                           className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)] transition-colors"
-                          placeholder="Tu nombre"
+                          placeholder={contacto.namePlaceholder}
                         />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
-                          Email
+                          {contacto.emailLabel}
                         </label>
                         <input
                           type="email"
@@ -207,7 +167,7 @@ export default function ContactoPage() {
                           onChange={handleChange}
                           required
                           className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)] transition-colors"
-                          placeholder="tu@email.com"
+                          placeholder={contacto.emailPlaceholder}
                         />
                       </div>
                     </div>
@@ -215,7 +175,7 @@ export default function ContactoPage() {
                     <div className="grid sm:grid-cols-2 gap-6">
                       <div>
                         <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
-                          Teléfono
+                          {contacto.phoneLabel}
                         </label>
                         <input
                           type="tel"
@@ -223,12 +183,12 @@ export default function ContactoPage() {
                           value={formData.phone}
                           onChange={handleChange}
                           className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)] transition-colors"
-                          placeholder="+34 600 000 000"
+                          placeholder={contacto.phonePlaceholder}
                         />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
-                          Asunto
+                          {contacto.subjectLabel}
                         </label>
                         <select
                           name="subject"
@@ -237,20 +197,19 @@ export default function ContactoPage() {
                           required
                           className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] transition-colors"
                         >
-                          <option value="">Selecciona un asunto</option>
-                          <option value="info">Información general</option>
-                          <option value="training">Entrenamiento personal</option>
-                          <option value="physio">Fisioterapia</option>
-                          <option value="pilates">Pilates</option>
-                          <option value="nutrition">Nutrición</option>
-                          <option value="other">Otro</option>
+                          <option value="">{contacto.subjectPlaceholder}</option>
+                          {(contacto.subjects ?? []).map((subject) => (
+                            <option key={subject} value={subject}>
+                              {subject}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     </div>
 
                     <div>
                       <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
-                        Mensaje
+                        {contacto.messageLabel}
                       </label>
                       <textarea
                         name="message"
@@ -259,7 +218,7 @@ export default function ContactoPage() {
                         required
                         rows={5}
                         className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:outline-none focus:border-[var(--color-accent-val)] transition-colors resize-none"
-                        placeholder="¿En qué podemos ayudarte?"
+                        placeholder={contacto.messagePlaceholder}
                       />
                     </div>
 
@@ -271,7 +230,7 @@ export default function ContactoPage() {
                       iconPosition="right"
                       className="w-full sm:w-auto"
                     >
-                      Enviar Mensaje
+                      {contacto.submitText}
                     </PremiumButton>
                   </form>
                 )}
@@ -281,7 +240,6 @@ export default function ContactoPage() {
         </div>
       </section>
 
-      {/* Map Section */}
       <section className="py-12">
         <div className="container mx-auto px-4">
           <motion.div
@@ -292,12 +250,12 @@ export default function ContactoPage() {
           >
             <div className="relative aspect-video md:aspect-[21/9] rounded-2xl overflow-hidden">
               <iframe
-                src="https://maps.google.com/maps?q=C.+de+Pe%C3%B1aranda+de+Bracamonte+69+Local+4,Villa+de+Vallecas,28051+Madrid&output=embed"
+                src={contacto.mapUrl}
                 className="absolute inset-0 w-full h-full"
                 style={{ border: 0 }}
                 loading="lazy"
                 referrerPolicy="no-referrer-when-downgrade"
-                title="Focus Club Vallecas — Calle de la Ilusión 45, Vallecas, Madrid"
+                title="Focus Club Vallecas mapa"
               />
             </div>
           </motion.div>

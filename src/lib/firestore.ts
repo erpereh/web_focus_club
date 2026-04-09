@@ -32,6 +32,8 @@ import type {
     CentroZona,
     CentroData,
     GaleriaContent,
+    ContactoConfig,
+    ContactoCard,
     GaleriaTrainingItem,
     GaleriaResultado,
     GaleriaStat,
@@ -145,6 +147,80 @@ export const DEFAULT_GALERIA_CONFIG: GaleriaContent = {
     galleryEyebrow: 'FOCUS CLUB',
     galleryTitle: 'Galeria',
     gallerySubtitle: '',
+};
+
+const DEFAULT_CONTACTO_CARDS: ContactoCard[] = [
+    {
+        icon: 'MapPin',
+        title: 'Direccion',
+        content: 'C. de Penaranda de Bracamonte, 69, Local 4, Villa de Vallecas, 28051 Madrid',
+        linkText: 'Abrir en Google Maps',
+        linkUrl: 'https://maps.app.goo.gl/EHFk2xEh9xwHBaDKA',
+        active: true,
+    },
+    {
+        icon: 'Phone',
+        title: 'Telefono',
+        content: '+34 689 93 33 39',
+        linkText: '+34 689 93 33 39',
+        linkUrl: 'tel:+34689933339',
+        active: true,
+    },
+    {
+        icon: 'Mail',
+        title: 'Email',
+        content: 'infofocusclub2026@gmail.com',
+        linkText: 'infofocusclub2026@gmail.com',
+        linkUrl: 'mailto:infofocusclub2026@gmail.com',
+        active: true,
+    },
+    {
+        icon: 'Clock',
+        title: 'Horario',
+        content: 'L-V: 7:00-21:00 | S: 9:00-14:00',
+        linkText: '',
+        linkUrl: '',
+        active: true,
+    },
+    {
+        icon: 'MessageCircle',
+        title: 'WhatsApp',
+        content: 'Atencion directa por WhatsApp',
+        linkText: 'Enviar mensaje directo',
+        linkUrl: 'https://wa.me/34689933339',
+        active: true,
+    },
+];
+
+export const DEFAULT_CONTACTO_CONFIG: ContactoConfig = {
+    heroEyebrow: 'CONTACTO',
+    heroTitle: 'Hablamos?',
+    heroSubtitle: 'Estamos aqui para responder tus preguntas y ayudarte a comenzar tu transformacion.',
+    cards: DEFAULT_CONTACTO_CARDS,
+    formTitle: '',
+    formSubtitle: '',
+    nameLabel: 'Nombre completo',
+    namePlaceholder: 'Tu nombre',
+    emailLabel: 'Email',
+    emailPlaceholder: 'tu@email.com',
+    phoneLabel: 'Telefono',
+    phonePlaceholder: '+34 600 000 000',
+    subjectLabel: 'Asunto',
+    subjectPlaceholder: 'Selecciona un asunto',
+    messageLabel: 'Mensaje',
+    messagePlaceholder: 'En que podemos ayudarte?',
+    subjects: [
+        'Informacion general',
+        'Entrenamiento personal',
+        'Fisioterapia',
+        'Pilates',
+        'Nutricion',
+        'Otro',
+    ],
+    submitText: 'Enviar Mensaje',
+    successTitle: 'Mensaje enviado',
+    successMessage: 'Te responderemos lo antes posible.',
+    mapUrl: 'https://maps.google.com/maps?q=C.+de+Pe%C3%B1aranda+de+Bracamonte+69+Local+4,Villa+de+Vallecas,28051+Madrid&output=embed',
 };
 
 const DEFAULT_HOME_FIELDS: Pick<
@@ -315,6 +391,53 @@ export function normalizeGaleriaConfig(rawGaleria: unknown): GaleriaContent {
     };
 }
 
+export function normalizeContactoConfig(rawContacto: unknown): ContactoConfig {
+    const raw = asRecord(rawContacto);
+
+    const cardsRaw = Array.isArray(raw.cards) ? raw.cards : [];
+    const cards = cardsRaw
+        .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+        .map((item) => ({
+            icon: asNonEmptyString(item.icon, 'MapPin'),
+            title: asNonEmptyString(item.title, ''),
+            content: asNonEmptyString(item.content, ''),
+            linkText: typeof item.linkText === 'string' ? item.linkText : '',
+            linkUrl: typeof item.linkUrl === 'string' ? item.linkUrl : '',
+            active: item.active === false ? false : true,
+        }))
+        .filter((item) => item.title || item.content || item.linkText || item.linkUrl);
+
+    const subjectsRaw = Array.isArray(raw.subjects) ? raw.subjects : [];
+    const subjects = subjectsRaw
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+    return {
+        heroEyebrow: asNonEmptyString(raw.heroEyebrow, DEFAULT_CONTACTO_CONFIG.heroEyebrow),
+        heroTitle: asNonEmptyString(raw.heroTitle, DEFAULT_CONTACTO_CONFIG.heroTitle),
+        heroSubtitle: asNonEmptyString(raw.heroSubtitle, DEFAULT_CONTACTO_CONFIG.heroSubtitle),
+        cards: cards.length > 0 ? cards : DEFAULT_CONTACTO_CARDS.map((item) => ({ ...item })),
+        formTitle: typeof raw.formTitle === 'string' ? raw.formTitle : DEFAULT_CONTACTO_CONFIG.formTitle,
+        formSubtitle: typeof raw.formSubtitle === 'string' ? raw.formSubtitle : DEFAULT_CONTACTO_CONFIG.formSubtitle,
+        nameLabel: asNonEmptyString(raw.nameLabel, DEFAULT_CONTACTO_CONFIG.nameLabel),
+        namePlaceholder: asNonEmptyString(raw.namePlaceholder, DEFAULT_CONTACTO_CONFIG.namePlaceholder),
+        emailLabel: asNonEmptyString(raw.emailLabel, DEFAULT_CONTACTO_CONFIG.emailLabel),
+        emailPlaceholder: asNonEmptyString(raw.emailPlaceholder, DEFAULT_CONTACTO_CONFIG.emailPlaceholder),
+        phoneLabel: asNonEmptyString(raw.phoneLabel, DEFAULT_CONTACTO_CONFIG.phoneLabel),
+        phonePlaceholder: asNonEmptyString(raw.phonePlaceholder, DEFAULT_CONTACTO_CONFIG.phonePlaceholder),
+        subjectLabel: asNonEmptyString(raw.subjectLabel, DEFAULT_CONTACTO_CONFIG.subjectLabel),
+        subjectPlaceholder: asNonEmptyString(raw.subjectPlaceholder, DEFAULT_CONTACTO_CONFIG.subjectPlaceholder),
+        messageLabel: asNonEmptyString(raw.messageLabel, DEFAULT_CONTACTO_CONFIG.messageLabel),
+        messagePlaceholder: asNonEmptyString(raw.messagePlaceholder, DEFAULT_CONTACTO_CONFIG.messagePlaceholder),
+        subjects: subjects.length > 0 ? subjects : [...DEFAULT_CONTACTO_CONFIG.subjects],
+        submitText: asNonEmptyString(raw.submitText, DEFAULT_CONTACTO_CONFIG.submitText),
+        successTitle: asNonEmptyString(raw.successTitle, DEFAULT_CONTACTO_CONFIG.successTitle),
+        successMessage: asNonEmptyString(raw.successMessage, DEFAULT_CONTACTO_CONFIG.successMessage),
+        mapUrl: asNonEmptyString(raw.mapUrl, DEFAULT_CONTACTO_CONFIG.mapUrl),
+    };
+}
+
 function normalizeHomeFields(raw: CMSContent): CMSContent {
     return {
         ...raw,
@@ -329,6 +452,7 @@ function normalizeHomeFields(raw: CMSContent): CMSContent {
         aboutButtonLink: asNonEmptyString(raw.aboutButtonLink, DEFAULT_HOME_FIELDS.aboutButtonLink ?? '/sandra'),
         aboutCardName: asNonEmptyString(raw.aboutCardName, DEFAULT_HOME_FIELDS.aboutCardName ?? 'Sandra Andujar'),
         aboutCardRole: asNonEmptyString(raw.aboutCardRole, DEFAULT_HOME_FIELDS.aboutCardRole ?? 'Fundadora & Coach Principal'),
+        contacto: normalizeContactoConfig(raw.contacto),
     };
 }
 
@@ -499,11 +623,12 @@ const SITE_CONTENT_DOC = 'main';
 export async function getSiteContent(): Promise<CMSContent | null> {
     const snap = await getDoc(doc(db, 'site_content', SITE_CONTENT_DOC));
     if (!snap.exists()) return null;
-    const data = snap.data() as CMSContent & { centro?: unknown; galeria?: unknown };
+    const data = snap.data() as CMSContent & { centro?: unknown; galeria?: unknown; contacto?: unknown };
     const normalized = {
         ...data,
         centro: normalizeCentroConfig(data.centro),
         galeria: normalizeGaleriaConfig(data.galeria),
+        contacto: normalizeContactoConfig(data.contacto),
     } as CMSContent;
     return normalizeHomeFields(normalized);
 }

@@ -277,6 +277,39 @@ export interface GaleriaContent {
     transformaciones?: { name: string; periodo: string; resultado: string }[];
 }
 
+export interface ContactoCard {
+    icon: string;
+    title: string;
+    content: string;
+    linkText?: string;
+    linkUrl?: string;
+    active?: boolean;
+}
+
+export interface ContactoConfig {
+    heroEyebrow: string;
+    heroTitle: string;
+    heroSubtitle: string;
+    cards: ContactoCard[];
+    formTitle?: string;
+    formSubtitle?: string;
+    nameLabel: string;
+    namePlaceholder: string;
+    emailLabel: string;
+    emailPlaceholder: string;
+    phoneLabel: string;
+    phonePlaceholder: string;
+    subjectLabel: string;
+    subjectPlaceholder: string;
+    messageLabel: string;
+    messagePlaceholder: string;
+    subjects: string[];
+    submitText: string;
+    successTitle: string;
+    successMessage: string;
+    mapUrl: string;
+}
+
 export interface HeroStat {
     icon: string;
     value: string;
@@ -314,6 +347,7 @@ export interface CMSContent {
     sandra: SandraData;
     centro: CentroData;
     galeria: GaleriaContent;
+    contacto?: ContactoConfig;
 
     servicesTitle: string;
     servicesSubtitle: string;
