@@ -4377,7 +4377,19 @@ export default function AdminPage() {
                         <div className="rounded-xl border border-border bg-muted/20 p-3">
                           <p className="text-xs text-[var(--color-text-secondary)] mb-2">Preview</p>
                           <div className="relative aspect-video rounded-xl overflow-hidden bg-black/30">
-                            <iframe src={editedContent?.contacto?.mapUrl ?? ''} className="absolute inset-0 w-full h-full" style={{ border: 0 }} loading="lazy" title="Mapa contacto preview" />
+                            {editedContent?.contacto?.mapUrl ? (
+                              <iframe
+                                src={editedContent.contacto.mapUrl}
+                                className="absolute inset-0 w-full h-full"
+                                style={{ border: 0 }}
+                                loading="lazy"
+                                title="Mapa contacto preview"
+                              />
+                            ) : (
+                              <div className="absolute inset-0 flex items-center justify-center text-sm text-[var(--color-text-secondary)]">
+                                Añade una URL de mapa para ver la previsualización
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>

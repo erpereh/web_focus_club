@@ -249,14 +249,20 @@ export default function ContactoPage() {
             viewport={{ once: true }}
           >
             <div className="relative aspect-video md:aspect-[21/9] rounded-2xl overflow-hidden">
-              <iframe
-                src={contacto.mapUrl}
-                className="absolute inset-0 w-full h-full"
-                style={{ border: 0 }}
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                title="Focus Club Vallecas mapa"
-              />
+              {contacto.mapUrl ? (
+                <iframe
+                  src={contacto.mapUrl}
+                  className="absolute inset-0 w-full h-full"
+                  style={{ border: 0 }}
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  title="Focus Club Vallecas mapa"
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center text-sm text-[var(--color-text-secondary)] bg-black/20">
+                  El mapa no está configurado todavía.
+                </div>
+              )}
             </div>
           </motion.div>
         </div>
