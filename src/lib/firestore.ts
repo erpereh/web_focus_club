@@ -30,6 +30,9 @@ import type {
     CentroZona,
     CentroData,
     GaleriaContent,
+    GaleriaTrainingItem,
+    GaleriaResultado,
+    GaleriaStat,
     TimeSlot,
     BlockedSlot,
     SlotOccupancy,
@@ -98,6 +101,48 @@ export const DEFAULT_CENTRO_CONFIG: CentroConfig = {
     ctaText: 'Reservar Visita',
     ctaLink: '/portal',
     mapUrl: 'https://maps.google.com/maps?q=C.+de+Pe%C3%B1aranda+de+Bracamonte+69+Local+4,Villa+de+Vallecas,28051+Madrid&output=embed',
+};
+
+const DEFAULT_GALERIA_STATS: GaleriaStat[] = [
+    { value: '200+', label: 'Clientes transformados' },
+    { value: '20 anos', label: 'De experiencia' },
+    { value: '100%', label: 'Compromiso' },
+];
+
+const DEFAULT_GALERIA_TRAININGS: GaleriaTrainingItem[] = [
+    { mediaUrl: '/imagenes/inventadas/entrenamiento-1.svg', mediaType: 'image', title: 'Entrenamiento de Fuerza', active: true },
+    { mediaUrl: '/imagenes/inventadas/entrenamiento-2.svg', mediaType: 'image', title: 'Hipertrofia Muscular', active: true },
+    { mediaUrl: '/imagenes/inventadas/entrenamiento-3.svg', mediaType: 'image', title: 'Cardio HIIT', active: true },
+    { mediaUrl: '/imagenes/inventadas/entrenamiento-4.svg', mediaType: 'image', title: 'Nutricion Deportiva', active: true },
+    { mediaUrl: '/imagenes/inventadas/entrenamiento-5.svg', mediaType: 'image', title: 'Prep. Competicion', active: true },
+    { mediaUrl: '/imagenes/inventadas/entrenamiento-6.svg', mediaType: 'image', title: 'Seguimiento Progreso', active: true },
+];
+
+const DEFAULT_GALERIA_RESULTADOS: GaleriaResultado[] = [
+    { metric: '-18 kg', period: 'en 4 meses', name: 'Maria Garcia', achievement: 'De 78 kg a 60 kg.', label: 'Perdida de peso', active: true },
+    { metric: '+12 kg', period: 'masa muscular', name: 'Carlos Martinez', achievement: 'Programa de hipertrofia progresivo.', label: 'Hipertrofia', active: true },
+    { metric: '1er', period: 'puesto competicion', name: 'Laura Perez', achievement: 'Preparacion completa para competicion.', label: 'Competicion', active: true },
+    { metric: '100%', period: 'objetivo cumplido', name: 'Ana Rodriguez', achievement: 'Programa de definicion y tonificacion.', label: 'Definicion', active: true },
+];
+
+export const DEFAULT_GALERIA_CONFIG: GaleriaContent = {
+    heroEyebrow: 'NUESTRA GALERIA',
+    heroTitle: 'Galeria Focus Club Vallecas',
+    heroSubtitle: 'Resultados reales, historias de transformacion autenticas.',
+    statsTitle: 'Resultados Reales',
+    statsSubtitle: '',
+    stats: DEFAULT_GALERIA_STATS,
+    trainingEyebrow: 'EN ACCION',
+    trainingTitle: 'Entrenamientos',
+    trainingSubtitle: 'Imagenes de las sesiones. Pasan automaticamente o navega con las flechas. Haz click para ampliar.',
+    trainings: DEFAULT_GALERIA_TRAININGS,
+    resultsEyebrow: 'HISTORIAS REALES',
+    resultsTitle: 'Resultados',
+    resultsSubtitle: 'Pasa el cursor sobre cada tarjeta para descubrir la historia detras del resultado.',
+    resultados: DEFAULT_GALERIA_RESULTADOS,
+    galleryEyebrow: 'FOCUS CLUB',
+    galleryTitle: 'Galeria',
+    gallerySubtitle: '',
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -173,6 +218,71 @@ export function normalizeCentroConfig(rawCentro: unknown): CentroConfig {
         ctaText: asNonEmptyString(raw.ctaText, DEFAULT_CENTRO_CONFIG.ctaText),
         ctaLink: asNonEmptyString(raw.ctaLink, DEFAULT_CENTRO_CONFIG.ctaLink),
         mapUrl: asNonEmptyString(raw.mapUrl, DEFAULT_CENTRO_CONFIG.mapUrl),
+    };
+}
+
+function parseStatValue(value: unknown, suffix: unknown): string {
+    const base = typeof value === 'number' ? String(value) : (typeof value === 'string' ? value.trim() : '');
+    const suf = typeof suffix === 'string' ? suffix.trim() : '';
+    if (!base && !suf) return '';
+    return `${base}${suf}`.trim();
+}
+
+export function normalizeGaleriaConfig(rawGaleria: unknown): GaleriaContent {
+    const raw = asRecord(rawGaleria);
+
+    const statsRaw = Array.isArray(raw.stats) ? raw.stats : [];
+    const stats = statsRaw
+        .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+        .map((item) => ({
+            value: asNonEmptyString(item.value, parseStatValue(item.value, item.suffix)),
+            label: asNonEmptyString(item.label, ''),
+        }))
+        .filter((item) => item.value || item.label);
+
+    const trainingsRaw = Array.isArray(raw.trainings) ? raw.trainings : [];
+    const trainings = trainingsRaw
+        .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+        .map((item): GaleriaTrainingItem => ({
+            mediaUrl: asNonEmptyString(item.mediaUrl, ''),
+            mediaType: item.mediaType === 'video' ? 'video' : 'image',
+            title: asNonEmptyString(item.title, ''),
+            active: item.active === false ? false : true,
+        }))
+        .filter((item) => item.mediaUrl || item.title);
+
+    const resultadosRaw = Array.isArray(raw.resultados) ? raw.resultados : [];
+    const resultados = resultadosRaw
+        .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+        .map((item) => ({
+            metric: asNonEmptyString(item.metric, asNonEmptyString(item.stat, '')),
+            period: asNonEmptyString(item.period, asNonEmptyString(item.statLabel, '')),
+            name: asNonEmptyString(item.name, ''),
+            achievement: asNonEmptyString(item.achievement, asNonEmptyString(item.detail, asNonEmptyString(item.story, ''))),
+            label: asNonEmptyString(item.label, asNonEmptyString(item.tag, '')),
+            active: item.active === false ? false : true,
+        }))
+        .filter((item) => item.metric || item.name || item.achievement || item.label);
+
+    return {
+        heroEyebrow: asNonEmptyString(raw.heroEyebrow, DEFAULT_GALERIA_CONFIG.heroEyebrow ?? ''),
+        heroTitle: asNonEmptyString(raw.heroTitle, DEFAULT_GALERIA_CONFIG.heroTitle),
+        heroSubtitle: asNonEmptyString(raw.heroSubtitle, DEFAULT_GALERIA_CONFIG.heroSubtitle),
+        statsTitle: asNonEmptyString(raw.statsTitle, DEFAULT_GALERIA_CONFIG.statsTitle ?? ''),
+        statsSubtitle: asNonEmptyString(raw.statsSubtitle, DEFAULT_GALERIA_CONFIG.statsSubtitle ?? ''),
+        stats: stats.length > 0 ? stats : DEFAULT_GALERIA_STATS.map((item) => ({ ...item })),
+        trainingEyebrow: asNonEmptyString(raw.trainingEyebrow, DEFAULT_GALERIA_CONFIG.trainingEyebrow ?? ''),
+        trainingTitle: asNonEmptyString(raw.trainingTitle, DEFAULT_GALERIA_CONFIG.trainingTitle ?? ''),
+        trainingSubtitle: asNonEmptyString(raw.trainingSubtitle, DEFAULT_GALERIA_CONFIG.trainingSubtitle ?? ''),
+        trainings: trainings.length > 0 ? trainings : DEFAULT_GALERIA_TRAININGS.map((item) => ({ ...item })),
+        resultsEyebrow: asNonEmptyString(raw.resultsEyebrow, DEFAULT_GALERIA_CONFIG.resultsEyebrow ?? ''),
+        resultsTitle: asNonEmptyString(raw.resultsTitle, DEFAULT_GALERIA_CONFIG.resultsTitle ?? ''),
+        resultsSubtitle: asNonEmptyString(raw.resultsSubtitle, DEFAULT_GALERIA_CONFIG.resultsSubtitle ?? ''),
+        resultados: resultados.length > 0 ? resultados : DEFAULT_GALERIA_RESULTADOS.map((item) => ({ ...item })),
+        galleryEyebrow: asNonEmptyString(raw.galleryEyebrow, DEFAULT_GALERIA_CONFIG.galleryEyebrow ?? ''),
+        galleryTitle: asNonEmptyString(raw.galleryTitle, DEFAULT_GALERIA_CONFIG.galleryTitle ?? ''),
+        gallerySubtitle: asNonEmptyString(raw.gallerySubtitle, DEFAULT_GALERIA_CONFIG.gallerySubtitle ?? ''),
+        transformaciones: Array.isArray(raw.transformaciones) ? (raw.transformaciones as { name: string; periodo: string; resultado: string }[]) : [],
     };
 }
 
@@ -343,10 +453,11 @@ const SITE_CONTENT_DOC = 'main';
 export async function getSiteContent(): Promise<CMSContent | null> {
     const snap = await getDoc(doc(db, 'site_content', SITE_CONTENT_DOC));
     if (!snap.exists()) return null;
-    const data = snap.data() as CMSContent & { centro?: unknown };
+    const data = snap.data() as CMSContent & { centro?: unknown; galeria?: unknown };
     return {
         ...data,
         centro: normalizeCentroConfig(data.centro),
+        galeria: normalizeGaleriaConfig(data.galeria),
     } as CMSContent;
 }
 
@@ -384,8 +495,27 @@ export async function updateCentroData(data: Partial<CentroData>): Promise<void>
     await updateCentroConfig(data as Partial<CentroConfig>);
 }
 
+export async function getGaleriaConfig(): Promise<GaleriaContent | null> {
+    const snap = await getDoc(doc(db, 'site_content', SITE_CONTENT_DOC));
+    if (!snap.exists()) return null;
+    return normalizeGaleriaConfig((snap.data() as { galeria?: unknown }).galeria);
+}
+
+export async function updateGaleriaConfig(data: Partial<GaleriaContent>): Promise<void> {
+    const current = await getGaleriaConfig();
+    const base = current ?? DEFAULT_GALERIA_CONFIG;
+    const merged = normalizeGaleriaConfig({
+        ...base,
+        ...data,
+        stats: data.stats ?? base.stats,
+        trainings: data.trainings ?? base.trainings,
+        resultados: data.resultados ?? base.resultados,
+    });
+    await setDoc(doc(db, 'site_content', SITE_CONTENT_DOC), { galeria: merged }, { merge: true });
+}
+
 export async function updateGaleriaData(data: GaleriaContent): Promise<void> {
-    await updateDoc(doc(db, 'site_content', SITE_CONTENT_DOC), { galeria: data });
+    await updateGaleriaConfig(data);
 }
 
 // ============================================

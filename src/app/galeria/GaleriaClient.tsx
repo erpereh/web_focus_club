@@ -6,18 +6,6 @@ import Image from 'next/image';
 import { Play, X, ChevronLeft, ChevronRight, Quote } from 'lucide-react';
 import type { GaleriaContent, GalleryItem } from '@/types';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface CloudinaryResource {
-  public_id: string;
-  url: string;
-  resource_type: 'image' | 'video';
-  format: string;
-  width: number;
-  height: number;
-  folder: string;
-}
-
 interface LightboxItem {
   src: string;
   type: 'image' | 'video';
@@ -30,84 +18,87 @@ interface TrainingItem {
   type: 'image' | 'video';
 }
 
-// ─── Static fallback data ─────────────────────────────────────────────────────
-
 const STATS_FALLBACK = [
-  { value: 200, suffix: '+', label: 'Clientes transformados' },
-  { value: 20, suffix: ' años', label: 'De experiencia' },
-  { value: 100, suffix: '%', label: 'Compromiso' },
+  { value: '200+', label: 'Clientes transformados' },
+  { value: '20 anos', label: 'De experiencia' },
+  { value: '100%', label: 'Compromiso' },
 ];
 
 const TRAINING_FALLBACK: TrainingItem[] = [
   { src: '/imagenes/inventadas/entrenamiento-1.svg', title: 'Entrenamiento de Fuerza', type: 'image' },
   { src: '/imagenes/inventadas/entrenamiento-2.svg', title: 'Hipertrofia Muscular', type: 'image' },
   { src: '/imagenes/inventadas/entrenamiento-3.svg', title: 'Cardio HIIT', type: 'image' },
-  { src: '/imagenes/inventadas/entrenamiento-4.svg', title: 'Nutrición Deportiva', type: 'image' },
-  { src: '/imagenes/inventadas/entrenamiento-5.svg', title: 'Prep. Competición', type: 'image' },
+  { src: '/imagenes/inventadas/entrenamiento-4.svg', title: 'Nutricion Deportiva', type: 'image' },
+  { src: '/imagenes/inventadas/entrenamiento-5.svg', title: 'Prep. Competicion', type: 'image' },
   { src: '/imagenes/inventadas/entrenamiento-6.svg', title: 'Seguimiento Progreso', type: 'image' },
 ];
 
 const RESULTADOS_FALLBACK = [
   {
-    name: 'María García',
-    stat: '-18 kg',
-    statLabel: 'en 4 meses',
-    tag: 'Pérdida de peso',
+    name: 'Maria Garcia',
+    metric: '-18 kg',
+    period: 'en 4 meses',
+    label: 'Perdida de peso',
     image: '/imagenes/inventadas/resultado-1.svg',
-    story: '"Nunca pensé que podría estar así de bien. Sandra me cambió la vida, no solo el cuerpo. El método es brutal."',
-    detail: 'De 78 kg a 60 kg. Cambio total de composición corporal con plan de nutrición incluido.',
+    achievement: 'De 78 kg a 60 kg. Cambio total de composicion corporal con plan de nutricion incluido.',
+    active: true,
   },
   {
-    name: 'Carlos Martínez',
-    stat: '+12 kg',
-    statLabel: 'masa muscular',
-    tag: 'Hipertrofia',
+    name: 'Carlos Martinez',
+    metric: '+12 kg',
+    period: 'masa muscular',
+    label: 'Hipertrofia',
     image: '/imagenes/inventadas/resultado-2.svg',
-    story: '"Llevaba años en el gimnasio sin avanzar. En 6 meses con Sandra conseguí más que en 4 años solo."',
-    detail: 'Programa de hipertrofia progresivo con periodización avanzada y seguimiento semanal.',
+    achievement: 'Programa de hipertrofia progresivo con periodizacion avanzada y seguimiento semanal.',
+    active: true,
   },
   {
-    name: 'Laura Pérez',
-    stat: '1er',
-    statLabel: 'puesto competición',
-    tag: 'Competición',
+    name: 'Laura Perez',
+    metric: '1er',
+    period: 'puesto competicion',
+    label: 'Competicion',
     image: '/imagenes/inventadas/resultado-3.svg',
-    story: '"Preparar mi primera competición con Sandra fue la mejor decisión. Técnica, nutrición y mentalidad: 10/10."',
-    detail: 'Preparación completa para competición de fitness en 5 meses. Primera vez en escenario.',
+    achievement: 'Preparacion completa para competicion de fitness en 5 meses. Primera vez en escenario.',
+    active: true,
   },
   {
-    name: 'Ana Rodríguez',
-    stat: '100%',
-    statLabel: 'objetivo cumplido',
-    tag: 'Definición',
+    name: 'Ana Rodriguez',
+    metric: '100%',
+    period: 'objetivo cumplido',
+    label: 'Definicion',
     image: '/imagenes/inventadas/resultado-4.svg',
-    story: '"Entré buscando definición y salí con un estilo de vida completamente nuevo. Increíble equipo."',
-    detail: 'Programa de definición y tonificación de 3 meses con resultados visibles desde la semana 4.',
+    achievement: 'Programa de definicion y tonificacion de 3 meses con resultados visibles desde la semana 4.',
+    active: true,
   },
 ];
 
-// ─── Animated Counter ─────────────────────────────────────────────────────────
-
-function AnimatedCounter({ value, suffix }: { value: number; suffix: string }) {
+function AnimatedCounter({ value }: { value: string }) {
   const ref = useRef<HTMLSpanElement>(null);
   const inView = useInView(ref, { once: true, margin: '-50px' });
+  const parsed = value.match(/^(\d+)(.*)$/);
+  const numericValue = parsed ? Number(parsed[1]) : null;
+  const suffix = parsed ? parsed[2] : '';
 
   useEffect(() => {
     if (!inView || !ref.current) return;
-    const controls = animate(0, value, {
+    if (numericValue === null || Number.isNaN(numericValue)) {
+      ref.current.textContent = value;
+      return;
+    }
+
+    const controls = animate(0, numericValue, {
       duration: 2,
       ease: 'easeOut',
       onUpdate(v: number) {
         if (ref.current) ref.current.textContent = Math.round(v) + suffix;
       },
     });
+
     return () => controls.stop();
-  }, [inView, value, suffix]);
+  }, [inView, numericValue, suffix, value]);
 
-  return <span ref={ref}>0{suffix}</span>;
+  return <span ref={ref}>{numericValue === null ? value : `0${suffix}`}</span>;
 }
-
-// ─── Image Carousel ───────────────────────────────────────────────────────────
 
 const slideVariants = {
   enter: (dir: number) => ({ x: dir > 0 ? '100%' : '-100%', opacity: 0 }),
@@ -167,7 +158,10 @@ function ImageCarousel({
             onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; }}
             onTouchEnd={(e) => {
               const dx = e.changedTouches[0].clientX - touchStartX.current;
-              if (Math.abs(dx) > 40) dx < 0 ? next() : prev();
+              if (Math.abs(dx) > 40) {
+                if (dx < 0) next();
+                else prev();
+              }
             }}
           >
             <Image src={item.src} alt={item.title} fill unoptimized className="object-cover" />
@@ -181,41 +175,24 @@ function ImageCarousel({
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent flex items-end p-4 pointer-events-none">
               <p className="text-white font-semibold text-sm">{item.title}</p>
             </div>
-            <button
-              className="absolute inset-0 w-full h-full"
-              onClick={() => onOpen({ src: item.src, type: item.type, title: item.title })}
-              aria-label={`Ver ${item.title}`}
-            />
+            <button className="absolute inset-0 w-full h-full" onClick={() => onOpen({ src: item.src, type: item.type, title: item.title })} aria-label={`Ver ${item.title}`} />
           </motion.div>
         </AnimatePresence>
-        <button
-          onClick={prev}
-          className="absolute left-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/50 backdrop-blur-sm border border-white/20 flex items-center justify-center text-white hover:bg-[var(--color-accent-val)]/70 transition-colors"
-        >
+        <button onClick={prev} className="absolute left-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/50 backdrop-blur-sm border border-white/20 flex items-center justify-center text-white hover:bg-[var(--color-accent-val)]/70 transition-colors">
           <ChevronLeft className="w-4 h-4" />
         </button>
-        <button
-          onClick={next}
-          className="absolute right-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/50 backdrop-blur-sm border border-white/20 flex items-center justify-center text-white hover:bg-[var(--color-accent-val)]/70 transition-colors"
-        >
+        <button onClick={next} className="absolute right-3 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/50 backdrop-blur-sm border border-white/20 flex items-center justify-center text-white hover:bg-[var(--color-accent-val)]/70 transition-colors">
           <ChevronRight className="w-4 h-4" />
         </button>
       </div>
       <div className="flex justify-center gap-1.5 pt-1">
         {items.map((_, i) => (
-          <button
-            key={i}
-            onClick={() => go(i)}
-            className={`h-1.5 rounded-full transition-all duration-300 ${i === current ? 'w-6 bg-[var(--color-accent-val)]' : 'w-1.5 bg-white/20 hover:bg-white/40'}`}
-            aria-label={`Ir a imagen ${i + 1}`}
-          />
+          <button key={i} onClick={() => go(i)} className={`h-1.5 rounded-full transition-all duration-300 ${i === current ? 'w-6 bg-[var(--color-accent-val)]' : 'w-1.5 bg-white/20 hover:bg-white/40'}`} aria-label={`Ir a imagen ${i + 1}`} />
         ))}
       </div>
     </div>
   );
 }
-
-// ─── Gallery Slider ───────────────────────────────────────────────────────────
 
 function GallerySlider({
   items,
@@ -240,36 +217,24 @@ function GallerySlider({
   }, []);
 
   const totalPages = Math.ceil(items.length / itemsPerPage);
-  const gap = 16; // px
+  const gap = 16;
 
   const prevPage = () => setCurrentPage((p) => Math.max(0, p - 1));
   const nextPage = () => setCurrentPage((p) => Math.min(totalPages - 1, p + 1));
 
   return (
     <div className="relative">
-      {/* Arrows */}
       {totalPages > 1 && (
         <>
-          <button
-            onClick={prevPage}
-            disabled={currentPage === 0}
-            className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-6 z-10 text-[var(--color-accent-val)] disabled:opacity-20 hover:scale-110 transition-transform"
-            aria-label="Anterior"
-          >
+          <button onClick={prevPage} disabled={currentPage === 0} className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-6 z-10 text-[var(--color-accent-val)] disabled:opacity-20 hover:scale-110 transition-transform" aria-label="Anterior">
             <ChevronLeft className="w-8 h-8" />
           </button>
-          <button
-            onClick={nextPage}
-            disabled={currentPage === totalPages - 1}
-            className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-6 z-10 text-[var(--color-accent-val)] disabled:opacity-20 hover:scale-110 transition-transform"
-            aria-label="Siguiente"
-          >
+          <button onClick={nextPage} disabled={currentPage === totalPages - 1} className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-6 z-10 text-[var(--color-accent-val)] disabled:opacity-20 hover:scale-110 transition-transform" aria-label="Siguiente">
             <ChevronRight className="w-8 h-8" />
           </button>
         </>
       )}
 
-      {/* Slider viewport */}
       <div className="overflow-hidden rounded-2xl">
         <div
           className="flex"
@@ -281,7 +246,10 @@ function GallerySlider({
           onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; }}
           onTouchEnd={(e) => {
             const dx = e.changedTouches[0].clientX - touchStartX.current;
-            if (Math.abs(dx) > 50) dx < 0 ? nextPage() : prevPage();
+            if (Math.abs(dx) > 50) {
+              if (dx < 0) nextPage();
+              else prevPage();
+            }
           }}
         >
           {items.map((item) => (
@@ -293,12 +261,7 @@ function GallerySlider({
               aria-label="Ver imagen"
             >
               {item.type === 'image' ? (
-                <img
-                  src={item.url}
-                  alt=""
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-                  loading="lazy"
-                />
+                <img src={item.url} alt="" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]" loading="lazy" />
               ) : (
                 <div className="w-full h-full bg-black/50 flex items-center justify-center">
                   <div className="w-14 h-14 rounded-full bg-black/60 backdrop-blur-sm border border-white/20 flex items-center justify-center transition-transform duration-300 group-hover:scale-110">
@@ -312,16 +275,10 @@ function GallerySlider({
         </div>
       </div>
 
-      {/* Dots */}
       {totalPages > 1 && (
         <div className="flex justify-center gap-2 mt-5">
           {Array.from({ length: totalPages }).map((_, i) => (
-            <button
-              key={i}
-              onClick={() => setCurrentPage(i)}
-              className={`h-2 rounded-full transition-all duration-300 ${i === currentPage ? 'w-6 bg-[var(--color-accent-val)]' : 'w-2 bg-white/20 hover:bg-white/40'}`}
-              aria-label={`Página ${i + 1}`}
-            />
+            <button key={i} onClick={() => setCurrentPage(i)} className={`h-2 rounded-full transition-all duration-300 ${i === currentPage ? 'w-6 bg-[var(--color-accent-val)]' : 'w-2 bg-white/20 hover:bg-white/40'}`} aria-label={`Pagina ${i + 1}`} />
           ))}
         </div>
       )}
@@ -329,72 +286,59 @@ function GallerySlider({
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
-
 export default function GaleriaClient({
-  initialResources,
   galeriaContent,
   galleryItems,
 }: {
-  initialResources: CloudinaryResource[];
   galeriaContent?: GaleriaContent;
   galleryItems: GalleryItem[];
 }) {
   const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
 
   const STATS = galeriaContent?.stats ?? STATS_FALLBACK;
-  const RESULTADOS = (galeriaContent?.resultados ?? RESULTADOS_FALLBACK).map((r, i) => ({
-    ...r,
-    image: `/imagenes/inventadas/resultado-${i + 1}.svg`,
-  }));
+  const RESULTADOS = (galeriaContent?.resultados ?? RESULTADOS_FALLBACK)
+    .filter((r) => r.active !== false)
+    .map((r, i) => ({
+      ...r,
+      image: `/imagenes/inventadas/resultado-${i + 1}.svg`,
+      metric: r.metric ?? '',
+      period: r.period ?? '',
+      label: r.label ?? '',
+      achievement: r.achievement ?? '',
+    }));
 
-  const trainingItems: TrainingItem[] = initialResources.length > 0
-    ? initialResources.map((r) => ({
-        src: r.resource_type === 'video' ? r.url.replace(/\.(mp4|mov|avi|webm)$/i, '.jpg') : r.url,
-        title: `Focus Club · ${r.format.toUpperCase()}`,
-        type: r.resource_type,
-      }))
-    : TRAINING_FALLBACK;
+  const trainingItems: TrainingItem[] = (galeriaContent?.trainings ?? [])
+    .filter((item) => item.active !== false)
+    .map((item) => ({
+      src: item.mediaUrl,
+      title: item.title || 'Focus Club',
+      type: item.mediaType,
+    }));
 
-  const mid = Math.ceil(trainingItems.length / 2);
-  const carousel1 = trainingItems.slice(0, mid);
-  const carousel2 = trainingItems.slice(mid);
+  const TRAININGS = trainingItems.length > 0 ? trainingItems : TRAINING_FALLBACK;
+
+  const mid = Math.ceil(TRAININGS.length / 2);
+  const carousel1 = TRAININGS.slice(0, mid);
+  const carousel2 = TRAININGS.slice(mid);
 
   const hasGallery = galleryItems.length > 0;
 
   return (
     <div className="space-y-0">
-
-      {/* ═══ SECCIÓN 1 · HERO ═══════════════════════════════════════════ */}
       <section className="relative py-20 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-accent-dim)] to-transparent" />
         <div className="container mx-auto px-4">
-          <motion.div
-            className="text-center max-w-3xl mx-auto"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-          >
-            <span className="eyebrow">Nuestra Galería</span>
-            <h1 className="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mt-3 mb-6">
-              {galeriaContent?.heroTitle ?? 'Resultados Reales'}
-            </h1>
+          <motion.div className="text-center max-w-3xl mx-auto" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
+            <span className="eyebrow">{galeriaContent?.heroEyebrow ?? 'Nuestra Galeria'}</span>
+            <h1 className="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mt-3 mb-6">{galeriaContent?.heroTitle ?? 'Galeria Focus Club Vallecas'}</h1>
             <div className="line-accent mx-auto mb-6" />
-            <p className="text-[var(--color-text-secondary)] text-lg">
-              {galeriaContent?.heroSubtitle ?? 'Cada imagen cuenta una historia de esfuerzo, constancia y transformación.'}
-            </p>
+            <p className="text-[var(--color-text-secondary)] text-lg">{galeriaContent?.heroSubtitle ?? 'Resultados reales, historias de transformacion autenticas.'}</p>
           </motion.div>
           <div className="grid grid-cols-3 gap-4 md:gap-8 max-w-2xl mx-auto mt-12">
             {STATS.map((stat, i) => (
-              <motion.div
-                key={stat.label}
-                className="glass-card rounded-2xl p-4 md:p-6 text-center"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 + i * 0.1, duration: 0.5 }}
-              >
+              <motion.div key={stat.label + i} className="glass-card rounded-2xl p-4 md:p-6 text-center" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 + i * 0.1, duration: 0.5 }}>
                 <div className="text-3xl md:text-4xl font-black text-[var(--color-accent-val)] tabular-nums">
-                  <AnimatedCounter value={stat.value} suffix={stat.suffix} />
+                  <AnimatedCounter value={stat.value} />
                 </div>
                 <div className="text-[var(--color-text-secondary)] text-xs md:text-sm mt-1">{stat.label}</div>
               </motion.div>
@@ -403,86 +347,50 @@ export default function GaleriaClient({
         </div>
       </section>
 
-
-      {/* ═══ SECCIÓN 2 · ENTRENAMIENTOS (2 Carruseles) ══════════════════ */}
       <section className="py-24 relative">
         <div className="absolute inset-0 bg-[var(--color-bg-surface)]/40" />
         <div className="container mx-auto px-4 relative">
-          <motion.div
-            className="text-center mb-16"
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.7 }}
-          >
-            <span className="eyebrow">En Acción</span>
-            <h2 className="text-4xl md:text-5xl font-black text-[var(--color-text-primary)] mb-4">Entrenamientos</h2>
+          <motion.div className="text-center mb-16" initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.7 }}>
+            <span className="eyebrow">{galeriaContent?.trainingEyebrow ?? 'En Accion'}</span>
+            <h2 className="text-4xl md:text-5xl font-black text-[var(--color-text-primary)] mb-4">{galeriaContent?.trainingTitle ?? 'Entrenamientos'}</h2>
             <div className="line-accent mx-auto mb-4" />
-            <p className="text-[var(--color-text-secondary)] max-w-xl mx-auto">
-              Imágenes de las sesiones. Pasan automáticamente o navega con las flechas. Haz click para ampliar.
-            </p>
+            <p className="text-[var(--color-text-secondary)] max-w-xl mx-auto">{galeriaContent?.trainingSubtitle ?? 'Imagenes de las sesiones. Pasan automaticamente o navega con las flechas. Haz click para ampliar.'}</p>
           </motion.div>
-          <motion.div
-            className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto"
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
-          >
+          <motion.div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto" initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.6 }}>
             {carousel1.length > 0 && <ImageCarousel items={carousel1} onOpen={setLightbox} />}
             {carousel2.length > 0 && <ImageCarousel items={carousel2} onOpen={setLightbox} />}
           </motion.div>
         </div>
       </section>
 
-
-      {/* ═══ SECCIÓN 3 · RESULTADOS (Flip Cards) ═══════════════════════ */}
       <section className="py-24">
         <div className="container mx-auto px-4">
-          <motion.div
-            className="text-center mb-16"
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.7 }}
-          >
-            <span className="eyebrow">Historias Reales</span>
-            <h2 className="text-4xl md:text-5xl font-black text-[var(--color-text-primary)] mb-4">Resultados</h2>
+          <motion.div className="text-center mb-16" initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.7 }}>
+            <span className="eyebrow">{galeriaContent?.resultsEyebrow ?? 'Historias Reales'}</span>
+            <h2 className="text-4xl md:text-5xl font-black text-[var(--color-text-primary)] mb-4">{galeriaContent?.resultsTitle ?? 'Resultados'}</h2>
             <div className="line-accent mx-auto mb-4" />
-            <p className="text-[var(--color-text-secondary)] max-w-xl mx-auto">
-              Pasa el cursor sobre cada tarjeta para descubrir la historia detrás del resultado.
-            </p>
+            <p className="text-[var(--color-text-secondary)] max-w-xl mx-auto">{galeriaContent?.resultsSubtitle ?? 'Pasa el cursor sobre cada tarjeta para descubrir la historia detras del resultado.'}</p>
           </motion.div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {RESULTADOS.map((r, i) => (
-              <motion.div
-                key={r.name}
-                className="flip-card h-80"
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: '-50px' }}
-                transition={{ duration: 0.6, delay: i * 0.12 }}
-              >
+              <motion.div key={r.name + i} className="flip-card h-80" initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: '-50px' }} transition={{ duration: 0.6, delay: i * 0.12 }}>
                 <div className="flip-card-inner w-full h-full">
                   <div className="flip-card-front glass-card flex flex-col items-center justify-center p-6 text-center">
                     <div className="w-16 h-16 rounded-2xl overflow-hidden mb-4 border border-[var(--color-accent-border)]">
                       <Image src={r.image} alt={r.name} width={64} height={64} unoptimized className="w-full h-full object-cover" />
                     </div>
-                    <div className="text-4xl font-black text-[var(--color-accent-val)] mb-1">{r.stat}</div>
-                    <div className="text-[var(--color-text-secondary)] text-sm mb-3">{r.statLabel}</div>
+                    <div className="text-4xl font-black text-[var(--color-accent-val)] mb-1">{r.metric}</div>
+                    <div className="text-[var(--color-text-secondary)] text-sm mb-3">{r.period}</div>
                     <div className="text-[var(--color-text-primary)] font-bold text-base mb-1">{r.name}</div>
-                    <span className="inline-block px-3 py-1 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs font-medium border border-[var(--color-accent-border)]">
-                      {r.tag}
-                    </span>
-                    <p className="text-white/30 text-xs mt-4">Pasa el cursor →</p>
+                    <span className="inline-block px-3 py-1 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs font-medium border border-[var(--color-accent-border)]">{r.label}</span>
+                    <p className="text-white/30 text-xs mt-4">Pasa el cursor -&gt;</p>
                   </div>
-                  <div className="flip-card-back flex flex-col justify-between p-6"
-                    style={{ background: 'linear-gradient(135deg, rgba(13,13,13,0.95) 0%, rgba(8,8,8,0.98) 100%)', border: '1px solid var(--color-accent-border)' }}>
+                  <div className="flip-card-back flex flex-col justify-between p-6" style={{ background: 'linear-gradient(135deg, rgba(13,13,13,0.95) 0%, rgba(8,8,8,0.98) 100%)', border: '1px solid var(--color-accent-border)' }}>
                     <Quote className="w-8 h-8 text-[var(--color-accent-val)]/60 mb-3" />
-                    <p className="text-white/85 text-sm leading-relaxed italic flex-1">{r.story}</p>
+                    <p className="text-white/85 text-sm leading-relaxed italic flex-1">{r.achievement}</p>
                     <div className="mt-4 pt-4 border-t border-[var(--color-accent-border)]">
                       <p className="text-[var(--color-text-primary)] font-bold text-sm">{r.name}</p>
-                      <p className="text-white/40 text-xs mt-1">{r.detail}</p>
+                      <p className="text-white/40 text-xs mt-1">{r.period}</p>
                     </div>
                   </div>
                 </div>
@@ -492,22 +400,17 @@ export default function GaleriaClient({
         </div>
       </section>
 
-
-      {/* ═══ SECCIÓN 4 · GALERÍA (gallery_items activos) ════════════════ */}
       {hasGallery && (
         <section className="py-24 relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[var(--color-accent-dim)]/10 to-transparent pointer-events-none" />
           <div className="container mx-auto px-4 relative">
-            <motion.div
-              className="text-center mb-16"
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.7 }}
-            >
-              <span className="eyebrow">Focus Club</span>
-              <h2 className="text-4xl md:text-5xl font-black text-[var(--color-text-primary)] mb-4">Galería</h2>
+            <motion.div className="text-center mb-16" initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.7 }}>
+              <span className="eyebrow">{galeriaContent?.galleryEyebrow ?? 'Focus Club'}</span>
+              <h2 className="text-4xl md:text-5xl font-black text-[var(--color-text-primary)] mb-4">{galeriaContent?.galleryTitle ?? 'Galeria'}</h2>
               <div className="line-accent mx-auto" />
+              {(galeriaContent?.gallerySubtitle ?? '').trim() && (
+                <p className="text-[var(--color-text-secondary)] max-w-xl mx-auto mt-4">{galeriaContent?.gallerySubtitle}</p>
+              )}
             </motion.div>
 
             <GallerySlider items={galleryItems} onOpen={setLightbox} />
@@ -515,46 +418,25 @@ export default function GaleriaClient({
         </section>
       )}
 
-
-      {/* ═══ LIGHTBOX ═══════════════════════════════════════════════════ */}
       <AnimatePresence>
         {lightbox && (
-          <motion.div
-            className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex items-center justify-center p-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setLightbox(null)}
-          >
-            <motion.div
-              className="relative max-w-4xl w-full max-h-[90vh]"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {lightbox.title && (
-                <p className="text-white/60 text-sm mb-3 text-center">{lightbox.title}</p>
-              )}
+          <motion.div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setLightbox(null)}>
+            <motion.div className="relative max-w-4xl w-full max-h-[90vh]" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }} transition={{ type: 'spring', damping: 25, stiffness: 300 }} onClick={(e) => e.stopPropagation()}>
+              {lightbox.title && <p className="text-white/60 text-sm mb-3 text-center">{lightbox.title}</p>}
               {lightbox.type === 'video' ? (
                 <video src={lightbox.src} controls autoPlay className="w-full rounded-2xl shadow-2xl max-h-[80vh]" />
               ) : (
                 <div className="relative w-full rounded-2xl overflow-hidden" style={{ aspectRatio: '16/9' }}>
-                  <Image src={lightbox.src} alt={lightbox.title || 'Galería'} fill unoptimized className="object-contain" />
+                  <Image src={lightbox.src} alt={lightbox.title || 'Galeria'} fill unoptimized className="object-contain" />
                 </div>
               )}
-              <button
-                onClick={() => setLightbox(null)}
-                className="absolute -top-4 -right-4 w-10 h-10 rounded-full bg-black border border-white/20 text-white flex items-center justify-center hover:bg-red-600/80 hover:border-red-500 transition-colors shadow-lg"
-              >
+              <button onClick={() => setLightbox(null)} className="absolute -top-4 -right-4 w-10 h-10 rounded-full bg-black border border-white/20 text-white flex items-center justify-center hover:bg-red-600/80 hover:border-red-500 transition-colors shadow-lg">
                 <X className="w-4 h-4" />
               </button>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
-
     </div>
   );
 }

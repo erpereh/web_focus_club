@@ -227,12 +227,54 @@ export function formatMinutos(minutos: number): string {
     return `${h}h ${m}min`;
 }
 
+export interface GaleriaStat {
+    value: string;
+    label: string;
+    suffix?: string; // legacy compat
+}
+
+export interface GaleriaTrainingItem {
+    mediaUrl: string;
+    mediaType: 'image' | 'video';
+    title: string;
+    active?: boolean;
+}
+
+export interface GaleriaResultado {
+    metric: string;
+    period: string;
+    name: string;
+    achievement: string;
+    label: string;
+    active?: boolean;
+    // legacy compat
+    stat?: string;
+    statLabel?: string;
+    tag?: string;
+    story?: string;
+    detail?: string;
+}
+
 export interface GaleriaContent {
+    heroEyebrow?: string;
     heroTitle: string;
     heroSubtitle: string;
-    stats: { value: number; suffix: string; label: string }[];
-    transformaciones: { name: string; periodo: string; resultado: string }[];
-    resultados: { name: string; stat: string; statLabel: string; tag: string; story: string; detail: string }[];
+    statsTitle?: string;
+    statsSubtitle?: string;
+    stats: GaleriaStat[];
+    trainingEyebrow?: string;
+    trainingTitle?: string;
+    trainingSubtitle?: string;
+    trainings?: GaleriaTrainingItem[];
+    resultsEyebrow?: string;
+    resultsTitle?: string;
+    resultsSubtitle?: string;
+    resultados: GaleriaResultado[];
+    galleryEyebrow?: string;
+    galleryTitle?: string;
+    gallerySubtitle?: string;
+    // legacy compat
+    transformaciones?: { name: string; periodo: string; resultado: string }[];
 }
 
 export interface HeroStat {

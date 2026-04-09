@@ -56,6 +56,7 @@ import {
   Layers,
   Eye,
   EyeOff,
+  Play,
 } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
@@ -72,7 +73,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useMediaLibrary } from '@/hooks/useMediaLibrary';
 import { defaultCMS } from '@/hooks/useFirestore';
 import { toast } from '@/hooks/use-toast';
-import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono, BrandingConfig, HeroStat, SandraAchievement, SandraValue, CentroConfig } from '@/types';
+import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, BlockedSlot, Trainer, SiteConfig, Bono, BrandingConfig, HeroStat, SandraAchievement, SandraValue, CentroConfig, GaleriaTrainingItem, GaleriaResultado, GaleriaStat } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import {
   getAppointments,
@@ -93,7 +94,8 @@ import {
   updateSandraData as updateSandraDataFS,
   updateCentroConfig as updateCentroConfigFS,
   getCentroConfig as getCentroConfigFS,
-  updateGaleriaData as updateGaleriaDataFS,
+  updateGaleriaConfig as updateGaleriaConfigFS,
+  getGaleriaConfig as getGaleriaConfigFS,
   getUsers,
   getUserProfile,
   addActivityLog,
@@ -489,6 +491,180 @@ function SortableCentroZonaItem({
   );
 }
 
+function SortableGaleriaStatItem({
+  stat,
+  index,
+  onUpdate,
+  onRemove,
+}: {
+  stat: GaleriaStat;
+  index: number;
+  onUpdate: (field: 'value' | 'label', val: string) => void;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: index.toString() });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  return (
+    <div ref={setNodeRef} style={style} className="p-4 rounded-xl bg-muted/30 border border-border">
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div className="flex items-center gap-2">
+          <button type="button" {...attributes} {...listeners} className="cursor-grab text-[var(--color-text-muted)] hover:text-white touch-none">
+            <GripVertical className="w-4 h-4" />
+          </button>
+          <input
+            type="text"
+            value={stat.value ?? ''}
+            onChange={(e) => onUpdate('value', e.target.value)}
+            placeholder="Valor (ej: 200+)"
+            className="flex-1 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={stat.label ?? ''}
+            onChange={(e) => onUpdate('label', e.target.value)}
+            placeholder="Etiqueta"
+            className="flex-1 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+          />
+          <button type="button" onClick={onRemove} className="p-2 text-destructive hover:bg-destructive/10 rounded-xl">
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SortableGaleriaTrainingItem({
+  training,
+  index,
+  onUpdate,
+  onRemove,
+  onToggleActive,
+  onPickMedia,
+}: {
+  training: GaleriaTrainingItem;
+  index: number;
+  onUpdate: (field: 'title' | 'mediaType', value: string) => void;
+  onRemove: () => void;
+  onToggleActive: () => void;
+  onPickMedia: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: index.toString() });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  return (
+    <div ref={setNodeRef} style={style} className="p-4 rounded-xl bg-muted/30 border border-border space-y-3">
+      <div className="flex items-center gap-2">
+        <button type="button" {...attributes} {...listeners} className="cursor-grab text-[var(--color-text-muted)] hover:text-white touch-none">
+          <GripVertical className="w-4 h-4" />
+        </button>
+        <button type="button" onClick={onPickMedia} className="w-16 h-16 rounded-xl border border-border overflow-hidden bg-input flex items-center justify-center hover:border-[var(--color-accent-val)] transition-colors">
+          {training.mediaUrl ? (
+            training.mediaType === 'video' ? (
+              <div className="w-full h-full flex items-center justify-center bg-black/40">
+                <Play className="w-5 h-5 text-white/80" />
+              </div>
+            ) : (
+              <img src={training.mediaUrl} alt={training.title || `Entrenamiento ${index + 1}`} className="w-full h-full object-cover" />
+            )
+          ) : (
+            <ImageIcon className="w-5 h-5 text-[var(--color-text-secondary)]" />
+          )}
+        </button>
+        <div className="flex-1 grid sm:grid-cols-2 gap-2">
+          <input
+            type="text"
+            value={training.title ?? ''}
+            onChange={(e) => onUpdate('title', e.target.value)}
+            placeholder="Titulo de entrenamiento"
+            className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+          />
+          <select
+            value={training.mediaType ?? 'image'}
+            onChange={(e) => onUpdate('mediaType', e.target.value)}
+            className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+          >
+            <option value="image">Imagen</option>
+            <option value="video">Video</option>
+          </select>
+        </div>
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={onToggleActive}
+          className={cn(
+            'px-3 py-2 rounded-xl text-xs border transition-colors',
+            training.active === false
+              ? 'text-[var(--color-text-secondary)] border-border hover:text-[var(--color-text-primary)]'
+              : 'text-[var(--color-accent-val)] border-[var(--color-accent-border)] bg-[var(--color-accent-dim)]'
+          )}
+        >
+          {training.active === false ? 'Inactivo' : 'Activo'}
+        </button>
+        <button type="button" onClick={onRemove} className="p-2 text-destructive hover:bg-destructive/10 rounded-xl">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SortableGaleriaResultadoItem({
+  resultado,
+  index,
+  onUpdate,
+  onRemove,
+  onToggleActive,
+}: {
+  resultado: GaleriaResultado;
+  index: number;
+  onUpdate: (field: 'metric' | 'period' | 'name' | 'label' | 'achievement', val: string) => void;
+  onRemove: () => void;
+  onToggleActive: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: index.toString() });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  return (
+    <div ref={setNodeRef} style={style} className="p-4 rounded-xl bg-muted/30 border border-border space-y-3">
+      <div className="flex items-center gap-2">
+        <button type="button" {...attributes} {...listeners} className="cursor-grab text-[var(--color-text-muted)] hover:text-white touch-none">
+          <GripVertical className="w-4 h-4" />
+        </button>
+        <input
+          type="text"
+          value={resultado.name ?? ''}
+          onChange={(e) => onUpdate('name', e.target.value)}
+          placeholder="Nombre"
+          className="flex-1 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
+        />
+        <button
+          type="button"
+          onClick={onToggleActive}
+          className={cn(
+            'px-3 py-2 rounded-xl text-xs border transition-colors',
+            resultado.active === false
+              ? 'text-[var(--color-text-secondary)] border-border hover:text-[var(--color-text-primary)]'
+              : 'text-[var(--color-accent-val)] border-[var(--color-accent-border)] bg-[var(--color-accent-dim)]'
+          )}
+        >
+          {resultado.active === false ? 'Inactivo' : 'Activo'}
+        </button>
+        <button type="button" onClick={onRemove} className="p-2 text-destructive hover:bg-destructive/10 rounded-xl">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="grid sm:grid-cols-3 gap-3">
+        <input type="text" value={resultado.metric ?? ''} onChange={(e) => onUpdate('metric', e.target.value)} placeholder="Metrica (ej: -18 kg)" className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm" />
+        <input type="text" value={resultado.period ?? ''} onChange={(e) => onUpdate('period', e.target.value)} placeholder="Periodo (ej: en 4 meses)" className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm" />
+        <input type="text" value={resultado.label ?? ''} onChange={(e) => onUpdate('label', e.target.value)} placeholder="Etiqueta" className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm" />
+      </div>
+      <textarea value={resultado.achievement ?? ''} onChange={(e) => onUpdate('achievement', e.target.value)} placeholder="Descripcion del resultado" rows={2} className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none text-sm" />
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const { user, userProfile, loading: authLoading, login, loginWithGoogle, logout, resetPassword, refreshUserProfile, isAdmin } = useAuth();
   const pathname = usePathname();
@@ -556,12 +732,14 @@ export default function AdminPage() {
   } | null>(null);
 
   // Branding / Logo
-  const { brandingFolderId, sandraFolderId, centroFolderId, fetchFolders: fetchMediaFolders } = useMediaLibrary();
+  const { galleryFolderId, brandingFolderId, sandraFolderId, centroFolderId, fetchFolders: fetchMediaFolders } = useMediaLibrary();
   const [brandingConfig, setBrandingConfig] = useState<BrandingConfig | null>(null);
   const [logoPickerOpen, setLogoPickerOpen] = useState(false);
   const [sandraPickerOpen, setSandraPickerOpen] = useState(false);
   const [centroPickerOpen, setCentroPickerOpen] = useState(false);
   const [centroPickerIndex, setCentroPickerIndex] = useState<number | null>(null);
+  const [galeriaTrainingPickerOpen, setGaleriaTrainingPickerOpen] = useState(false);
+  const [galeriaTrainingPickerIndex, setGaleriaTrainingPickerIndex] = useState<number | null>(null);
 
   // Autenticación admin
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
@@ -606,7 +784,7 @@ export default function AdminPage() {
 
   // Cargar datos desde Firestore
   const refreshData = async () => {
-    const [appts, svcs, tests, cms, usersList, blocked, trainersList, config, branding, centroConfig] = await Promise.all([
+    const [appts, svcs, tests, cms, usersList, blocked, trainersList, config, branding, centroConfig, galeriaConfig] = await Promise.all([
       getAppointments(),
       getServices(),
       getTestimonials(),
@@ -617,6 +795,7 @@ export default function AdminPage() {
       getSiteConfig(),
       getBrandingConfig(),
       getCentroConfigFS(),
+      getGaleriaConfigFS(),
     ]);
     setAppointments(appts);
     setServices(svcs);
@@ -632,7 +811,7 @@ export default function AdminPage() {
     if (cms) {
       const mergedCms = {
         ...cms,
-        galeria: cms.galeria ?? defaultCMS.galeria,
+        galeria: galeriaConfig ?? cms.galeria ?? defaultCMS.galeria,
         centro: centroConfig ?? defaultCMS.centro,
       };
       // Normalize Sandra achievements: if Firestore still has old string[] format, reset to []
@@ -669,9 +848,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (isAdmin) {
-      // eslint-disable-next-line
       refreshData().catch(console.error);
-      // eslint-disable-next-line
       fetchMediaFolders().catch(console.error);
     } else if (isTrainerRole) {
       // Trainers only load their own data
@@ -827,7 +1004,7 @@ export default function AdminPage() {
   // Manejar guardado de la Galería
   const handleSaveGaleria = async () => {
     if (!editedContent?.galeria) return;
-    await updateGaleriaDataFS(editedContent.galeria);
+    await updateGaleriaConfigFS(editedContent.galeria);
     await addActivityLog({ action: 'cms_galeria_updated', adminEmail: user?.email || 'unknown' });
     await refreshData();
     const t = toast({ title: 'Galeria actualizada', description: 'Los cambios se han guardado correctamente.' });
@@ -973,6 +1150,150 @@ export default function AdminPage() {
         const oldIndex = Number(active.id);
         const newIndex = Number(over?.id);
         return { ...prev, centro: { ...prev.centro, zonas: arrayMove(zonas, oldIndex, newIndex) } } as CMSContent;
+      });
+    }
+  };
+
+  const updateGaleriaField = (field: keyof GaleriaContent, value: unknown) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        galeria: {
+          ...prev.galeria,
+          [field]: value,
+        },
+      } as CMSContent;
+    });
+  };
+
+  const updateGaleriaStatField = (index: number, field: 'value' | 'label', value: string) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const stats = [...(prev.galeria?.stats ?? [])];
+      stats[index] = { ...stats[index], [field]: value };
+      return { ...prev, galeria: { ...prev.galeria, stats } } as CMSContent;
+    });
+  };
+
+  const addGaleriaStat = () => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const stats = [...(prev.galeria?.stats ?? []), { value: '', label: '' }];
+      return { ...prev, galeria: { ...prev.galeria, stats } } as CMSContent;
+    });
+  };
+
+  const removeGaleriaStat = (index: number) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const stats = (prev.galeria?.stats ?? []).filter((_, i) => i !== index);
+      return { ...prev, galeria: { ...prev.galeria, stats } } as CMSContent;
+    });
+  };
+
+  const handleGaleriaStatsDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (active.id !== over?.id) {
+      setEditedContent((prev) => {
+        if (!prev) return prev;
+        const stats = prev.galeria?.stats ?? [];
+        return { ...prev, galeria: { ...prev.galeria, stats: arrayMove(stats, Number(active.id), Number(over?.id)) } } as CMSContent;
+      });
+    }
+  };
+
+  const updateGaleriaTrainingField = (index: number, field: 'title' | 'mediaType', value: string) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const trainings = [...(prev.galeria?.trainings ?? [])];
+      trainings[index] = {
+        ...trainings[index],
+        [field]: field === 'mediaType' ? (value === 'video' ? 'video' : 'image') : value,
+      };
+      return { ...prev, galeria: { ...prev.galeria, trainings } } as CMSContent;
+    });
+  };
+
+  const addGaleriaTraining = () => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const trainings = [...(prev.galeria?.trainings ?? []), { mediaUrl: '', mediaType: 'image', title: '', active: true }];
+      return { ...prev, galeria: { ...prev.galeria, trainings } } as CMSContent;
+    });
+  };
+
+  const removeGaleriaTraining = (index: number) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const trainings = (prev.galeria?.trainings ?? []).filter((_, i) => i !== index);
+      return { ...prev, galeria: { ...prev.galeria, trainings } } as CMSContent;
+    });
+  };
+
+  const toggleGaleriaTrainingActive = (index: number) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const trainings = [...(prev.galeria?.trainings ?? [])];
+      const current = trainings[index] ?? { mediaUrl: '', mediaType: 'image', title: '', active: true };
+      trainings[index] = { ...current, active: current.active === false ? true : false };
+      return { ...prev, galeria: { ...prev.galeria, trainings } } as CMSContent;
+    });
+  };
+
+  const handleGaleriaTrainingsDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (active.id !== over?.id) {
+      setEditedContent((prev) => {
+        if (!prev) return prev;
+        const trainings = prev.galeria?.trainings ?? [];
+        return { ...prev, galeria: { ...prev.galeria, trainings: arrayMove(trainings, Number(active.id), Number(over?.id)) } } as CMSContent;
+      });
+    }
+  };
+
+  const updateGaleriaResultadoField = (index: number, field: 'metric' | 'period' | 'name' | 'label' | 'achievement', value: string) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const resultados = [...(prev.galeria?.resultados ?? [])];
+      resultados[index] = { ...resultados[index], [field]: value };
+      return { ...prev, galeria: { ...prev.galeria, resultados } } as CMSContent;
+    });
+  };
+
+  const addGaleriaResultado = () => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const resultados = [...(prev.galeria?.resultados ?? []), { metric: '', period: '', name: '', achievement: '', label: '', active: true }];
+      return { ...prev, galeria: { ...prev.galeria, resultados } } as CMSContent;
+    });
+  };
+
+  const removeGaleriaResultado = (index: number) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const resultados = (prev.galeria?.resultados ?? []).filter((_, i) => i !== index);
+      return { ...prev, galeria: { ...prev.galeria, resultados } } as CMSContent;
+    });
+  };
+
+  const toggleGaleriaResultadoActive = (index: number) => {
+    setEditedContent((prev) => {
+      if (!prev) return prev;
+      const resultados = [...(prev.galeria?.resultados ?? [])];
+      const current = resultados[index] ?? { metric: '', period: '', name: '', achievement: '', label: '', active: true };
+      resultados[index] = { ...current, active: current.active === false ? true : false };
+      return { ...prev, galeria: { ...prev.galeria, resultados } } as CMSContent;
+    });
+  };
+
+  const handleGaleriaResultadosDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (active.id !== over?.id) {
+      setEditedContent((prev) => {
+        if (!prev) return prev;
+        const resultados = prev.galeria?.resultados ?? [];
+        return { ...prev, galeria: { ...prev.galeria, resultados: arrayMove(resultados, Number(active.id), Number(over?.id)) } } as CMSContent;
       });
     }
   };
@@ -3261,196 +3582,151 @@ export default function AdminPage() {
                   exit={{ opacity: 0, y: -20 }}
                 >
                   <div className="flex items-center justify-between mb-6">
-                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">CMS Galería</h1>
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">CMS Galeria</h1>
                     <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveGaleria}>
                       Guardar Cambios
                     </PremiumButton>
                   </div>
 
                   <div className="space-y-6">
-                    {/* Fotos & Vídeos — Media Library integrada */}
                     <GalleryManager />
 
-                    {/* Hero */}
                     <GlassCard className="p-6">
-                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Hero de Galería</h2>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Header</h2>
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Título</label>
-                          <input
-                            type="text"
-                            value={editedContent?.galeria?.heroTitle || ''}
-                            onChange={(e) => setEditedContent((prev) => prev ? { ...prev, galeria: { ...prev.galeria, heroTitle: e.target.value } } as CMSContent : prev)}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          />
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow</label>
+                          <input type="text" value={editedContent?.galeria?.heroEyebrow ?? ''} onChange={(e) => updateGaleriaField('heroEyebrow', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
                         </div>
                         <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtítulo</label>
-                          <input
-                            type="text"
-                            value={editedContent?.galeria?.heroSubtitle || ''}
-                            onChange={(e) => setEditedContent((prev) => prev ? { ...prev, galeria: { ...prev.galeria, heroSubtitle: e.target.value } } as CMSContent : prev)}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          />
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo</label>
+                          <input type="text" value={editedContent?.galeria?.heroTitle ?? ''} onChange={(e) => updateGaleriaField('heroTitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtitulo</label>
+                          <input type="text" value={editedContent?.galeria?.heroSubtitle ?? ''} onChange={(e) => updateGaleriaField('heroSubtitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
                         </div>
                       </div>
                     </GlassCard>
 
-                    {/* Estadísticas */}
                     <GlassCard className="p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Estadísticas</h2>
-                        <PremiumButton
-                          variant="outline"
-                          size="sm"
-                          icon={<Plus className="w-4 h-4" />}
-                          onClick={() => setEditedContent((prev) => {
-                            if (!prev?.galeria) return prev;
-                            return { ...prev, galeria: { ...prev.galeria, stats: [...prev.galeria.stats, { value: 0, suffix: '', label: '' }] } } as CMSContent;
-                          })}
-                        >
-                          Añadir stat
-                        </PremiumButton>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Stats</h2>
+                      <div className="grid sm:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo de seccion</label>
+                          <input type="text" value={editedContent?.galeria?.statsTitle ?? ''} onChange={(e) => updateGaleriaField('statsTitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtitulo de seccion</label>
+                          <input type="text" value={editedContent?.galeria?.statsSubtitle ?? ''} onChange={(e) => updateGaleriaField('statsSubtitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
                       </div>
-                      <div className="space-y-4">
-                        {(editedContent?.galeria?.stats || []).map((stat, i) => (
-                          <div key={i} className="grid grid-cols-3 gap-3 items-end">
-                            <div>
-                              <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Valor</label>
-                              <input
-                                type="number"
-                                value={stat.value}
-                                onChange={(e) => setEditedContent((prev) => {
-                                  if (!prev?.galeria) return prev;
-                                  const stats = [...prev.galeria.stats];
-                                  stats[i] = { ...stats[i], value: Number(e.target.value) };
-                                  return { ...prev, galeria: { ...prev.galeria, stats } } as CMSContent;
-                                })}
-                                className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Sufijo (ej: +, %)</label>
-                              <input
-                                type="text"
-                                value={stat.suffix}
-                                onChange={(e) => setEditedContent((prev) => {
-                                  if (!prev?.galeria) return prev;
-                                  const stats = [...prev.galeria.stats];
-                                  stats[i] = { ...stats[i], suffix: e.target.value };
-                                  return { ...prev, galeria: { ...prev.galeria, stats } } as CMSContent;
-                                })}
-                                className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                              />
-                            </div>
-                            <div className="flex gap-2">
-                              <div className="flex-1">
-                                <label className="block text-xs text-[var(--color-text-secondary)] mb-1">Etiqueta</label>
-                                <input
-                                  type="text"
-                                  value={stat.label}
-                                  onChange={(e) => setEditedContent((prev) => {
-                                    if (!prev?.galeria) return prev;
-                                    const stats = [...prev.galeria.stats];
-                                    stats[i] = { ...stats[i], label: e.target.value };
-                                    return { ...prev, galeria: { ...prev.galeria, stats } } as CMSContent;
-                                  })}
-                                  className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                                />
-                              </div>
-                              <button
-                                onClick={() => setEditedContent((prev) => {
-                                  if (!prev?.galeria) return prev;
-                                  const stats = prev.galeria.stats.filter((_, idx) => idx !== i);
-                                  return { ...prev, galeria: { ...prev.galeria, stats } } as CMSContent;
-                                })}
-                                className="mt-5 p-2 rounded-xl text-red-400 hover:bg-red-400/10 transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
+                      <DndContext collisionDetection={closestCenter} onDragEnd={handleGaleriaStatsDragEnd}>
+                        <SortableContext items={(editedContent?.galeria?.stats ?? []).map((_, i) => i.toString())} strategy={verticalListSortingStrategy}>
+                          <div className="space-y-3">
+                            {(editedContent?.galeria?.stats ?? []).map((stat, index) => (
+                              <SortableGaleriaStatItem key={index} stat={stat} index={index} onUpdate={(field, value) => updateGaleriaStatField(index, field, value)} onRemove={() => removeGaleriaStat(index)} />
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                        </SortableContext>
+                      </DndContext>
+                      <PremiumButton variant="outline" size="sm" icon={<Plus className="w-4 h-4" />} onClick={addGaleriaStat} className="mt-4">
+                        Anadir stat
+                      </PremiumButton>
                     </GlassCard>
 
-                    {/* Resultados */}
                     <GlassCard className="p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Resultados (Flip Cards)</h2>
-                        <PremiumButton
-                          variant="outline"
-                          size="sm"
-                          icon={<Plus className="w-4 h-4" />}
-                          onClick={() => setEditedContent((prev) => {
-                            if (!prev?.galeria) return prev;
-                            return { ...prev, galeria: { ...prev.galeria, resultados: [...prev.galeria.resultados, { name: '', stat: '', statLabel: '', tag: '', story: '', detail: '' }] } } as CMSContent;
-                          })}
-                        >
-                          Añadir resultado
-                        </PremiumButton>
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Entrenamientos</h2>
+                      <div className="grid sm:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow</label>
+                          <input type="text" value={editedContent?.galeria?.trainingEyebrow ?? ''} onChange={(e) => updateGaleriaField('trainingEyebrow', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo</label>
+                          <input type="text" value={editedContent?.galeria?.trainingTitle ?? ''} onChange={(e) => updateGaleriaField('trainingTitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
                       </div>
-                      <div className="space-y-4">
-                        {(editedContent?.galeria?.resultados || []).map((r, i) => (
-                          <div key={i} className="p-4 rounded-xl border border-border bg-muted/10">
-                            <div className="flex items-center justify-between mb-3">
-                              <span className="text-sm font-medium text-[var(--color-text-primary)]">Resultado {i + 1}</span>
-                              <button
-                                onClick={() => setEditedContent((prev) => {
-                                  if (!prev?.galeria) return prev;
-                                  const resultados = prev.galeria.resultados.filter((_, idx) => idx !== i);
-                                  return { ...prev, galeria: { ...prev.galeria, resultados } } as CMSContent;
-                                })}
-                                className="p-1 rounded-lg text-red-400 hover:bg-red-400/10 transition-colors"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                            <div className="grid sm:grid-cols-2 gap-3 mb-3">
-                              {([['name', 'Nombre'], ['stat', 'Stat principal'], ['statLabel', 'Subtítulo stat'], ['tag', 'Categoría']] as [keyof typeof r, string][]).map(([field, label]) => (
-                                <div key={field}>
-                                  <label className="block text-xs text-[var(--color-text-secondary)] mb-1">{label}</label>
-                                  <input
-                                    type="text"
-                                    value={r[field]}
-                                    onChange={(e) => setEditedContent((prev) => {
-                                      if (!prev?.galeria) return prev;
-                                      const resultados = [...prev.galeria.resultados];
-                                      resultados[i] = { ...resultados[i], [field]: e.target.value };
-                                      return { ...prev, galeria: { ...prev.galeria, resultados } } as CMSContent;
-                                    })}
-                                    className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                                  />
-                                </div>
-                              ))}
-                            </div>
-                            <div className="space-y-3">
-                              {([['story', 'Testimonio (cita)'], ['detail', 'Detalle del logro']] as [keyof typeof r, string][]).map(([field, label]) => (
-                                <div key={field}>
-                                  <label className="block text-xs text-[var(--color-text-secondary)] mb-1">{label}</label>
-                                  <textarea
-                                    value={r[field]}
-                                    onChange={(e) => setEditedContent((prev) => {
-                                      if (!prev?.galeria) return prev;
-                                      const resultados = [...prev.galeria.resultados];
-                                      resultados[i] = { ...resultados[i], [field]: e.target.value };
-                                      return { ...prev, galeria: { ...prev.galeria, resultados } } as CMSContent;
-                                    })}
-                                    rows={2}
-                                    className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
-                                  />
-                                </div>
-                              ))}
-                            </div>
+                      <div className="mb-4">
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtitulo</label>
+                        <textarea value={editedContent?.galeria?.trainingSubtitle ?? ''} onChange={(e) => updateGaleriaField('trainingSubtitle', e.target.value)} rows={2} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none" />
+                      </div>
+                      <DndContext collisionDetection={closestCenter} onDragEnd={handleGaleriaTrainingsDragEnd}>
+                        <SortableContext items={(editedContent?.galeria?.trainings ?? []).map((_, i) => i.toString())} strategy={verticalListSortingStrategy}>
+                          <div className="space-y-3">
+                            {(editedContent?.galeria?.trainings ?? []).map((training, index) => (
+                              <SortableGaleriaTrainingItem
+                                key={index}
+                                training={training}
+                                index={index}
+                                onUpdate={(field, value) => updateGaleriaTrainingField(index, field, value)}
+                                onRemove={() => removeGaleriaTraining(index)}
+                                onToggleActive={() => toggleGaleriaTrainingActive(index)}
+                                onPickMedia={() => {
+                                  setGaleriaTrainingPickerIndex(index);
+                                  setGaleriaTrainingPickerOpen(true);
+                                }}
+                              />
+                            ))}
                           </div>
-                        ))}
+                        </SortableContext>
+                      </DndContext>
+                      <PremiumButton variant="outline" size="sm" icon={<Plus className="w-4 h-4" />} onClick={addGaleriaTraining} className="mt-4">
+                        Anadir entrenamiento
+                      </PremiumButton>
+                    </GlassCard>
+
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Resultados</h2>
+                      <div className="grid sm:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow</label>
+                          <input type="text" value={editedContent?.galeria?.resultsEyebrow ?? ''} onChange={(e) => updateGaleriaField('resultsEyebrow', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo</label>
+                          <input type="text" value={editedContent?.galeria?.resultsTitle ?? ''} onChange={(e) => updateGaleriaField('resultsTitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                      </div>
+                      <div className="mb-4">
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtitulo</label>
+                        <textarea value={editedContent?.galeria?.resultsSubtitle ?? ''} onChange={(e) => updateGaleriaField('resultsSubtitle', e.target.value)} rows={2} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none" />
+                      </div>
+                      <DndContext collisionDetection={closestCenter} onDragEnd={handleGaleriaResultadosDragEnd}>
+                        <SortableContext items={(editedContent?.galeria?.resultados ?? []).map((_, i) => i.toString())} strategy={verticalListSortingStrategy}>
+                          <div className="space-y-3">
+                            {(editedContent?.galeria?.resultados ?? []).map((resultado, index) => (
+                              <SortableGaleriaResultadoItem key={index} resultado={resultado} index={index} onUpdate={(field, value) => updateGaleriaResultadoField(index, field, value)} onRemove={() => removeGaleriaResultado(index)} onToggleActive={() => toggleGaleriaResultadoActive(index)} />
+                            ))}
+                          </div>
+                        </SortableContext>
+                      </DndContext>
+                      <PremiumButton variant="outline" size="sm" icon={<Plus className="w-4 h-4" />} onClick={addGaleriaResultado} className="mt-4">
+                        Anadir resultado
+                      </PremiumButton>
+                    </GlassCard>
+
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Seccion Galeria</h2>
+                      <div className="grid sm:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow</label>
+                          <input type="text" value={editedContent?.galeria?.galleryEyebrow ?? ''} onChange={(e) => updateGaleriaField('galleryEyebrow', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo</label>
+                          <input type="text" value={editedContent?.galeria?.galleryTitle ?? ''} onChange={(e) => updateGaleriaField('galleryTitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtitulo</label>
+                        <textarea value={editedContent?.galeria?.gallerySubtitle ?? ''} onChange={(e) => updateGaleriaField('gallerySubtitle', e.target.value)} rows={2} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none" />
                       </div>
                     </GlassCard>
                   </div>
                 </motion.div>
               )}
-
-              {/* ============================================
+{/* ============================================
                   CMS - CONTACTO & HERO
                   ============================================ */}
               {activeTab === 'Hero' && (
@@ -4791,6 +5067,31 @@ export default function AdminPage() {
               }}
             />
 
+            <MediaPicker
+              open={galeriaTrainingPickerOpen}
+              onClose={() => {
+                setGaleriaTrainingPickerOpen(false);
+                setGaleriaTrainingPickerIndex(null);
+              }}
+              uploadFolderId={galleryFolderId}
+              onSelect={(file) => {
+                if (galeriaTrainingPickerIndex === null) return;
+                setEditedContent((prev) => {
+                  if (!prev) return prev;
+                  const trainings = [...(prev.galeria?.trainings ?? [])];
+                  if (!trainings[galeriaTrainingPickerIndex]) return prev;
+                  trainings[galeriaTrainingPickerIndex] = {
+                    ...trainings[galeriaTrainingPickerIndex],
+                    mediaUrl: file.url,
+                    mediaType: file.type,
+                  };
+                  return { ...prev, galeria: { ...prev.galeria, trainings } } as CMSContent;
+                });
+                setGaleriaTrainingPickerOpen(false);
+                setGaleriaTrainingPickerIndex(null);
+              }}
+            />
+
             {/* ============================================
                 ASSIGN BONO MODAL
                 ============================================ */}
@@ -5507,3 +5808,4 @@ export default function AdminPage() {
     </div >
   );
 }
+
