@@ -97,7 +97,6 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
             loop
             playsInline
             className="object-cover w-full h-full opacity-40"
-            poster="/imagenes/hero.jpeg"
           >
             <source src="/imagenes/hero.mp4" type="video/mp4" />
           </video>
