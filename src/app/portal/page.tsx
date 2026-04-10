@@ -239,6 +239,9 @@ export default function PortalPage() {
     setShowProfileModal(false);
   };
 
+  const displayedProfilePhoto = profilePhotoPreview
+    || (profilePhotoRemoved ? '' : userProfile?.photoURL || '');
+
   // Computed: minutos totales históricos y próxima cita
   const totalMinutosUsados = allBonos.reduce((sum, b) => sum + (getBonoMinutosTotales(b) - getBonoMinutosRestantes(b)), 0);
   const nextAppointment = [...userAppointments]
@@ -1605,9 +1608,9 @@ export default function PortalPage() {
                 {/* Avatar */}
                 <div className="flex flex-col items-center gap-3 pb-2">
                   <div className="relative">
-                    {profilePhotoPreview || userProfile?.photoURL ? (
+                    {displayedProfilePhoto ? (
                       <img
-                        src={profilePhotoPreview || userProfile?.photoURL}
+                        src={displayedProfilePhoto}
                         alt=""
                         className="w-20 h-20 rounded-full object-cover ring-2 ring-[var(--color-accent-border)]"
                       />
@@ -1636,7 +1639,7 @@ export default function PortalPage() {
                       />
                     </label>
                   </div>
-                  {(profilePhotoPreview || userProfile?.photoURL) && (
+                  {displayedProfilePhoto && (
                     <button
                       type="button"
                       onClick={() => {
