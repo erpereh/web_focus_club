@@ -36,6 +36,7 @@ import {
   X,
   Camera,
   Settings,
+  Trash2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -44,9 +45,7 @@ import { InteractiveCalendar } from '@/components/ui/interactive-calendar';
 import { useAuth } from '@/contexts/AuthContext';
 import type { TimeSlot, Appointment, Bono, Trainer } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
-import { addAppointment as addAppointmentFS, getAppointmentsByUser, getActiveBonoByUser, getBonosByUser, updateUserProfile, getTrainers } from '@/lib/firestore';
-import { storage } from '@/lib/firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { addAppointment as addAppointmentFS, getAppointmentsByUser, getActiveBonoByUser, getBonosByUser, updateUserProfile, getTrainers, uploadUserAvatar, deleteUserAvatar } from '@/lib/firestore';
 import { updatePassword } from 'firebase/auth';
 import { cn } from '@/lib/utils';
 
@@ -168,6 +167,7 @@ export default function PortalPage() {
   const [newPassword, setNewPassword] = useState('');
   const [profilePhotoFile, setProfilePhotoFile] = useState<File | null>(null);
   const [profilePhotoPreview, setProfilePhotoPreview] = useState('');
+  const [profilePhotoRemoved, setProfilePhotoRemoved] = useState(false);
 
   // Etiqueta del servicio derivada del bono activo
   const bonoServiceLabel = activeBono ? 'Bono Mensual de Entrenamiento' : '';
@@ -203,6 +203,41 @@ export default function PortalPage() {
       setProfileEditForm({ name: userProfile.name || '', phone: userProfile.phone || '' });
     }
   }, [userProfile]);
+
+  useEffect(() => {
+    return () => {
+      if (profilePhotoPreview.startsWith('blob:')) {
+        URL.revokeObjectURL(profilePhotoPreview);
+      }
+    };
+  }, [profilePhotoPreview]);
+
+  const openProfileModal = () => {
+    setProfileEditForm({ name: userProfile?.name || '', phone: userProfile?.phone || '' });
+    setProfilePhotoFile(null);
+    setProfilePhotoRemoved(false);
+    setProfileError('');
+    setProfileSuccess('');
+    setNewPassword('');
+    if (profilePhotoPreview.startsWith('blob:')) {
+      URL.revokeObjectURL(profilePhotoPreview);
+    }
+    setProfilePhotoPreview('');
+    setShowProfileModal(true);
+  };
+
+  const closeProfileModal = () => {
+    setProfilePhotoFile(null);
+    setProfilePhotoRemoved(false);
+    setProfileError('');
+    setProfileSuccess('');
+    setNewPassword('');
+    if (profilePhotoPreview.startsWith('blob:')) {
+      URL.revokeObjectURL(profilePhotoPreview);
+    }
+    setProfilePhotoPreview('');
+    setShowProfileModal(false);
+  };
 
   // Computed: minutos totales históricos y próxima cita
   const totalMinutosUsados = allBonos.reduce((sum, b) => sum + (getBonoMinutosTotales(b) - getBonoMinutosRestantes(b)), 0);
@@ -445,14 +480,15 @@ export default function PortalPage() {
     try {
       let photoURL = userProfile.photoURL || '';
       if (profilePhotoFile) {
-        const storageRef = ref(storage, `user-avatars/${user.uid}`);
-        await uploadBytes(storageRef, profilePhotoFile);
-        photoURL = await getDownloadURL(storageRef);
+        photoURL = await uploadUserAvatar(user.uid, profilePhotoFile, userProfile.photoURL);
+      } else if (profilePhotoRemoved && userProfile.photoURL) {
+        await deleteUserAvatar(userProfile.photoURL);
+        photoURL = '';
       }
       await updateUserProfile(user.uid, {
         name: profileEditForm.name,
         phone: profileEditForm.phone,
-        ...(photoURL ? { photoURL } : {}),
+        photoURL,
       });
       if (newPassword.length >= 6) {
         await updatePassword(user, newPassword);
@@ -460,6 +496,10 @@ export default function PortalPage() {
       }
       await refreshUserProfile();
       setProfilePhotoFile(null);
+      setProfilePhotoRemoved(false);
+      if (profilePhotoPreview.startsWith('blob:')) {
+        URL.revokeObjectURL(profilePhotoPreview);
+      }
       setProfilePhotoPreview('');
       setProfileSuccess('Perfil actualizado correctamente.');
     } catch (err) {
@@ -993,7 +1033,7 @@ export default function PortalPage() {
               {/* Header bar: avatar + CTA */}
               <div className="flex items-center justify-between mb-8 gap-4">
                 <div className="flex items-center gap-3">
-                  <button onClick={() => setShowProfileModal(true)} className="relative group shrink-0">
+                  <button onClick={openProfileModal} className="relative group shrink-0">
                     {userProfile?.photoURL ? (
                       <img src={userProfile.photoURL} alt="" className="w-12 h-12 rounded-full object-cover ring-2 ring-[var(--color-accent-border)] group-hover:ring-[var(--color-accent-border)] transition-all" />
                     ) : (
@@ -1542,7 +1582,7 @@ export default function PortalPage() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
-              onClick={() => setShowProfileModal(false)}
+              onClick={closeProfileModal}
             />
             <motion.div
               initial={{ opacity: 0, x: '100%' }}
@@ -1554,7 +1594,7 @@ export default function PortalPage() {
               <div className="flex items-center justify-between p-6 border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm z-10">
                 <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Mi Perfil</h2>
                 <button
-                  onClick={() => setShowProfileModal(false)}
+                  onClick={closeProfileModal}
                   className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted/30 transition-colors"
                 >
                   <X className="w-4 h-4 text-[var(--color-text-secondary)]" />
@@ -1585,13 +1625,35 @@ export default function PortalPage() {
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
+                            if (profilePhotoPreview.startsWith('blob:')) {
+                              URL.revokeObjectURL(profilePhotoPreview);
+                            }
                             setProfilePhotoFile(file);
                             setProfilePhotoPreview(URL.createObjectURL(file));
+                            setProfilePhotoRemoved(false);
                           }
                         }}
                       />
                     </label>
                   </div>
+                  {(profilePhotoPreview || userProfile?.photoURL) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (profilePhotoPreview.startsWith('blob:')) {
+                          URL.revokeObjectURL(profilePhotoPreview);
+                        }
+                        setProfilePhotoFile(null);
+                        setProfilePhotoPreview('');
+                        setProfilePhotoRemoved(true);
+                        setProfileSuccess('');
+                      }}
+                      className="inline-flex items-center gap-2 text-xs text-red-400 hover:text-red-300 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Eliminar foto
+                    </button>
+                  )}
                 </div>
 
                 {/* Nombre */}

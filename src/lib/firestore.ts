@@ -480,6 +480,42 @@ export async function getUsers(): Promise<UserProfile[]> {
     return snap.docs.map((d) => d.data() as UserProfile);
 }
 
+function getFileExtension(file: File): string {
+    const fromName = file.name.split('.').pop()?.toLowerCase();
+    if (fromName && /^[a-z0-9]+$/.test(fromName)) return fromName;
+
+    const mimeExt = file.type.split('/').pop()?.toLowerCase();
+    if (mimeExt && /^[a-z0-9]+$/.test(mimeExt)) return mimeExt;
+
+    return 'jpg';
+}
+
+async function deleteStorageAssetByUrl(url?: string): Promise<void> {
+    if (!url?.trim()) return;
+
+    try {
+        const assetRef = ref(storage, url);
+        await deleteObject(assetRef);
+    } catch {
+        // Ignore missing/legacy files so profile updates never fail on cleanup.
+    }
+}
+
+export async function uploadUserAvatar(uid: string, file: File, currentPhotoURL?: string): Promise<string> {
+    const ext = getFileExtension(file);
+    const storagePath = `user-avatars/${uid}/profile-${Date.now()}.${ext}`;
+    const storageRef = ref(storage, storagePath);
+
+    await uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
+    await deleteStorageAssetByUrl(currentPhotoURL);
+
+    return getDownloadURL(storageRef);
+}
+
+export async function deleteUserAvatar(currentPhotoURL?: string): Promise<void> {
+    await deleteStorageAssetByUrl(currentPhotoURL);
+}
+
 // ============================================
 // CITAS (APPOINTMENTS)
 // ============================================

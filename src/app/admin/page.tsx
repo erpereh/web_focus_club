@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePathname } from 'next/navigation';
 
@@ -1003,6 +1003,11 @@ export default function AdminPage() {
   const filteredAppointments = statusFilter === 'all'
     ? appointments
     : appointments.filter((a) => a.status === statusFilter);
+  const clientsByUid = useMemo(() => new Map(clients.map((client) => [client.uid, client])), [clients]);
+  const clientsByEmail = useMemo(() => new Map(clients.map((client) => [client.email, client])), [clients]);
+
+  const getClientForAppointment = (appointment: Appointment): UserProfile | undefined =>
+    clientsByUid.get(appointment.userId) ?? clientsByEmail.get(appointment.email);
 
   // Manejar inicio de sesión admin con Firebase Auth
   const handleLogin = async (e: React.FormEvent) => {
@@ -2270,6 +2275,7 @@ export default function AdminPage() {
                     <div className="space-y-4">
                       {appointments.slice(0, 5).map((appointment) => {
                         const StatusIcon = statusConfig[appointment.status].icon;
+                        const appointmentClient = getClientForAppointment(appointment);
                         return (
                           <div
                             key={appointment.id}
@@ -2284,9 +2290,17 @@ export default function AdminPage() {
                             }}
                           >
                             <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--color-accent-val)] to-emerald-bright flex items-center justify-center text-[var(--color-bg-base)] font-semibold">
-                                {appointment.name.charAt(0)}
-                              </div>
+                              {appointmentClient?.photoURL ? (
+                                <img
+                                  src={appointmentClient.photoURL}
+                                  alt={appointment.name}
+                                  className="w-10 h-10 rounded-full object-cover ring-2 ring-[var(--color-accent-border)]"
+                                />
+                              ) : (
+                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[var(--color-accent-val)] to-emerald-bright flex items-center justify-center text-[var(--color-bg-base)] font-semibold">
+                                  {appointment.name.charAt(0)}
+                                </div>
+                              )}
                               <div>
                                 <p className="font-medium text-[var(--color-text-primary)] hover:text-[var(--color-accent-val)] transition-colors">{appointment.name}</p>
                                 <p className="text-sm text-[var(--color-text-secondary)]">
@@ -2349,6 +2363,7 @@ export default function AdminPage() {
                   <div className="space-y-4">
                     {filteredAppointments.map((appointment) => {
                       const StatusIcon = statusConfig[appointment.status].icon;
+                      const appointmentClient = getClientForAppointment(appointment);
                       return (
                         <motion.div
                           id={`appt-${appointment.id}`}
@@ -2361,9 +2376,17 @@ export default function AdminPage() {
                             <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6">
                               <div className="flex-1 space-y-4">
                                 <div className="flex items-center gap-3">
-                                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[var(--color-accent-val)] to-emerald-bright flex items-center justify-center text-[var(--color-bg-base)] font-bold text-lg">
-                                    {appointment.name.charAt(0)}
-                                  </div>
+                                  {appointmentClient?.photoURL ? (
+                                    <img
+                                      src={appointmentClient.photoURL}
+                                      alt={appointment.name}
+                                      className="w-12 h-12 rounded-full object-cover ring-2 ring-[var(--color-accent-border)]"
+                                    />
+                                  ) : (
+                                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[var(--color-accent-val)] to-emerald-bright flex items-center justify-center text-[var(--color-bg-base)] font-bold text-lg">
+                                      {appointment.name.charAt(0)}
+                                    </div>
+                                  )}
                                   <div>
                                     <h3 className="font-semibold text-[var(--color-text-primary)] text-lg">{appointment.name}</h3>
                                     <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border', statusConfig[appointment.status].color)}>
@@ -2632,16 +2655,24 @@ export default function AdminPage() {
                       <GlassCard key={client.uid} className="p-6">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                           <div className="flex items-center gap-4">
-                            <div className={cn(
-                              "w-12 h-12 rounded-full flex items-center justify-center",
-                              client.role === 'admin' ? "bg-[var(--color-accent-dim)]" : client.isTrainer ? "bg-[var(--color-accent-dim)]" : "bg-[var(--color-accent-dim)]"
-                            )}>
-                              {client.isTrainer ? (
-                                <Dumbbell className="w-6 h-6 text-[var(--color-accent-val)]" />
-                              ) : (
-                                <User className="w-6 h-6 text-[var(--color-accent-val)]" />
-                              )}
-                            </div>
+                            {client.photoURL ? (
+                              <img
+                                src={client.photoURL}
+                                alt={client.name}
+                                className="w-12 h-12 rounded-full object-cover ring-2 ring-[var(--color-accent-border)]"
+                              />
+                            ) : (
+                              <div className={cn(
+                                "w-12 h-12 rounded-full flex items-center justify-center",
+                                client.role === 'admin' ? "bg-[var(--color-accent-dim)]" : client.isTrainer ? "bg-[var(--color-accent-dim)]" : "bg-[var(--color-accent-dim)]"
+                              )}>
+                                {client.isTrainer ? (
+                                  <Dumbbell className="w-6 h-6 text-[var(--color-accent-val)]" />
+                                ) : (
+                                  <User className="w-6 h-6 text-[var(--color-accent-val)]" />
+                                )}
+                              </div>
+                            )}
                             <div>
                               <h3 className="font-semibold text-[var(--color-text-primary)]">{client.name}</h3>
                               <div className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
