@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
-  <rect width="400" height="400" fill="#0D1F16"/>
-  <circle cx="200" cy="160" r="80" fill="none" stroke="#40916C" stroke-width="2" opacity="0.4"/>
-  <text x="200" y="155" font-family="sans-serif" font-size="42" font-weight="bold" fill="#40916C" text-anchor="middle">-18</text>
-  <text x="200" y="185" font-family="sans-serif" font-size="16" fill="#F8F9FA" text-anchor="middle">kg perdidos</text>
-  <text x="200" y="290" font-family="sans-serif" font-size="20" font-weight="bold" fill="#F8F9FA" text-anchor="middle">María García</text>
-  <text x="200" y="318" font-family="sans-serif" font-size="13" fill="#40916C" text-anchor="middle">Transformación · 4 meses</text>
-</svg>

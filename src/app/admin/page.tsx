@@ -4264,6 +4264,77 @@ export default function AdminPage() {
                         </div>
                       </div>
                     </GlassCard>
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Testimonios (Home)</h2>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Eyebrow</label>
+                          <input
+                            type="text"
+                            value={editedContent?.testimonialsEyebrow ?? ''}
+                            onChange={(e) => setEditedContent(prev => prev ? { ...prev, testimonialsEyebrow: e.target.value } as CMSContent : prev)}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            placeholder="TESTIMONIOS"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo</label>
+                          <input
+                            type="text"
+                            value={editedContent?.testimonialsTitle ?? ''}
+                            onChange={(e) => setEditedContent(prev => prev ? { ...prev, testimonialsTitle: e.target.value } as CMSContent : prev)}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            placeholder="Historias de Transformacion"
+                          />
+                        </div>
+                      </div>
+                    </GlassCard>
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">CTA Final (Home)</h2>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Titulo</label>
+                          <input
+                            type="text"
+                            value={editedContent?.ctaTitle ?? ''}
+                            onChange={(e) => setEditedContent(prev => prev ? { ...prev, ctaTitle: e.target.value } as CMSContent : prev)}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            placeholder="Comienza tu transformacion hoy"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Subtitulo</label>
+                          <textarea
+                            value={editedContent?.ctaSubtitle ?? ''}
+                            onChange={(e) => setEditedContent(prev => prev ? { ...prev, ctaSubtitle: e.target.value } as CMSContent : prev)}
+                            rows={3}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto boton</label>
+                            <input
+                              type="text"
+                              value={editedContent?.ctaButtonText ?? ''}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, ctaButtonText: e.target.value } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              placeholder="Solicitar Cita"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Enlace boton</label>
+                            <input
+                              type="text"
+                              value={editedContent?.ctaButtonLink ?? ''}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, ctaButtonLink: e.target.value } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              placeholder="/portal"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </GlassCard>
                   </div>
                 </motion.div>
               )}

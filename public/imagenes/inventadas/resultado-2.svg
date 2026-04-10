@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
-  <rect width="400" height="400" fill="#0A1A12"/>
-  <circle cx="200" cy="160" r="80" fill="none" stroke="#40916C" stroke-width="2" opacity="0.4"/>
-  <text x="200" y="155" font-family="sans-serif" font-size="38" font-weight="bold" fill="#40916C" text-anchor="middle">+12kg</text>
-  <text x="200" y="185" font-family="sans-serif" font-size="16" fill="#F8F9FA" text-anchor="middle">masa muscular</text>
-  <text x="200" y="290" font-family="sans-serif" font-size="20" font-weight="bold" fill="#F8F9FA" text-anchor="middle">Carlos Martínez</text>
-  <text x="200" y="318" font-family="sans-serif" font-size="13" fill="#40916C" text-anchor="middle">Hipertrofia · 6 meses</text>
-</svg>

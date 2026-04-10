@@ -236,6 +236,9 @@ const DEFAULT_HOME_FIELDS: Pick<
     | 'aboutButtonLink'
     | 'aboutCardName'
     | 'aboutCardRole'
+    | 'testimonialsEyebrow'
+    | 'ctaButtonText'
+    | 'ctaButtonLink'
 > = {
     heroBackgroundUrl: '/imagenes/hero.mp4',
     heroBackgroundType: 'video',
@@ -248,6 +251,9 @@ const DEFAULT_HOME_FIELDS: Pick<
     aboutButtonLink: '/sandra',
     aboutCardName: 'Sandra Andujar',
     aboutCardRole: 'Fundadora & Coach Principal',
+    testimonialsEyebrow: 'TESTIMONIOS',
+    ctaButtonText: 'Solicitar Cita',
+    ctaButtonLink: '/portal',
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -452,6 +458,9 @@ function normalizeHomeFields(raw: CMSContent): CMSContent {
         aboutButtonLink: asNonEmptyString(raw.aboutButtonLink, DEFAULT_HOME_FIELDS.aboutButtonLink ?? '/sandra'),
         aboutCardName: asNonEmptyString(raw.aboutCardName, DEFAULT_HOME_FIELDS.aboutCardName ?? 'Sandra Andujar'),
         aboutCardRole: asNonEmptyString(raw.aboutCardRole, DEFAULT_HOME_FIELDS.aboutCardRole ?? 'Fundadora & Coach Principal'),
+        testimonialsEyebrow: asNonEmptyString(raw.testimonialsEyebrow, DEFAULT_HOME_FIELDS.testimonialsEyebrow ?? 'TESTIMONIOS'),
+        ctaButtonText: asNonEmptyString(raw.ctaButtonText, DEFAULT_HOME_FIELDS.ctaButtonText ?? 'Solicitar Cita'),
+        ctaButtonLink: asNonEmptyString(raw.ctaButtonLink, DEFAULT_HOME_FIELDS.ctaButtonLink ?? '/portal'),
         contacto: normalizeContactoConfig(raw.contacto),
     };
 }

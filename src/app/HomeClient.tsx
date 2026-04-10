@@ -397,7 +397,7 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
             viewport={{ once: true }}
           >
             <span className="eyebrow justify-center">
-              Testimonios
+              {cmsContent.testimonialsEyebrow ?? 'TESTIMONIOS'}
             </span>
             <h2 className="text-[var(--font-size-section)] font-bold text-[var(--color-text-primary)] mt-3 mb-4">
               {cmsContent.testimonialsTitle}
@@ -468,9 +468,9 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
             <p className="text-[var(--color-text-secondary)] text-lg mb-8">
               {cmsContent.ctaSubtitle}
             </p>
-            <Link href="/portal">
+            <Link href={cmsContent.ctaButtonLink ?? '/portal'}>
               <PremiumButton variant="cta" size="lg" icon={<ArrowRight className="w-5 h-5" />} iconPosition="right">
-                Solicitar Cita
+                {cmsContent.ctaButtonText ?? 'Solicitar Cita'}
               </PremiumButton>
             </Link>
           </motion.div>

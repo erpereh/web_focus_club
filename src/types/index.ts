@@ -355,10 +355,13 @@ export interface CMSContent {
     servicesFaqsTitle?: string;
     servicesFaqs?: { question: string; answer: string }[];
 
+    testimonialsEyebrow?: string;
     testimonialsTitle: string;
 
     ctaTitle: string;
     ctaSubtitle: string;
+    ctaButtonText?: string;
+    ctaButtonLink?: string;
 
     footerText: string;
     phone: string;
