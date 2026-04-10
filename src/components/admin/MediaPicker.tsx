@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
+import { VideoFramePreview } from '@/components/ui/VideoFramePreview';
 import { useMediaLibrary } from '@/hooks/useMediaLibrary';
 import { cn } from '@/lib/utils';
 import type { MediaFile, UploadProgress } from '@/types';
@@ -224,9 +225,13 @@ function MediaPickerDialog({ onClose, onSelect, filterType, uploadFolderId, defa
                                                         className="w-full h-full object-cover"
                                                     />
                                                 ) : (
-                                                    <div className="w-full h-full bg-black/50 flex items-center justify-center">
-                                                        <Play className="w-8 h-8 text-white/70" />
-                                                    </div>
+                                                    <VideoFramePreview
+                                                        src={file.url}
+                                                        title={file.name}
+                                                        className="w-full h-full"
+                                                        iconContainerClassName="p-2 rounded-full bg-black/45 backdrop-blur-sm"
+                                                        iconClassName="w-8 h-8 text-white/70"
+                                                    />
                                                 )}
                                                 {isSelected && (
                                                     <div className="absolute inset-0 bg-[var(--color-accent-dim)]/70 flex items-center justify-center">

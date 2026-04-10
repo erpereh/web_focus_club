@@ -3,7 +3,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence, useInView, animate } from 'framer-motion';
 import Image from 'next/image';
-import { Play, X, ChevronLeft, ChevronRight, Quote } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Quote } from 'lucide-react';
+import { VideoFramePreview } from '@/components/ui/VideoFramePreview';
 import type { GaleriaContent, GalleryItem } from '@/types';
 
 interface LightboxItem {
@@ -164,13 +165,17 @@ function ImageCarousel({
               }
             }}
           >
-            <Image src={item.src} alt={item.title} fill unoptimized className="object-cover" />
-            {item.type === 'video' && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-14 h-14 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center border border-white/20">
-                  <Play className="w-6 h-6 text-white ml-0.5" fill="white" />
-                </div>
-              </div>
+            {item.type === 'image' ? (
+              <Image src={item.src} alt={item.title} fill unoptimized className="object-cover" />
+            ) : (
+              <VideoFramePreview
+                src={item.src}
+                title={item.title}
+                className="absolute inset-0"
+                videoClassName="transition-transform duration-500"
+                iconContainerClassName="w-14 h-14 p-0 rounded-full bg-black/60 backdrop-blur-sm border border-white/20 flex items-center justify-center"
+                iconClassName="w-6 h-6 text-white ml-0.5"
+              />
             )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent flex items-end p-4 pointer-events-none">
               <p className="text-white font-semibold text-sm">{item.title}</p>
@@ -263,11 +268,13 @@ function GallerySlider({
               {item.type === 'image' ? (
                 <img src={item.url} alt="" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]" loading="lazy" />
               ) : (
-                <div className="w-full h-full bg-black/50 flex items-center justify-center">
-                  <div className="w-14 h-14 rounded-full bg-black/60 backdrop-blur-sm border border-white/20 flex items-center justify-center transition-transform duration-300 group-hover:scale-110">
-                    <Play className="w-6 h-6 text-white ml-0.5" fill="white" />
-                  </div>
-                </div>
+                <VideoFramePreview
+                  src={item.url}
+                  className="w-full h-full"
+                  videoClassName="transition-transform duration-500 group-hover:scale-[1.03]"
+                  iconContainerClassName="w-14 h-14 p-0 rounded-full bg-black/60 backdrop-blur-sm border border-white/20 flex items-center justify-center transition-transform duration-300 group-hover:scale-110"
+                  iconClassName="w-6 h-6 text-white ml-0.5"
+                />
               )}
               <div className="absolute inset-0 bg-[var(--color-accent-val)]/0 group-hover:bg-[var(--color-accent-val)]/5 transition-colors duration-300 pointer-events-none" />
             </button>

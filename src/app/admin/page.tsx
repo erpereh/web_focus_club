@@ -65,6 +65,7 @@ import { ContextualImageManager } from '@/components/ui/ContextualImageManager';
 import { GalleryManager } from '@/components/admin/GalleryManager';
 import { MediaPicker } from '@/components/admin/MediaPicker';
 import { IconPicker } from '@/components/admin/IconPicker';
+import { VideoFramePreview } from '@/components/ui/VideoFramePreview';
 import { DynamicIcon } from '@/components/ui/DynamicIcon';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable';
@@ -563,9 +564,13 @@ function SortableGaleriaTrainingItem({
         <button type="button" onClick={onPickMedia} className="w-16 h-16 rounded-xl border border-border overflow-hidden bg-input flex items-center justify-center hover:border-[var(--color-accent-val)] transition-colors">
           {training.mediaUrl ? (
             training.mediaType === 'video' ? (
-              <div className="w-full h-full flex items-center justify-center bg-black/40">
-                <Play className="w-5 h-5 text-white/80" />
-              </div>
+              <VideoFramePreview
+                src={training.mediaUrl}
+                title={training.title || `Entrenamiento ${index + 1}`}
+                className="w-full h-full"
+                iconContainerClassName="p-1.5 rounded-full bg-black/45 backdrop-blur-sm"
+                iconClassName="w-5 h-5 text-white/80"
+              />
             ) : (
               <img src={training.mediaUrl} alt={training.title || `Entrenamiento ${index + 1}`} className="w-full h-full object-cover" />
             )

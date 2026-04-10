@@ -22,7 +22,6 @@ import {
     Plus,
     Trash2,
     GripVertical,
-    Play,
     Eye,
     EyeOff,
     Check,
@@ -30,6 +29,7 @@ import {
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { MediaPicker } from '@/components/admin/MediaPicker';
+import { VideoFramePreview } from '@/components/ui/VideoFramePreview';
 import {
     getGalleryItems,
     addGalleryItem,
@@ -86,9 +86,13 @@ function SortableCard({
                     {item.type === 'image' ? (
                         <img src={item.url} alt={item.title || 'Imagen'} className="w-full h-full object-cover" />
                     ) : (
-                        <div className="w-full h-full flex items-center justify-center bg-black/50">
-                            <Play className="w-8 h-8 text-white/70" />
-                        </div>
+                        <VideoFramePreview
+                            src={item.url}
+                            title={item.title || 'Video'}
+                            className="w-full h-full"
+                            iconContainerClassName="p-2 rounded-full bg-black/45 backdrop-blur-sm"
+                            iconClassName="w-8 h-8 text-white/70"
+                        />
                     )}
 
                     {/* Drag handle */}
