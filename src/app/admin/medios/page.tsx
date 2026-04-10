@@ -243,6 +243,10 @@ function FileCard({
 }) {
     const [menuOpen, setMenuOpen] = useState(false);
     const [copied, setCopied] = useState(false);
+    const [hasVideoFrame, setHasVideoFrame] = useState(file.type === 'image');
+    const [videoFallback, setVideoFallback] = useState(false);
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const seekAttemptsRef = useRef(0);
 
     const handleCopy = () => {
         onCopyUrl();
@@ -250,6 +254,60 @@ function FileCard({
         setTimeout(() => setCopied(false), 1500);
         setMenuOpen(false);
     };
+
+    const captureVideoFrame = useCallback((attempt: number) => {
+        const video = videoRef.current;
+        if (!video || file.type !== 'video' || videoFallback) return;
+
+        const targetTime = attempt === 0 ? 0.15 : 0.5;
+        if (video.readyState < 2 || !Number.isFinite(video.duration) || video.duration <= 0) {
+            return;
+        }
+
+        try {
+            video.currentTime = Math.min(targetTime, Math.max(video.duration - 0.05, 0));
+        } catch {
+            if (attempt === 0) {
+                seekAttemptsRef.current = 1;
+                window.setTimeout(() => {
+                    const retryVideo = videoRef.current;
+                    if (!retryVideo || file.type !== 'video' || videoFallback) return;
+                    if (retryVideo.readyState < 2 || !Number.isFinite(retryVideo.duration) || retryVideo.duration <= 0) {
+                        setVideoFallback(true);
+                        return;
+                    }
+
+                    try {
+                        retryVideo.currentTime = Math.min(0.5, Math.max(retryVideo.duration - 0.05, 0));
+                    } catch {
+                        setVideoFallback(true);
+                    }
+                }, 120);
+            } else {
+                setVideoFallback(true);
+            }
+        }
+    }, [file.type, videoFallback]);
+
+    const handleVideoLoaded = useCallback(() => {
+        if (file.type !== 'video' || videoFallback) return;
+        captureVideoFrame(0);
+    }, [captureVideoFrame, file.type, videoFallback]);
+
+    const handleVideoSeeked = useCallback(() => {
+        const video = videoRef.current;
+        if (!video || file.type !== 'video') return;
+
+        video.pause();
+        setHasVideoFrame(true);
+    }, [file.type]);
+
+    const handleVideoError = useCallback(() => {
+        setVideoFallback(true);
+        setHasVideoFrame(false);
+    }, []);
+
+    const showVideoFallback = file.type === 'video' && (!hasVideoFrame || videoFallback);
 
     return (
         <div className="group relative rounded-xl overflow-hidden border border-border bg-white/5 hover:border-[var(--color-accent-border)] transition-all">
@@ -265,8 +323,35 @@ function FileCard({
                         className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                     />
                 ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-black/40">
-                        <Play className="w-10 h-10 text-white/70" />
+                    <div className="relative w-full h-full bg-black/40">
+                        {!videoFallback && (
+                            <video
+                                ref={videoRef}
+                                src={file.url}
+                                key={file.url}
+                                muted
+                                playsInline
+                                preload="auto"
+                                onLoadedData={handleVideoLoaded}
+                                onCanPlay={handleVideoLoaded}
+                                onSeeked={handleVideoSeeked}
+                                onError={handleVideoError}
+                                className={cn(
+                                    'w-full h-full object-cover pointer-events-none transition-transform duration-300 group-hover:scale-105',
+                                    showVideoFallback ? 'opacity-0' : 'opacity-100'
+                                )}
+                            />
+                        )}
+                        {showVideoFallback && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                                <Play className="w-10 h-10 text-white/70" />
+                            </div>
+                        )}
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <div className="rounded-full bg-black/35 p-3 backdrop-blur-sm">
+                                <Play className="w-8 h-8 text-white/85" />
+                            </div>
+                        </div>
                     </div>
                 )}
             </button>
