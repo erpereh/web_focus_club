@@ -27,6 +27,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { useAuth } from '@/contexts/AuthContext';
+import { useBrandingConfig } from '@/hooks/useBrandingConfig';
 import { useMediaLibrary } from '@/hooks/useMediaLibrary';
 import { cn } from '@/lib/utils';
 import type { MediaFolder, MediaFile, UploadProgress } from '@/types';
@@ -478,6 +479,7 @@ function MoveFileModal({
 
 export default function MediaPage() {
     const { userProfile, isAdmin, logout } = useAuth();
+    const { logoUrl } = useBrandingConfig();
     const router = useRouter();
     const {
         folders,
@@ -577,7 +579,7 @@ export default function MediaPage() {
                             </button>
                             <Link href="/" className="flex items-center gap-2">
                                 <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0">
-                                    <Image src="/imagenes/logo.jpeg" alt="Focus Club" width={32} height={32} className="w-full h-full object-cover" />
+                                    <Image src={logoUrl ?? '/imagenes/logo.jpeg'} alt="Focus Club" width={32} height={32} className="w-full h-full object-cover" unoptimized={!!logoUrl} />
                                 </div>
                                 <span className="font-bold text-[var(--color-text-primary)] hidden sm:block">Focus Club Admin</span>
                             </Link>

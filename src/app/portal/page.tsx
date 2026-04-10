@@ -42,6 +42,7 @@ import type { LucideIcon } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { InteractiveCalendar } from '@/components/ui/interactive-calendar';
+import { useBrandingConfig } from '@/hooks/useBrandingConfig';
 import { useAuth } from '@/contexts/AuthContext';
 import type { TimeSlot, Appointment, Bono, Trainer } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
@@ -112,6 +113,7 @@ const durations: { value: '30' | '45' | '60'; label: string; desc: string }[] = 
 
 export default function PortalPage() {
   const { user, userProfile, loading: authContextLoading, login, register, loginWithGoogle, logout, resetPassword, resendVerification, completeGoogleProfile, refreshUserProfile } = useAuth();
+  const { logoUrl } = useBrandingConfig();
   const isAuthenticated = !!user && !!userProfile?.phone;
 
   const [authMode, setAuthMode] = useState<AuthMode>('login');
@@ -997,7 +999,7 @@ export default function PortalPage() {
           <div className="flex items-center justify-between h-16">
             <Link href="/" className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0">
-                <Image src="/imagenes/logo.jpeg" alt="Focus Club" width={32} height={32} className="w-full h-full object-cover" />
+                <Image src={logoUrl ?? '/imagenes/logo.jpeg'} alt="Focus Club" width={32} height={32} className="w-full h-full object-cover" unoptimized={!!logoUrl} />
               </div>
               <span className="font-bold text-[var(--color-text-primary)] hidden sm:block">Focus Club</span>
             </Link>

@@ -169,7 +169,7 @@ async function sendWebhook(payload: {
 }
 
 
-type TabType = 'Inicio' | 'appointments' | 'availability' | 'clients' | 'team' | 'testimonials' | 'Hero' | 'Sandra' | 'Centro' | 'Servicios' | 'Galeria' | 'Contacto' | 'config';
+type TabType = 'Inicio' | 'appointments' | 'availability' | 'clients' | 'team' | 'testimonials' | 'Hero' | 'Sandra' | 'Centro' | 'Servicios' | 'Galeria' | 'Contacto' | 'Footer' | 'config';
 type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
 
 const statusConfig = {
@@ -1879,7 +1879,7 @@ export default function AdminPage() {
             <div className="flex items-center justify-between h-16">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0">
-                  <Image src="/imagenes/logo.jpeg" alt="Focus Club" width={32} height={32} className="w-full h-full object-cover" />
+                  <Image src={brandingConfig?.logoUrl ?? '/imagenes/logo.jpeg'} alt="Focus Club" width={32} height={32} className="w-full h-full object-cover" unoptimized={!!brandingConfig?.logoUrl} />
                 </div>
                 <div>
                   <span className="font-bold text-[var(--color-text-primary)]">Panel Entrenador</span>
@@ -1982,7 +1982,7 @@ export default function AdminPage() {
               </button>
               <Link href="/" className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0">
-                  <Image src="/imagenes/logo.jpeg" alt="Focus Club" width={32} height={32} className="w-full h-full object-cover" />
+                  <Image src={brandingConfig?.logoUrl ?? '/imagenes/logo.jpeg'} alt="Focus Club" width={32} height={32} className="w-full h-full object-cover" unoptimized={!!brandingConfig?.logoUrl} />
                 </div>
                 <span className="font-bold text-[var(--color-text-primary)] hidden sm:block">Focus Club Admin</span>
               </Link>
@@ -2222,6 +2222,19 @@ export default function AdminPage() {
             >
               <Globe className="w-5 h-5" />
               <span className="font-medium">Contacto</span>
+            </button>
+
+            <button
+              onClick={() => switchTab('Footer')}
+              className={cn(
+                'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
+                activeTab === 'Footer'
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
+              )}
+            >
+              <FileText className="w-5 h-5" />
+              <span className="font-medium">Footer</span>
             </button>
           </aside>
 
@@ -4497,6 +4510,109 @@ export default function AdminPage() {
                                 Añade una URL de mapa para ver la previsualización
                               </div>
                             )}
+                          </div>
+                        </div>
+                      </div>
+                    </GlassCard>
+                  </div>
+                </motion.div>
+              )}
+
+              {activeTab === 'Footer' && (
+                <motion.div
+                  key="Footer"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                >
+                  <div className="flex items-center justify-between mb-6">
+                    <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Footer</h1>
+                    <PremiumButton variant="cta" icon={<Save className="w-4 h-4" />} onClick={handleSaveCMS}>
+                      Guardar Cambios
+                    </PremiumButton>
+                  </div>
+
+                  <div className="space-y-6">
+                    <GlassCard className="p-6">
+                      <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">
+                        <FileText className="w-5 h-5 text-[var(--color-accent-val)]" />
+                        Contenido del Footer
+                      </h2>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Texto descriptivo</label>
+                          <textarea
+                            value={editedContent?.footerText ?? ''}
+                            onChange={(e) => setEditedContent(prev => prev ? { ...prev, footerText: e.target.value } as CMSContent : prev)}
+                            rows={3}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Direccion</label>
+                          <textarea
+                            value={editedContent?.address ?? ''}
+                            onChange={(e) => setEditedContent(prev => prev ? { ...prev, address: e.target.value } as CMSContent : prev)}
+                            rows={2}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Telefono</label>
+                            <input
+                              type="text"
+                              value={editedContent?.phone ?? ''}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, phone: e.target.value } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">WhatsApp</label>
+                            <input
+                              type="text"
+                              value={editedContent?.whatsapp ?? ''}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, whatsapp: e.target.value } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Email</label>
+                            <input
+                              type="email"
+                              value={editedContent?.email ?? ''}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, email: e.target.value } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Instagram</label>
+                            <input
+                              type="text"
+                              value={editedContent?.socialInstagram ?? ''}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, socialInstagram: e.target.value } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Facebook</label>
+                            <input
+                              type="text"
+                              value={editedContent?.socialFacebook ?? ''}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, socialFacebook: e.target.value } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Twitter / X</label>
+                            <input
+                              type="text"
+                              value={editedContent?.socialTwitter ?? ''}
+                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, socialTwitter: e.target.value } as CMSContent : prev)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            />
                           </div>
                         </div>
                       </div>
