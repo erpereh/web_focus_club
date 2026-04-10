@@ -351,7 +351,7 @@ function MoveFileModal({
                     </button>
                 </div>
                 <div className="p-4 space-y-1 max-h-64 overflow-y-auto">
-                    {/* Root option */}
+                    {/* Sin carpeta */}
                     <button
                         onClick={() => setSelected(null)}
                         className={cn(
@@ -361,7 +361,7 @@ function MoveFileModal({
                                 : 'text-[var(--color-text-secondary)] hover:bg-white/10'
                         )}
                     >
-                        <Images className="w-4 h-4 shrink-0" /> Raíz
+                        <Images className="w-4 h-4 shrink-0" /> Sin carpeta
                     </button>
                     {rootFolders.map((f) => (
                         <button
@@ -468,11 +468,11 @@ export default function MediaPage() {
 
     const currentFolderName = (() => {
         if (selectedFolderId === 'ALL') return 'Todos los medios';
-        if (selectedFolderId === null) return 'Raíz';
+        if (selectedFolderId === null) return 'Sin carpeta';
         return folders.find((f) => f.id === selectedFolderId)?.name ?? '';
     })();
 
-    const handleSelectFolder = (id: string) => {
+    const handleSelectFolder = (id: string | null) => {
         setSelectedFolderId(id);
         setSidebarOpen(false);
     };
@@ -580,12 +580,12 @@ export default function MediaPage() {
                         <span className="font-medium">Todos los medios</span>
                     </button>
 
-                    {/* Raíz (archivos sin carpeta) */}
+                    {/* Sin carpeta */}
                     <button
-                        onClick={() => handleSelectFolder('null')}
+                        onClick={() => handleSelectFolder(null)}
                         className={cn(
                             'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all text-left',
-                            selectedFolderId === 'null'
+                            selectedFolderId === null
                                 ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)]'
                                 : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
                         )}
@@ -833,3 +833,5 @@ export default function MediaPage() {
         </div>
     );
 }
+
+

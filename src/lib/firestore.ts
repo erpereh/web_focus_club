@@ -1163,6 +1163,11 @@ export async function deleteMediaFolder(id: string): Promise<void> {
 // ============================================
 
 export async function getMediaFiles(folderId: string | null): Promise<MediaFile[]> {
+    if (folderId === null) {
+        const allFiles = await getAllMediaFiles();
+        return allFiles.filter((file) => file.folderId == null);
+    }
+
     const snap = await getDocs(
         query(
             collection(db, 'media_files'),
