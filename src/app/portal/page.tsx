@@ -46,7 +46,17 @@ import { useBrandingConfig } from '@/hooks/useBrandingConfig';
 import { useAuth } from '@/contexts/AuthContext';
 import type { TimeSlot, Appointment, Bono, Trainer } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
-import { addAppointment as addAppointmentFS, getAppointmentsByUser, getActiveBonoByUser, getBonosByUser, updateUserProfile, getTrainers, uploadUserAvatar, deleteUserAvatar } from '@/lib/firestore';
+import {
+  addAppointment as addAppointmentFS,
+  getAppointmentsByUser,
+  getActiveBonoByUser,
+  updateUserProfile,
+  uploadUserAvatar,
+  deleteUserAvatar,
+  subscribeActiveTrainers,
+  subscribeAppointmentsByUser,
+  subscribeBonosByUser,
+} from '@/lib/firestore';
 import { updatePassword } from 'firebase/auth';
 import { cn } from '@/lib/utils';
 
@@ -175,9 +185,34 @@ export default function PortalPage() {
   const bonoServiceLabel = activeBono ? 'Bono Mensual de Entrenamiento' : '';
 
   useEffect(() => {
+    if (!user) {
+      setUserAppointments([]);
+      setAllBonos([]);
+      setActiveBono(null);
+      setBonoLoading(false);
+      return;
+    }
+
     if (user) {
-      getAppointmentsByUser(user.uid).then(setUserAppointments).catch(console.error);
-      getTrainers().then(setTrainers).catch(console.error);
+      const unsubscribeAppointments = subscribeAppointmentsByUser(user.uid, setUserAppointments, console.error);
+      const unsubscribeTrainers = subscribeActiveTrainers(setTrainers, console.error);
+      const unsubscribeBonos = subscribeBonosByUser(
+        user.uid,
+        (bonos) => {
+          setAllBonos(bonos);
+          const bono = bonos.find((item) => item.estado === 'activo') ?? null;
+          if (bono && new Date(bono.fechaExpiracion) < new Date()) {
+            setActiveBono({ ...bono, estado: 'expirado' });
+          } else {
+            setActiveBono(bono);
+          }
+          setBonoLoading(false);
+        },
+        (err) => {
+          console.error('Error loading bono:', err);
+          setBonoLoading(false);
+        }
+      );
       // Load bono data
       (async () => {
         try {
@@ -188,14 +223,17 @@ export default function PortalPage() {
           } else {
             setActiveBono(bono);
           }
-          const bonos = await getBonosByUser(user.uid);
-          setAllBonos(bonos);
         } catch (err) {
           console.error('Error loading bono:', err);
         } finally {
           setBonoLoading(false);
         }
       })();
+      return () => {
+        unsubscribeAppointments();
+        unsubscribeTrainers();
+        unsubscribeBonos();
+      };
     }
   }, [user]);
 

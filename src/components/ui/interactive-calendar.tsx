@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Clock, Users, Lock, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getMonthAvailability, getSiteConfig, generateTimeSlots } from '@/lib/firestore';
+import { generateTimeSlots, subscribeMonthAvailability, subscribeSiteConfig } from '@/lib/firestore';
 import type { BlockedSlot, TimeSlot, SiteConfig } from '@/types';
 
 // ============================================
@@ -133,35 +133,39 @@ export function InteractiveCalendar({
   }, [blockedSlots]);
 
   // Cargar disponibilidad al montar y al cambiar de mes
-  const loadAvailability = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await getMonthAvailability(currentYear, currentMonth);
-      setOccupancy(data.occupancy);
-      setBlockedSlots(data.blockedSlots);
-    } catch (err) {
-      console.error('Error cargando disponibilidad:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [currentYear, currentMonth]);
-
   useEffect(() => {
-    loadAvailability();
-  }, [loadAvailability]);
+    const unsubscribe = subscribeMonthAvailability(
+      currentYear,
+      currentMonth,
+      (data) => {
+        setOccupancy(data.occupancy);
+        setBlockedSlots(data.blockedSlots);
+        setLoading(false);
+      },
+      (err) => {
+        console.error('Error cargando disponibilidad:', err);
+        setLoading(false);
+      }
+    );
+
+    return unsubscribe;
+  }, [currentYear, currentMonth]);
 
   // Cargar configuración de franjas una vez al montar
   useEffect(() => {
-    getSiteConfig().then((config) => {
-      setTimeSlots(generateTimeSlots(config));
-    });
+    const unsubscribe = subscribeSiteConfig(
+      (config) => {
+        setTimeSlots(generateTimeSlots(config));
+      },
+      (err) => {
+        console.error('Error cargando configuraciÃ³n de franjas:', err);
+      }
+    );
+
+    return unsubscribe;
   }, []);
 
   // Reset día seleccionado al cambiar de mes
-  useEffect(() => {
-    setSelectedDay(null);
-  }, [currentMonth, currentYear]);
-
   // Auto-dismiss del mensaje de "sesión completa"
   useEffect(() => {
     if (fullMessage) {
@@ -175,6 +179,7 @@ export function InteractiveCalendar({
     (currentYear === now.getFullYear() && currentMonth > now.getMonth() + 1);
 
   const goNextMonth = () => {
+    setSelectedDay(null);
     if (currentMonth === 12) {
       setCurrentMonth(1);
       setCurrentYear(currentYear + 1);
@@ -185,6 +190,7 @@ export function InteractiveCalendar({
 
   const goPrevMonth = () => {
     if (!canGoBack) return;
+    setSelectedDay(null);
     if (currentMonth === 1) {
       setCurrentMonth(12);
       setCurrentYear(currentYear - 1);

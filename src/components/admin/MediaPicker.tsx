@@ -63,8 +63,9 @@ function MediaPickerDialog({ onClose, onSelect, filterType, uploadFolderId, defa
         files,
         loading,
         uploadQueue,
-        fetchFolders,
         fetchFiles,
+        subscribeFolders,
+        subscribeFiles,
         uploadMultipleFiles,
     } = useMediaLibrary();
 
@@ -73,14 +74,13 @@ function MediaPickerDialog({ onClose, onSelect, filterType, uploadFolderId, defa
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
-        const initialFolder = defaultFolderId ?? 'ALL';
-        fetchFolders();
-        fetchFiles(initialFolder);
-    }, [defaultFolderId, fetchFiles, fetchFolders]);
+        const unsubscribeFolders = subscribeFolders();
+        return unsubscribeFolders;
+    }, [subscribeFolders]);
 
     useEffect(() => {
-        fetchFiles(selectedFolderId === 'ALL' ? 'ALL' : selectedFolderId);
-    }, [fetchFiles, selectedFolderId]);
+        return subscribeFiles(selectedFolderId === 'ALL' ? 'ALL' : selectedFolderId);
+    }, [subscribeFiles, selectedFolderId]);
 
     const displayFiles = filterType ? files.filter((f) => f.type === filterType) : files;
 

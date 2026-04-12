@@ -16,6 +16,7 @@ import {
     writeBatch,
     arrayUnion,
     arrayRemove,
+    onSnapshot,
 } from 'firebase/firestore';
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from './firebase';
@@ -474,6 +475,18 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
     return snap.exists() ? (snap.data() as UserProfile) : null;
 }
 
+export function subscribeUserProfile(
+    uid: string,
+    callback: (profile: UserProfile | null) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        doc(db, 'users', uid),
+        (snap) => callback(snap.exists() ? (snap.data() as UserProfile) : null),
+        onError
+    );
+}
+
 export async function createUserProfile(profile: UserProfile): Promise<void> {
     await setDoc(doc(db, 'users', profile.uid), profile);
 }
@@ -487,6 +500,17 @@ export async function getUsers(): Promise<UserProfile[]> {
         query(collection(db, 'users'))
     );
     return snap.docs.map((d) => d.data() as UserProfile);
+}
+
+export function subscribeUsers(
+    callback: (users: UserProfile[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(collection(db, 'users')),
+        (snap) => callback(snap.docs.map((d) => d.data() as UserProfile)),
+        onError
+    );
 }
 
 function getFileExtension(file: File): string {
@@ -536,6 +560,17 @@ export async function getAppointments(): Promise<Appointment[]> {
     return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Appointment));
 }
 
+export function subscribeAppointments(
+    callback: (appointments: Appointment[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(collection(db, 'appointments'), orderBy('createdAt', 'desc')),
+        (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Appointment))),
+        onError
+    );
+}
+
 export async function getAppointmentsByUser(uid: string): Promise<Appointment[]> {
     const snap = await getDocs(
         query(
@@ -545,6 +580,22 @@ export async function getAppointmentsByUser(uid: string): Promise<Appointment[]>
         )
     );
     return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Appointment));
+}
+
+export function subscribeAppointmentsByUser(
+    uid: string,
+    callback: (appointments: Appointment[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(
+            collection(db, 'appointments'),
+            where('userId', '==', uid),
+            orderBy('createdAt', 'desc')
+        ),
+        (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Appointment))),
+        onError
+    );
 }
 
 export async function addAppointment(
@@ -610,6 +661,17 @@ export async function getServices(): Promise<Service[]> {
     return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Service));
 }
 
+export function subscribeServices(
+    callback: (services: Service[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(collection(db, 'services'), orderBy('order', 'asc')),
+        (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Service))),
+        onError
+    );
+}
+
 export async function addService(data: Omit<Service, 'id'>): Promise<void> {
     await addDoc(collection(db, 'services'), data);
 }
@@ -641,11 +703,33 @@ export async function getTestimonials(): Promise<Testimonial[]> {
     return sortTestimonialsNewestFirst(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Testimonial)));
 }
 
+export function subscribeTestimonials(
+    callback: (testimonials: Testimonial[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        collection(db, 'testimonials'),
+        (snap) => callback(sortTestimonialsNewestFirst(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Testimonial)))),
+        onError
+    );
+}
+
 export async function getApprovedTestimonials(): Promise<Testimonial[]> {
     const snap = await getDocs(
         query(collection(db, 'testimonials'), where('approved', '==', true))
     );
     return sortTestimonialsNewestFirst(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Testimonial)));
+}
+
+export function subscribeApprovedTestimonials(
+    callback: (testimonials: Testimonial[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(collection(db, 'testimonials'), where('approved', '==', true)),
+        (snap) => callback(sortTestimonialsNewestFirst(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Testimonial)))),
+        onError
+    );
 }
 
 export async function addTestimonial(
@@ -703,10 +787,7 @@ export async function approveTestimonial(id: string): Promise<void> {
 
 const SITE_CONTENT_DOC = 'main';
 
-export async function getSiteContent(): Promise<CMSContent | null> {
-    const snap = await getDoc(doc(db, 'site_content', SITE_CONTENT_DOC));
-    if (!snap.exists()) return null;
-    const data = snap.data() as CMSContent & { centro?: unknown; galeria?: unknown; contacto?: unknown };
+function normalizeSiteContentData(data: CMSContent & { centro?: unknown; galeria?: unknown; contacto?: unknown }): CMSContent {
     const normalized = {
         ...data,
         centro: normalizeCentroConfig(data.centro),
@@ -714,6 +795,25 @@ export async function getSiteContent(): Promise<CMSContent | null> {
         contacto: normalizeContactoConfig(data.contacto),
     } as CMSContent;
     return normalizeHomeFields(normalized);
+}
+
+export async function getSiteContent(): Promise<CMSContent | null> {
+    const snap = await getDoc(doc(db, 'site_content', SITE_CONTENT_DOC));
+    if (!snap.exists()) return null;
+    return normalizeSiteContentData(snap.data() as CMSContent & { centro?: unknown; galeria?: unknown; contacto?: unknown });
+}
+
+export function subscribeSiteContent(
+    callback: (content: CMSContent | null) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        doc(db, 'site_content', SITE_CONTENT_DOC),
+        (snap) => callback(snap.exists()
+            ? normalizeSiteContentData(snap.data() as CMSContent & { centro?: unknown; galeria?: unknown; contacto?: unknown })
+            : null),
+        onError
+    );
 }
 
 export async function updateSiteContent(data: Partial<CMSContent>): Promise<void> {
@@ -784,6 +884,17 @@ export async function getBlockedSlots(): Promise<BlockedSlot[]> {
     return snap.docs.map((d) => ({ id: d.id, ...d.data() } as BlockedSlot));
 }
 
+export function subscribeBlockedSlots(
+    callback: (slots: BlockedSlot[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(collection(db, 'blocked_slots'), orderBy('date', 'asc')),
+        (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as BlockedSlot))),
+        onError
+    );
+}
+
 export async function getBlockedSlotsForMonth(year: number, month: number): Promise<BlockedSlot[]> {
     const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
     const endMonth = month === 12 ? 1 : month + 1;
@@ -799,6 +910,29 @@ export async function getBlockedSlotsForMonth(year: number, month: number): Prom
         )
     );
     return snap.docs.map((d) => ({ id: d.id, ...d.data() } as BlockedSlot));
+}
+
+export function subscribeBlockedSlotsForMonth(
+    year: number,
+    month: number,
+    callback: (slots: BlockedSlot[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const endMonth = month === 12 ? 1 : month + 1;
+    const endYear = month === 12 ? year + 1 : year;
+    const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+
+    return onSnapshot(
+        query(
+            collection(db, 'blocked_slots'),
+            where('date', '>=', startDate),
+            where('date', '<', endDate),
+            orderBy('date', 'asc')
+        ),
+        (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as BlockedSlot))),
+        onError
+    );
 }
 
 export async function addBlockedSlot(
@@ -927,6 +1061,35 @@ export async function getSlotOccupancyForMonth(
     return occupancy;
 }
 
+export function subscribeSlotOccupancyForMonth(
+    year: number,
+    month: number,
+    callback: (occupancy: Record<string, number>) => void,
+    onError?: (error: Error) => void
+): () => void {
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const endMonth = month === 12 ? 1 : month + 1;
+    const endYear = month === 12 ? year + 1 : year;
+    const endDate = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+
+    return onSnapshot(
+        query(
+            collection(db, 'slot_occupancy'),
+            where('date', '>=', startDate),
+            where('date', '<', endDate)
+        ),
+        (snap) => {
+            const occupancy: Record<string, number> = {};
+            snap.docs.forEach((d) => {
+                const data = d.data() as SlotOccupancy;
+                occupancy[`${data.date}_${data.time}`] = data.count;
+            });
+            callback(occupancy);
+        },
+        onError
+    );
+}
+
 /**
  * Obtiene disponibilidad completa para un mes:
  * - occupancy: mapa de franjas con cantidad de personas aprobadas
@@ -943,6 +1106,50 @@ export async function getMonthAvailability(year: number, month: number): Promise
     return { occupancy, blockedSlots };
 }
 
+export function subscribeMonthAvailability(
+    year: number,
+    month: number,
+    callback: (availability: { occupancy: Record<string, number>; blockedSlots: BlockedSlot[] }) => void,
+    onError?: (error: Error) => void
+): () => void {
+    let latestOccupancy: Record<string, number> = {};
+    let latestBlockedSlots: BlockedSlot[] = [];
+    let hasOccupancy = false;
+    let hasBlockedSlots = false;
+
+    const emitIfReady = () => {
+        if (hasOccupancy && hasBlockedSlots) {
+            callback({ occupancy: latestOccupancy, blockedSlots: latestBlockedSlots });
+        }
+    };
+
+    const unsubscribeOccupancy = subscribeSlotOccupancyForMonth(
+        year,
+        month,
+        (occupancy) => {
+            latestOccupancy = occupancy;
+            hasOccupancy = true;
+            emitIfReady();
+        },
+        onError
+    );
+    const unsubscribeBlocked = subscribeBlockedSlotsForMonth(
+        year,
+        month,
+        (blockedSlots) => {
+            latestBlockedSlots = blockedSlots;
+            hasBlockedSlots = true;
+            emitIfReady();
+        },
+        onError
+    );
+
+    return () => {
+        unsubscribeOccupancy();
+        unsubscribeBlocked();
+    };
+}
+
 // ============================================
 // ENTRENADORES (TRAINERS)
 // ============================================
@@ -952,11 +1159,33 @@ export async function getTrainers(): Promise<Trainer[]> {
     return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Trainer));
 }
 
+export function subscribeTrainers(
+    callback: (trainers: Trainer[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        collection(db, 'trainers'),
+        (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Trainer))),
+        onError
+    );
+}
+
 export async function getActiveTrainers(): Promise<Trainer[]> {
     const snap = await getDocs(
         query(collection(db, 'trainers'), where('active', '==', true))
     );
     return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Trainer));
+}
+
+export function subscribeActiveTrainers(
+    callback: (trainers: Trainer[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(collection(db, 'trainers'), where('active', '==', true)),
+        (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Trainer))),
+        onError
+    );
 }
 
 export async function addTrainer(data: Omit<Trainer, 'id' | 'createdAt'>): Promise<string> {
@@ -980,6 +1209,25 @@ export async function getTrainerByUid(uid: string): Promise<Trainer | null> {
     return { id: d.id, ...d.data() } as Trainer;
 }
 
+export function subscribeTrainerByUid(
+    uid: string,
+    callback: (trainer: Trainer | null) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(collection(db, 'trainers'), where('uid', '==', uid)),
+        (snap) => {
+            if (snap.empty) {
+                callback(null);
+                return;
+            }
+            const d = snap.docs[0];
+            callback({ id: d.id, ...d.data() } as Trainer);
+        },
+        onError
+    );
+}
+
 export async function getAppointmentsByTrainer(trainerId: string): Promise<Appointment[]> {
     const snap = await getDocs(
         query(
@@ -990,6 +1238,23 @@ export async function getAppointmentsByTrainer(trainerId: string): Promise<Appoi
         )
     );
     return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Appointment));
+}
+
+export function subscribeAppointmentsByTrainer(
+    trainerId: string,
+    callback: (appointments: Appointment[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(
+            collection(db, 'appointments'),
+            where('assignedTrainer', '==', trainerId),
+            where('status', '==', 'approved'),
+            orderBy('createdAt', 'desc')
+        ),
+        (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Appointment))),
+        onError
+    );
 }
 
 export async function updateTrainerNotes(appointmentId: string, trainerNotes: string): Promise<void> {
@@ -1085,6 +1350,19 @@ export async function getSiteConfig(): Promise<SiteConfig> {
     return normalizeSiteConfig(snap.data() as Partial<SiteConfig>);
 }
 
+export function subscribeSiteConfig(
+    callback: (config: SiteConfig) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        doc(db, 'site_config', 'main'),
+        (snap) => callback(snap.exists()
+            ? normalizeSiteConfig(snap.data() as Partial<SiteConfig>)
+            : { ...DEFAULT_SITE_CONFIG }),
+        onError
+    );
+}
+
 export async function updateSiteConfig(data: Partial<SiteConfig>): Promise<void> {
     const sanitized: Partial<SiteConfig> = { ...data };
 
@@ -1161,6 +1439,18 @@ export async function getBonosByUser(userId: string): Promise<Bono[]> {
     return snap.docs.map((d) => normalizeBonoDoc(d.id, d.data() as BonoData));
 }
 
+export function subscribeBonosByUser(
+    userId: string,
+    callback: (bonos: Bono[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(collection(db, 'bonos'), where('userId', '==', userId), orderBy('createdAt', 'desc')),
+        (snap) => callback(snap.docs.map((d) => normalizeBonoDoc(d.id, d.data() as BonoData))),
+        onError
+    );
+}
+
 /** Bono activo de un usuario (null si no tiene) */
 export async function getActiveBonoByUser(userId: string): Promise<Bono | null> {
     const snap = await getDocs(
@@ -1169,12 +1459,35 @@ export async function getActiveBonoByUser(userId: string): Promise<Bono | null> 
     return snap.empty ? null : normalizeBonoDoc(snap.docs[0].id, snap.docs[0].data() as BonoData);
 }
 
+export function subscribeActiveBonoByUser(
+    userId: string,
+    callback: (bono: Bono | null) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(collection(db, 'bonos'), where('userId', '==', userId), where('estado', '==', 'activo')),
+        (snap) => callback(snap.empty ? null : normalizeBonoDoc(snap.docs[0].id, snap.docs[0].data() as BonoData)),
+        onError
+    );
+}
+
 /** Todos los bonos activos (para recalcular expiración masiva) */
 export async function getAllActiveBonos(): Promise<Bono[]> {
     const snap = await getDocs(
         query(collection(db, 'bonos'), where('estado', '==', 'activo'))
     );
     return snap.docs.map((d) => normalizeBonoDoc(d.id, d.data() as BonoData));
+}
+
+export function subscribeAllActiveBonos(
+    callback: (bonos: Bono[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(collection(db, 'bonos'), where('estado', '==', 'activo')),
+        (snap) => callback(snap.docs.map((d) => normalizeBonoDoc(d.id, d.data() as BonoData))),
+        onError
+    );
 }
 
 /** Corrige bonos activos que quedaron por encima del tamano real. */
@@ -1354,17 +1667,30 @@ export async function expireOverdueBonos(): Promise<void> {
 // MEDIA FOLDERS
 // ============================================
 
+function mapMediaFolder(d: { id: string; data: () => Record<string, unknown> }): MediaFolder {
+    const data = d.data();
+    return {
+        id: d.id,
+        name: data.name as string,
+        parentId: (data.parentId as string | null | undefined) ?? null,
+        createdAt: (data.createdAt as { toDate?: () => Date })?.toDate?.().toISOString?.() ?? (data.createdAt as string) ?? new Date().toISOString(),
+    };
+}
+
 export async function getMediaFolders(): Promise<MediaFolder[]> {
     const snap = await getDocs(query(collection(db, 'media_folders'), orderBy('createdAt', 'asc')));
-    return snap.docs.map((d) => {
-        const data = d.data();
-        return {
-            id: d.id,
-            name: data.name,
-            parentId: data.parentId ?? null,
-            createdAt: data.createdAt?.toDate?.().toISOString?.() ?? data.createdAt ?? new Date().toISOString(),
-        };
-    });
+    return snap.docs.map(mapMediaFolder);
+}
+
+export function subscribeMediaFolders(
+    callback: (folders: MediaFolder[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(collection(db, 'media_folders'), orderBy('createdAt', 'asc')),
+        (snap) => callback(snap.docs.map(mapMediaFolder)),
+        onError
+    );
 }
 
 export async function createMediaFolder(name: string, parentId: string | null): Promise<string> {
@@ -1388,6 +1714,20 @@ export async function deleteMediaFolder(id: string): Promise<void> {
 // MEDIA FILES
 // ============================================
 
+function mapMediaFile(d: { id: string; data: () => Record<string, unknown> }): MediaFile {
+    const data = d.data();
+    return {
+        id: d.id,
+        name: data.name as string,
+        url: data.url as string,
+        storagePath: data.storagePath as string,
+        folderId: (data.folderId as string | null | undefined) ?? null,
+        type: data.type as 'image' | 'video',
+        size: data.size as number,
+        createdAt: (data.createdAt as { toDate?: () => Date })?.toDate?.().toISOString?.() ?? (data.createdAt as string) ?? new Date().toISOString(),
+    };
+}
+
 export async function getMediaFiles(folderId: string | null): Promise<MediaFile[]> {
     if (folderId === null) {
         const allFiles = await getAllMediaFiles();
@@ -1401,38 +1741,48 @@ export async function getMediaFiles(folderId: string | null): Promise<MediaFile[
             orderBy('createdAt', 'desc')
         )
     );
-    return snap.docs.map((d) => {
-        const data = d.data();
-        return {
-            id: d.id,
-            name: data.name,
-            url: data.url,
-            storagePath: data.storagePath,
-            folderId: data.folderId ?? null,
-            type: data.type,
-            size: data.size,
-            createdAt: data.createdAt?.toDate?.().toISOString?.() ?? data.createdAt ?? new Date().toISOString(),
-        };
-    });
+    return snap.docs.map(mapMediaFile);
 }
 
 export async function getAllMediaFiles(): Promise<MediaFile[]> {
     const snap = await getDocs(
         query(collection(db, 'media_files'), orderBy('createdAt', 'desc'))
     );
-    return snap.docs.map((d) => {
-        const data = d.data();
-        return {
-            id: d.id,
-            name: data.name,
-            url: data.url,
-            storagePath: data.storagePath,
-            folderId: data.folderId ?? null,
-            type: data.type,
-            size: data.size,
-            createdAt: data.createdAt?.toDate?.().toISOString?.() ?? data.createdAt ?? new Date().toISOString(),
-        };
-    });
+    return snap.docs.map(mapMediaFile);
+}
+
+export function subscribeMediaFiles(
+    folderId: string | null,
+    callback: (files: MediaFile[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    if (folderId === null) {
+        return subscribeAllMediaFiles(
+            (files) => callback(files.filter((file) => file.folderId == null)),
+            onError
+        );
+    }
+
+    return onSnapshot(
+        query(
+            collection(db, 'media_files'),
+            where('folderId', '==', folderId),
+            orderBy('createdAt', 'desc')
+        ),
+        (snap) => callback(snap.docs.map(mapMediaFile)),
+        onError
+    );
+}
+
+export function subscribeAllMediaFiles(
+    callback: (files: MediaFile[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(collection(db, 'media_files'), orderBy('createdAt', 'desc')),
+        (snap) => callback(snap.docs.map(mapMediaFile)),
+        onError
+    );
 }
 
 export async function addMediaFile(data: Omit<MediaFile, 'id'>): Promise<string> {
@@ -1454,17 +1804,7 @@ export async function deleteMediaFileRecord(id: string): Promise<void> {
 export async function getMediaFileById(id: string): Promise<MediaFile | null> {
     const snap = await getDoc(doc(db, 'media_files', id));
     if (!snap.exists()) return null;
-    const data = snap.data();
-    return {
-        id: snap.id,
-        name: data.name,
-        url: data.url,
-        storagePath: data.storagePath,
-        folderId: data.folderId ?? null,
-        type: data.type,
-        size: data.size,
-        createdAt: data.createdAt?.toDate?.().toISOString?.() ?? data.createdAt ?? new Date().toISOString(),
-    };
+    return mapMediaFile(snap);
 }
 
 export async function getMediaFileByUrl(url: string): Promise<MediaFile | null> {
@@ -1472,18 +1812,7 @@ export async function getMediaFileByUrl(url: string): Promise<MediaFile | null> 
     if (!trimmed) return null;
     const snap = await getDocs(query(collection(db, 'media_files'), where('url', '==', trimmed)));
     if (snap.empty) return null;
-    const first = snap.docs[0];
-    const data = first.data();
-    return {
-        id: first.id,
-        name: data.name,
-        url: data.url,
-        storagePath: data.storagePath,
-        folderId: data.folderId ?? null,
-        type: data.type,
-        size: data.size,
-        createdAt: data.createdAt?.toDate?.().toISOString?.() ?? data.createdAt ?? new Date().toISOString(),
-    };
+    return mapMediaFile(snap.docs[0]);
 }
 
 function getExtensionFromPath(path: string, fallbackType: 'image' | 'video'): string {
@@ -1571,6 +1900,21 @@ export async function getGalleryItems(onlyActive = false): Promise<GalleryItem[]
     return snap.docs.map(mapGalleryItem);
 }
 
+export function subscribeGalleryItems(
+    onlyActive: boolean,
+    callback: (items: GalleryItem[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    const constraints = onlyActive
+        ? [where('active', '==', true), orderBy('order', 'asc')]
+        : [orderBy('order', 'asc')];
+    return onSnapshot(
+        query(collection(db, 'gallery_items'), ...constraints),
+        (snap) => callback(snap.docs.map(mapGalleryItem)),
+        onError
+    );
+}
+
 export async function addGalleryItem(data: Omit<GalleryItem, 'id'>): Promise<string> {
     const ref = await addDoc(collection(db, 'gallery_items'), {
         ...data,
@@ -1602,6 +1946,21 @@ export async function getActiveGalleryItemsByDate(): Promise<GalleryItem[]> {
     return snap.docs
         .map(mapGalleryItem)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export function subscribeActiveGalleryItemsByDate(
+    callback: (items: GalleryItem[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(collection(db, 'gallery_items'), where('active', '==', true)),
+        (snap) => callback(
+            snap.docs
+                .map(mapGalleryItem)
+                .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        ),
+        onError
+    );
 }
 
 // ============================================
@@ -1645,6 +2004,17 @@ export async function getOrCreateBrandingFolder(): Promise<{ folderId: string }>
 export async function getBrandingConfig(): Promise<BrandingConfig | null> {
     const snap = await getDoc(doc(db, 'site_config', 'general'));
     return snap.exists() ? (snap.data() as BrandingConfig) : null;
+}
+
+export function subscribeBrandingConfig(
+    callback: (config: BrandingConfig | null) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        doc(db, 'site_config', 'general'),
+        (snap) => callback(snap.exists() ? (snap.data() as BrandingConfig) : null),
+        onError
+    );
 }
 
 export async function updateBrandingConfig(data: Partial<BrandingConfig>): Promise<void> {

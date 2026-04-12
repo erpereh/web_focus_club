@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
     DndContext,
     closestCenter,
@@ -31,13 +31,12 @@ import { PremiumButton } from '@/components/ui/premium-button';
 import { MediaPicker } from '@/components/admin/MediaPicker';
 import { VideoFramePreview } from '@/components/ui/VideoFramePreview';
 import {
-    getGalleryItems,
     addGalleryItem,
     updateGalleryItem,
     deleteGalleryItem,
     reorderGalleryItems,
+    subscribeGalleryItems,
 } from '@/lib/firestore';
-import { useMediaLibrary } from '@/hooks/useMediaLibrary';
 import type { GalleryItem, MediaFile } from '@/types';
 
 // ============================================
@@ -165,27 +164,25 @@ export function GalleryManager() {
     const [loading, setLoading] = useState(true);
     const [pickerOpen, setPickerOpen] = useState(false);
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-    const { fetchFolders } = useMediaLibrary();
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
         useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
     );
 
-    const loadItems = useCallback(async () => {
-        setLoading(true);
-        try {
-            const data = await getGalleryItems(false);
-            setItems(data);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
     useEffect(() => {
-        loadItems();
-        fetchFolders();
-    }, [fetchFolders, loadItems]);
+        const unsubscribeItems = subscribeGalleryItems(
+            false,
+            (data) => {
+                setItems(data);
+                setLoading(false);
+            },
+            () => setLoading(false)
+        );
+        return () => {
+            unsubscribeItems();
+        };
+    }, []);
 
     const handleSelect = async (file: MediaFile) => {
         const maxOrder = items.length > 0 ? Math.max(...items.map((i) => i.order)) : -1;

@@ -7,6 +7,9 @@ import {
     getMediaFolders,
     getMediaFiles,
     getAllMediaFiles,
+    subscribeMediaFolders,
+    subscribeMediaFiles,
+    subscribeAllMediaFiles,
     createMediaFolder,
     renameMediaFolder,
     deleteMediaFolder,
@@ -77,6 +80,29 @@ export function useMediaLibrary() {
         } finally {
             setLoading(false);
         }
+    }, []);
+
+    const subscribeFolders = useCallback(() => {
+        setLoading(true);
+        return subscribeMediaFolders(
+            (data) => {
+                setFolders(data);
+                setLoading(false);
+            },
+            () => setLoading(false)
+        );
+    }, []);
+
+    const subscribeFiles = useCallback((folderId: string | null) => {
+        setLoading(true);
+        const handleData = (data: MediaFile[]) => {
+            setFiles(data);
+            setLoading(false);
+        };
+        const handleError = () => setLoading(false);
+        return folderId === 'ALL'
+            ? subscribeAllMediaFiles(handleData, handleError)
+            : subscribeMediaFiles(folderId, handleData, handleError);
     }, []);
 
     // --- FOLDERS ---
@@ -214,6 +240,8 @@ export function useMediaLibrary() {
         setUploadQueue,
         fetchFolders,
         fetchFiles,
+        subscribeFolders,
+        subscribeFiles,
         createFolder: handleCreateFolder,
         renameFolder: handleRenameFolder,
         deleteFolder: handleDeleteFolder,

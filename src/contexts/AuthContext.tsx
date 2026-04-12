@@ -12,7 +12,7 @@ import {
     User as FirebaseUser,
 } from 'firebase/auth';
 import { auth, googleProvider } from '@/lib/firebase';
-import { getUserProfile, createUserProfile, updateUserProfile } from '@/lib/firestore';
+import { getUserProfile, createUserProfile, updateUserProfile, subscribeUserProfile } from '@/lib/firestore';
 import type { UserProfile } from '@/types';
 
 // ============================================
@@ -87,6 +87,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             unsubscribe();
         };
     }, []);
+
+    useEffect(() => {
+        if (!user) return;
+        const unsubscribe = subscribeUserProfile(
+            user.uid,
+            setUserProfile,
+            () => setUserProfile(null)
+        );
+        return unsubscribe;
+    }, [user]);
 
     // ============================================
     // LOGIN CON EMAIL + PASSWORD

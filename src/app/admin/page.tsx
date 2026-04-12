@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePathname } from 'next/navigation';
 
@@ -133,6 +133,18 @@ import {
   expireOverdueBonos,
   getBrandingConfig,
   updateBrandingConfig,
+  subscribeAllActiveBonos,
+  subscribeAppointments,
+  subscribeAppointmentsByTrainer,
+  subscribeBlockedSlots,
+  subscribeBrandingConfig,
+  subscribeServices,
+  subscribeSiteConfig,
+  subscribeSiteContent,
+  subscribeTestimonials,
+  subscribeTrainerByUid,
+  subscribeTrainers,
+  subscribeUsers,
 
 } from '@/lib/firestore';
 import { cn } from '@/lib/utils';
@@ -833,6 +845,9 @@ export default function AdminPage() {
   const [cmsContent, setCmsContent] = useState<CMSContent | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabType>('Inicio');
+  const activeTabRef = useRef<TabType>('Inicio');
+  const appointmentIdsRef = useRef<Set<string>>(new Set());
+  const appointmentsSnapshotReadyRef = useRef(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const switchTab = (tab: TabType) => { setActiveTab(tab); setSidebarOpen(false); };
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -934,6 +949,10 @@ export default function AdminPage() {
   // Delete appointments when blocking
   const [deleteOnBlock, setDeleteOnBlock] = useState(false);
 
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
   // Cargar datos desde Firestore
   const refreshData = async () => {
     const [appts, svcs, tests, cms, usersList, blocked, trainersList, config, branding, centroConfig, galeriaConfig] = await Promise.all([
@@ -1008,6 +1027,89 @@ export default function AdminPage() {
       refreshTrainerData().catch(console.error);
     }
   }, [isAdmin, isTrainerRole]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    appointmentsSnapshotReadyRef.current = false;
+    appointmentIdsRef.current = new Set();
+
+    const unsubscribeAppointments = subscribeAppointments((nextAppointments) => {
+      const nextIds = new Set(nextAppointments.map((appointment) => appointment.id));
+      if (appointmentsSnapshotReadyRef.current) {
+        const hasNewAppointment = nextAppointments.some((appointment) => !appointmentIdsRef.current.has(appointment.id));
+        if (hasNewAppointment) {
+          const t = toast({ title: 'Nueva cita recibida', description: 'La lista de citas se ha actualizado automáticamente.' });
+          setTimeout(() => t.dismiss(), 3500);
+        }
+      }
+      appointmentsSnapshotReadyRef.current = true;
+      appointmentIdsRef.current = nextIds;
+      setAppointments(nextAppointments);
+    }, console.error);
+
+    const unsubscribeServices = subscribeServices((nextServices) => {
+      setServices(nextServices);
+      if (activeTabRef.current !== 'Servicios') {
+        setEditedServices(nextServices);
+      }
+    }, console.error);
+
+    const unsubscribeTestimonials = subscribeTestimonials(setTestimonials, console.error);
+
+    const unsubscribeSiteContent = subscribeSiteContent((content) => {
+      if (!content) return;
+      setCmsContent(content);
+      if (!['Hero', 'Sandra', 'Centro', 'Galeria', 'Contacto', 'Footer'].includes(activeTabRef.current)) {
+        setEditedContent(content);
+      }
+    }, console.error);
+
+    const unsubscribeUsers = subscribeUsers(setClients, console.error);
+    const unsubscribeBlockedSlots = subscribeBlockedSlots(setBlockedSlots, console.error);
+    const unsubscribeTrainers = subscribeTrainers(setTrainers, console.error);
+    const unsubscribeSiteConfig = subscribeSiteConfig((config) => {
+      setSiteConfig(config);
+      if (activeTabRef.current !== 'config') {
+        setEditConfig(config);
+        setEditBonoConfig(config.bonoExpirationMonths || 1);
+      }
+    }, console.error);
+    const unsubscribeBranding = subscribeBrandingConfig(setBrandingConfig, console.error);
+    const unsubscribeBonos = subscribeAllActiveBonos((activeBonos) => {
+      const bonoMap: Record<string, Bono | null> = {};
+      for (const bono of activeBonos) {
+        bonoMap[bono.userId] = bono;
+      }
+      setClientBonos(bonoMap);
+    }, console.error);
+
+    return () => {
+      unsubscribeAppointments();
+      unsubscribeServices();
+      unsubscribeTestimonials();
+      unsubscribeSiteContent();
+      unsubscribeUsers();
+      unsubscribeBlockedSlots();
+      unsubscribeTrainers();
+      unsubscribeSiteConfig();
+      unsubscribeBranding();
+      unsubscribeBonos();
+    };
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isTrainerRole || !user) return;
+    return subscribeTrainerByUid(user.uid, setTrainerProfile, console.error);
+  }, [isTrainerRole, user]);
+
+  useEffect(() => {
+    if (!isTrainerRole || !trainerProfile) {
+      setTrainerAppointments([]);
+      return;
+    }
+    return subscribeAppointmentsByTrainer(trainerProfile.id, setTrainerAppointments, console.error);
+  }, [isTrainerRole, trainerProfile]);
 
   // Stats
   const stats = {

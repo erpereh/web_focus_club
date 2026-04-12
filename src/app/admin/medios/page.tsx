@@ -486,8 +486,9 @@ export default function MediaPage() {
         files,
         loading,
         uploadQueue,
-        fetchFolders,
         fetchFiles,
+        subscribeFolders,
+        subscribeFiles,
         createFolder,
         renameFolder,
         deleteFolder,
@@ -514,14 +515,14 @@ export default function MediaPage() {
         }
     }, [isAdmin, userProfile, router]);
 
-    // Initial load
+    // Realtime folders/files
     useEffect(() => {
-        fetchFolders();
-    }, [fetchFolders]);
+        return subscribeFolders();
+    }, [subscribeFolders]);
 
     useEffect(() => {
-        fetchFiles(selectedFolderId);
-    }, [selectedFolderId, fetchFiles]);
+        return subscribeFiles(selectedFolderId);
+    }, [selectedFolderId, subscribeFiles]);
 
     // Drag & drop
     const handleDragOver = useCallback((e: React.DragEvent) => {
