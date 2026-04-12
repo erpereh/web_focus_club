@@ -69,6 +69,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUser(firebaseUser);
 
             if (firebaseUser) {
+                if (!firebaseUser.emailVerified) {
+                    setUserProfile(null);
+                    setLoading(false);
+                    return;
+                }
+
                 try {
                     const profile = await getUserProfile(firebaseUser.uid);
                     setUserProfile(profile);
@@ -89,7 +95,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, []);
 
     useEffect(() => {
-        if (!user) return;
+        if (!user || !user.emailVerified) {
+            return;
+        }
         const unsubscribe = subscribeUserProfile(
             user.uid,
             setUserProfile,
@@ -109,9 +117,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Bloquear si no ha verificado el email
             if (!cred.user.emailVerified) {
                 // No hacer signOut — el usuario se queda "semi-logueado" para poder reenviar verificación
+                setUserProfile(null);
                 return {
                     success: false,
-                    message: 'Debes verificar tu email antes de acceder. Revisa tu bandeja de entrada.',
+                    message: 'Debes verificar tu email antes de acceder. Revisa tu bandeja de entrada y la carpeta de spam.',
                     needsVerification: true,
                 };
             }
@@ -163,7 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             return {
                 success: true,
-                message: 'Cuenta creada. Revisa tu bandeja de entrada para verificar tu email.',
+                message: 'Cuenta creada. Revisa tu bandeja de entrada y la carpeta de spam para verificar tu email.',
             };
         } catch (error: unknown) {
             const code = (error as { code?: string })?.code;
@@ -266,7 +275,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 return { success: false, message: 'No hay sesión activa. Intenta iniciar sesión de nuevo.' };
             }
             await sendEmailVerification(currentUser);
-            return { success: true, message: 'Email de verificación reenviado. Revisa tu bandeja de entrada.' };
+            return { success: true, message: 'Email de verificación reenviado. Revisa tu bandeja de entrada y la carpeta de spam.' };
         } catch (error: unknown) {
             const code = (error as { code?: string })?.code;
             if (code === 'auth/too-many-requests') {
@@ -313,7 +322,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // ============================================
 
     const refreshUserProfile = async () => {
-        if (!user) return;
+        if (!user || !user.emailVerified) return;
         try {
             const profile = await getUserProfile(user.uid);
             setUserProfile(profile);

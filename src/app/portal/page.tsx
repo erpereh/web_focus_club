@@ -124,7 +124,7 @@ const durations: { value: '30' | '45' | '60'; label: string; desc: string }[] = 
 export default function PortalPage() {
   const { user, userProfile, loading: authContextLoading, login, register, loginWithGoogle, logout, resetPassword, resendVerification, completeGoogleProfile, refreshUserProfile } = useAuth();
   const { logoUrl } = useBrandingConfig();
-  const isAuthenticated = !!user && !!userProfile?.phone;
+  const isAuthenticated = !!user?.emailVerified && !!userProfile?.phone;
 
   const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [portalView, setPortalView] = useState<PortalView>('dashboard');
@@ -144,6 +144,7 @@ export default function PortalPage() {
   const [authLoading, setAuthLoading] = useState(false);
   const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
   const [needsVerification, setNeedsVerification] = useState(false);
+  const showVerificationPrompt = needsVerification || (!!user && !user.emailVerified);
 
   // Estado para completar perfil Google
   const [profileForm, setProfileForm] = useState({ name: '', phone: '' });
@@ -185,7 +186,7 @@ export default function PortalPage() {
   const bonoServiceLabel = activeBono ? 'Bono Mensual de Entrenamiento' : '';
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !user.emailVerified) {
       setUserAppointments([]);
       setAllBonos([]);
       setActiveBono(null);
@@ -818,13 +819,13 @@ export default function PortalPage() {
                         </button>
                       </div>
 
-                      {authError && (
+                      {(authError || showVerificationPrompt) && (
                         <div className="space-y-2">
                           <p className="text-destructive text-sm flex items-center gap-2">
                             <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                            {authError}
+                            {authError || 'Debes verificar tu email antes de acceder. Revisa tu bandeja de entrada y la carpeta de spam.'}
                           </p>
-                          {needsVerification && (
+                          {showVerificationPrompt && (
                             <button
                               type="button"
                               onClick={handleResendVerification}

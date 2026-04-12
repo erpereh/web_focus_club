@@ -2,10 +2,12 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    // CMS and media uploads use persistent Storage URLs.
-    // Keep access simple: any authenticated session can read and write.
+    function isVerified() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
     match /{allPaths=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isVerified();
     }
   }
 }
