@@ -52,6 +52,9 @@ server.log
 
 # Firebase service account keys (NEVER commit these)
 *-adminsdk*.json
+auth-export.json
+firebase-debug.log
+firebase-debug.*.log
 
 # Skills directory
 /skills/

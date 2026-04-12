@@ -4,10 +4,21 @@ const path = require('path');
 
 const apiPath = path.join(__dirname, '../src/app/api');
 const backupPath = path.join(__dirname, '../src/app/_api');
+const outPath = path.join(__dirname, '../out');
 
 console.log('--- Preparing static build ---');
 
 try {
+    if (fs.existsSync(outPath)) {
+        console.log('Cleaning previous static output...');
+        fs.rmSync(outPath, { recursive: true, force: true });
+    }
+
+    if (fs.existsSync(backupPath) && !fs.existsSync(apiPath)) {
+        console.log('Restoring stale API backup before build...');
+        fs.renameSync(backupPath, apiPath);
+    }
+
     if (fs.existsSync(apiPath)) {
         console.log('Moving API folder to backup to bypass export limitations...');
         fs.renameSync(apiPath, backupPath);

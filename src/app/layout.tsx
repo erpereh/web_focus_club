@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import { GeistSans } from "geist/font/sans";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { Navbar } from "@/components/layout/Navbar";
@@ -9,11 +9,6 @@ import { CookieConsent } from "@/components/layout/CookieConsent";
 import { Providers } from "./providers";
 import { AmbientBackground } from "@/components/layout/AmbientBackground";
 import { ScrollProgressBar } from "@/components/layout/ScrollProgressBar";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "Focus Club Vallecas | Entrenamiento Personal y Bienestar en Madrid",
@@ -58,7 +53,7 @@ export default function RootLayout({
   return (
     <html lang="es" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} antialiased bg-background text-foreground min-h-screen flex flex-col`}
+        className={`${GeistSans.variable} antialiased bg-background text-foreground min-h-screen flex flex-col`}
       >
         <Providers>
           <AmbientBackground />
