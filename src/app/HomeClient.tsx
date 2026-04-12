@@ -413,7 +413,7 @@ export default function HomeClient({ initialCMS: cmsContent, initialServices: se
             viewport={{ once: true }}
           >
             {testimonials.length > 0
-              ? testimonials.map((testimonial) => (
+              ? testimonials.slice(0, 3).map((testimonial) => (
                   <motion.div key={testimonial.id} variants={itemVariants}>
                     <GlassCard className="h-full">
                       <div className="flex items-center gap-1 mb-4">

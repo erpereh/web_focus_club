@@ -1,0 +1,142 @@
+{
+  "name": "Focus Club - Google Reviews to Firestore",
+  "flow": [
+    {
+      "id": 1,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": {
+        "handleErrors": true,
+        "useNewZLibDeCompress": true
+      },
+      "mapper": {
+        "url": "https://mybusiness.googleapis.com/v4/accounts/REPLACE_GOOGLE_ACCOUNT_ID/locations/REPLACE_GOOGLE_LOCATION_ID/reviews?pageSize=50&orderBy=updateTime%20desc",
+        "method": "get",
+        "headers": [
+          {
+            "name": "Authorization",
+            "value": "Bearer REPLACE_GOOGLE_BUSINESS_PROFILE_ACCESS_TOKEN_OR_CONFIGURE_OAUTH"
+          },
+          {
+            "name": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "qs": [],
+        "bodyType": "",
+        "parseResponse": true,
+        "timeout": "",
+        "shareCookies": false,
+        "rejectUnauthorized": true,
+        "followRedirect": true,
+        "useQuerystring": false,
+        "gzip": true,
+        "useMtls": false,
+        "serializeUrl": false,
+        "followAllRedirects": false
+      },
+      "metadata": {
+        "designer": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": 2,
+      "module": "builtin:BasicFeeder",
+      "version": 1,
+      "parameters": {},
+      "mapper": {
+        "array": "{{1.reviews}}"
+      },
+      "metadata": {
+        "designer": {
+          "x": 300,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": 3,
+      "module": "http:ActionSendData",
+      "version": 3,
+      "parameters": {
+        "handleErrors": true,
+        "useNewZLibDeCompress": true
+      },
+      "filter": {
+        "name": "Solo reviews 5 estrellas con texto",
+        "conditions": [
+          [
+            {
+              "a": "{{2.starRating}}",
+              "o": "text:equal",
+              "b": "FIVE"
+            },
+            {
+              "a": "{{2.comment}}",
+              "o": "text:exist"
+            }
+          ]
+        ]
+      },
+      "mapper": {
+        "url": "https://firestore.googleapis.com/v1/projects/REPLACE_FIREBASE_PROJECT_ID/databases/(default)/documents/testimonials/google_{{replace(2.name; \"/\"; \"_\")}}?updateMask.fieldPaths=name&updateMask.fieldPaths=role&updateMask.fieldPaths=content&updateMask.fieldPaths=rating&updateMask.fieldPaths=approved&updateMask.fieldPaths=source&updateMask.fieldPaths=googleReviewId&updateMask.fieldPaths=reviewCreateTime&updateMask.fieldPaths=reviewUpdateTime&updateMask.fieldPaths=importedAt",
+        "method": "patch",
+        "headers": [
+          {
+            "name": "Authorization",
+            "value": "Bearer REPLACE_FIRESTORE_ACCESS_TOKEN_OR_CONFIGURE_OAUTH"
+          },
+          {
+            "name": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "qs": [],
+        "bodyType": "raw",
+        "contentType": "application/json",
+        "parseResponse": true,
+        "timeout": "",
+        "shareCookies": false,
+        "rejectUnauthorized": true,
+        "followRedirect": true,
+        "useQuerystring": false,
+        "gzip": true,
+        "useMtls": false,
+        "serializeUrl": false,
+        "followAllRedirects": false,
+        "body": "{\n  \"fields\": {\n    \"name\": { \"stringValue\": \"{{ifempty(2.reviewer.displayName; \\\"Cliente Google\\\")}}\" },\n    \"role\": { \"stringValue\": \"Resena de Google\" },\n    \"content\": { \"stringValue\": \"{{2.comment}}\" },\n    \"rating\": { \"integerValue\": \"5\" },\n    \"approved\": { \"booleanValue\": true },\n    \"source\": { \"stringValue\": \"google\" },\n    \"googleReviewId\": { \"stringValue\": \"{{2.name}}\" },\n    \"reviewCreateTime\": { \"stringValue\": \"{{2.createTime}}\" },\n    \"reviewUpdateTime\": { \"stringValue\": \"{{2.updateTime}}\" },\n    \"importedAt\": { \"stringValue\": \"{{now}}\" }\n  }\n}"
+      },
+      "metadata": {
+        "designer": {
+          "x": 600,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "version": 1,
+    "scenario": {
+      "roundtrips": 1,
+      "maxErrors": 3,
+      "autoCommit": true,
+      "autoCommitTriggerLast": true,
+      "sequential": false,
+      "confidential": false,
+      "dataloss": false,
+      "dlq": false,
+      "freshVariables": false
+    },
+    "designer": {
+      "orphans": []
+    },
+    "zone": "eu1.make.com"
+  },
+  "scheduling": {
+    "type": "indefinitely",
+    "interval": 604800
+  }
+}

@@ -3045,12 +3045,19 @@ export default function AdminPage() {
                             <h3 className="font-semibold text-[var(--color-text-primary)]">{testimonial.name}</h3>
                             <p className="text-xs text-[var(--color-text-secondary)]">{testimonial.role}</p>
                           </div>
-                          <span className={cn(
-                            'px-2 py-1 text-xs rounded',
-                            testimonial.approved ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)]' : 'bg-yellow-500/20 text-yellow-400'
-                          )}>
-                            {testimonial.approved ? 'Aprobado' : 'Pendiente'}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            {testimonial.source === 'google' && (
+                              <span className="px-2 py-1 text-xs rounded bg-blue-500/15 text-blue-300 border border-blue-500/20">
+                                Google
+                              </span>
+                            )}
+                            <span className={cn(
+                              'px-2 py-1 text-xs rounded',
+                              testimonial.approved ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)]' : 'bg-yellow-500/20 text-yellow-400'
+                            )}>
+                              {testimonial.approved ? 'Aprobado' : 'Pendiente'}
+                            </span>
+                          </div>
                         </div>
                         <div className="flex items-center gap-1 mb-3">
                           {Array.from({ length: 5 }).map((_, i) => (

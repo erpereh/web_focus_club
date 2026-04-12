@@ -84,6 +84,11 @@ export interface Testimonial {
     rating: number;
     image?: string;
     approved: boolean;
+    source?: 'manual' | 'google';
+    googleReviewId?: string;
+    reviewCreateTime?: string;
+    reviewUpdateTime?: string;
+    importedAt?: string;
 }
 
 export interface SandraAchievement {

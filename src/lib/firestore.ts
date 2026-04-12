@@ -626,22 +626,60 @@ export async function deleteService(id: string): Promise<void> {
 // TESTIMONIOS
 // ============================================
 
+function getTestimonialSortTime(testimonial: Testimonial): number {
+    const rawDate = testimonial.reviewCreateTime ?? testimonial.importedAt ?? '';
+    const time = rawDate ? new Date(rawDate).getTime() : 0;
+    return Number.isFinite(time) ? time : 0;
+}
+
+function sortTestimonialsNewestFirst(testimonials: Testimonial[]): Testimonial[] {
+    return [...testimonials].sort((a, b) => getTestimonialSortTime(b) - getTestimonialSortTime(a));
+}
+
 export async function getTestimonials(): Promise<Testimonial[]> {
     const snap = await getDocs(collection(db, 'testimonials'));
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Testimonial));
+    return sortTestimonialsNewestFirst(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Testimonial)));
 }
 
 export async function getApprovedTestimonials(): Promise<Testimonial[]> {
     const snap = await getDocs(
         query(collection(db, 'testimonials'), where('approved', '==', true))
     );
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Testimonial));
+    return sortTestimonialsNewestFirst(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Testimonial)));
 }
 
 export async function addTestimonial(
     data: Omit<Testimonial, 'id' | 'approved'>
 ): Promise<void> {
-    await addDoc(collection(db, 'testimonials'), { ...data, approved: false });
+    await addDoc(collection(db, 'testimonials'), { ...data, source: data.source ?? 'manual', approved: false });
+}
+
+export async function upsertGoogleTestimonial(
+    data: Omit<Testimonial, 'id' | 'source' | 'approved' | 'role'> & {
+        googleReviewId: string;
+        approved?: boolean;
+        role?: string;
+    }
+): Promise<void> {
+    const now = new Date().toISOString();
+    const payload: Omit<Testimonial, 'id'> = {
+        ...data,
+        source: 'google',
+        approved: data.approved ?? true,
+        role: data.role || 'Resena de Google',
+        importedAt: data.importedAt ?? now,
+    };
+
+    const existing = await getDocs(
+        query(collection(db, 'testimonials'), where('googleReviewId', '==', data.googleReviewId))
+    );
+
+    if (!existing.empty) {
+        await updateDoc(existing.docs[0].ref, payload);
+        return;
+    }
+
+    await addDoc(collection(db, 'testimonials'), payload);
 }
 
 export async function updateTestimonial(
