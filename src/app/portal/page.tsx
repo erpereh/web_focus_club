@@ -59,6 +59,7 @@ import {
 } from '@/lib/firestore';
 import { updatePassword } from 'firebase/auth';
 import { cn } from '@/lib/utils';
+import { validatePassword, validateSpanishPhone } from '@/lib/validation';
 
 // ============================================
 // TIPOS
@@ -345,6 +346,13 @@ export default function PortalPage() {
     setAuthLoading(true);
     setAuthError('');
     setAuthSuccess('');
+    const phoneValidation = validateSpanishPhone(authForm.phone);
+
+    if (!phoneValidation.isValid) {
+      setAuthError(phoneValidation.error ?? 'El teléfono no es válido.');
+      setAuthLoading(false);
+      return;
+    }
 
     if (authForm.password !== authForm.confirmPassword) {
       setAuthError('Las contraseñas no coinciden');
@@ -352,8 +360,10 @@ export default function PortalPage() {
       return;
     }
 
-    if (authForm.password.length < 6) {
-      setAuthError('La contraseña debe tener al menos 6 caracteres');
+    const passwordValidation = validatePassword(authForm.password);
+
+    if (!passwordValidation.isValid) {
+      setAuthError(passwordValidation.error ?? 'La contraseña no es válida.');
       setAuthLoading(false);
       return;
     }
@@ -364,7 +374,7 @@ export default function PortalPage() {
       return;
     }
 
-    const result = await register(authForm.email, authForm.password, authForm.name, authForm.phone);
+    const result = await register(authForm.email, authForm.password, authForm.name, phoneValidation.normalized);
 
     if (result.success) {
       setAuthSuccess(result.message);
@@ -402,13 +412,15 @@ export default function PortalPage() {
     setAuthLoading(true);
     setAuthError('');
 
-    if (!profileForm.phone.trim()) {
-      setAuthError('El teléfono es obligatorio');
+    const phoneValidation = validateSpanishPhone(profileForm.phone);
+
+    if (!phoneValidation.isValid) {
+      setAuthError(phoneValidation.error ?? 'El teléfono no es válido.');
       setAuthLoading(false);
       return;
     }
 
-    const result = await completeGoogleProfile(profileForm.name, profileForm.phone);
+    const result = await completeGoogleProfile(profileForm.name, phoneValidation.normalized);
 
     if (!result.success) {
       setAuthError(result.message);
@@ -517,13 +529,23 @@ export default function PortalPage() {
 
   const handleSaveProfile = async () => {
     if (!user || !userProfile) return;
-    if (newPassword.length > 0 && newPassword.length < 6) {
-      setProfileError('La contraseña debe tener al menos 6 caracteres.');
-      return;
-    }
     setProfileSaving(true);
     setProfileError('');
     setProfileSuccess('');
+    const phoneValidation = validateSpanishPhone(profileEditForm.phone);
+    if (!phoneValidation.isValid) {
+      setProfileError(phoneValidation.error ?? 'El teléfono no es válido.');
+      setProfileSaving(false);
+      return;
+    }
+    if (newPassword.length > 0) {
+      const passwordValidation = validatePassword(newPassword);
+      if (!passwordValidation.isValid) {
+        setProfileError(passwordValidation.error ?? 'La contraseña no es válida.');
+        setProfileSaving(false);
+        return;
+      }
+    }
     try {
       let photoURL = userProfile.photoURL || '';
       if (profilePhotoFile) {
@@ -534,10 +556,10 @@ export default function PortalPage() {
       }
       await updateUserProfile(user.uid, {
         name: profileEditForm.name,
-        phone: profileEditForm.phone,
+        phone: phoneValidation.normalized,
         photoURL,
       });
-      if (newPassword.length >= 6) {
+      if (newPassword.length > 0) {
         await updatePassword(user, newPassword);
         setNewPassword('');
       }

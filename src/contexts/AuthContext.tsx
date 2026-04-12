@@ -13,6 +13,7 @@ import {
 } from 'firebase/auth';
 import { auth, googleProvider } from '@/lib/firebase';
 import { getUserProfile, createUserProfile, updateUserProfile, subscribeUserProfile } from '@/lib/firestore';
+import { validateSpanishPhone } from '@/lib/validation';
 import type { UserProfile } from '@/types';
 
 // ============================================
@@ -147,6 +148,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const register = async (email: string, password: string, name: string, phone: string): Promise<LoginResult> => {
         try {
+            const phoneValidation = validateSpanishPhone(phone);
+            if (!phoneValidation.isValid) {
+                return { success: false, message: phoneValidation.error ?? 'El teléfono no es válido.' };
+            }
+
             // 1. Crear cuenta en Firebase Auth
             const cred = await createUserWithEmailAndPassword(auth, email, password);
 
@@ -158,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 uid: cred.user.uid,
                 email,
                 name,
-                phone,
+                phone: phoneValidation.normalized,
                 role: 'user',
                 isTrainer: false,
                 createdAt: new Date().toISOString(),
@@ -252,10 +258,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
             if (!user) return { success: false, message: 'No hay usuario autenticado' };
 
-            await updateUserProfile(user.uid, { name, phone });
+            const phoneValidation = validateSpanishPhone(phone);
+            if (!phoneValidation.isValid) {
+                return { success: false, message: phoneValidation.error ?? 'El teléfono no es válido.' };
+            }
+
+            await updateUserProfile(user.uid, { name, phone: phoneValidation.normalized });
 
             // Actualizar estado local
-            setUserProfile(prev => prev ? { ...prev, name, phone } : null);
+            setUserProfile(prev => prev ? { ...prev, name, phone: phoneValidation.normalized } : null);
 
             return { success: true, message: 'Perfil actualizado correctamente' };
         } catch {
