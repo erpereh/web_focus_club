@@ -211,13 +211,17 @@ export interface Bono {
 
 /** Devuelve los minutos restantes del bono, con soporte para bonos legacy. */
 export function getBonoMinutosRestantes(bono: Bono): number {
-    if (bono.minutosRestantes !== undefined) return bono.minutosRestantes;
+    if (bono.minutosRestantes !== undefined) {
+        const total = getBonoMinutosTotales(bono);
+        return Math.max(0, Math.min(bono.minutosRestantes, total));
+    }
     const minPerSession = bono.modalidad === '30min' ? 30 : 60;
     return (bono.sesionesRestantes ?? 0) * minPerSession;
 }
 
 /** Devuelve los minutos totales del bono, con soporte para bonos legacy. */
 export function getBonoMinutosTotales(bono: Bono): number {
+    if (bono.tamano !== undefined) return bono.tamano;
     if (bono.minutosTotales !== undefined) return bono.minutosTotales;
     const minPerSession = bono.modalidad === '30min' ? 30 : 60;
     return (bono.sesionesTotales ?? 0) * minPerSession;

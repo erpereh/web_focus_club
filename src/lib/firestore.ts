@@ -1052,12 +1052,38 @@ export async function updateSiteConfig(data: Partial<SiteConfig>): Promise<void>
 // BONOS
 // ============================================
 
+type BonoData = Omit<Bono, 'id'>;
+
+function getBonoMaxMinutes(bono: Partial<BonoData>): number {
+    if (typeof bono.tamano === 'number') return bono.tamano;
+    if (typeof bono.minutosTotales === 'number') return bono.minutosTotales;
+    const minPerSession = bono.modalidad === '30min' ? 30 : 60;
+    return (bono.sesionesTotales ?? 0) * minPerSession;
+}
+
+function getBonoRemainingMinutes(bono: Partial<BonoData>): number {
+    const maxMinutes = getBonoMaxMinutes(bono);
+    const rawRemaining = typeof bono.minutosRestantes === 'number'
+        ? bono.minutosRestantes
+        : (bono.sesionesRestantes ?? 0) * (bono.modalidad === '30min' ? 30 : 60);
+    return Math.max(0, Math.min(rawRemaining, maxMinutes));
+}
+
+function normalizeBonoDoc(id: string, data: BonoData): Bono {
+    return {
+        id,
+        ...data,
+        minutosTotales: getBonoMaxMinutes(data),
+        minutosRestantes: getBonoRemainingMinutes(data),
+    } as Bono;
+}
+
 /** Todos los bonos de un usuario, ordenados por fecha de creación descendente */
 export async function getBonosByUser(userId: string): Promise<Bono[]> {
     const snap = await getDocs(
         query(collection(db, 'bonos'), where('userId', '==', userId), orderBy('createdAt', 'desc'))
     );
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Bono));
+    return snap.docs.map((d) => normalizeBonoDoc(d.id, d.data() as BonoData));
 }
 
 /** Bono activo de un usuario (null si no tiene) */
@@ -1065,7 +1091,7 @@ export async function getActiveBonoByUser(userId: string): Promise<Bono | null> 
     const snap = await getDocs(
         query(collection(db, 'bonos'), where('userId', '==', userId), where('estado', '==', 'activo'))
     );
-    return snap.empty ? null : ({ id: snap.docs[0].id, ...snap.docs[0].data() } as Bono);
+    return snap.empty ? null : normalizeBonoDoc(snap.docs[0].id, snap.docs[0].data() as BonoData);
 }
 
 /** Todos los bonos activos (para recalcular expiración masiva) */
@@ -1073,7 +1099,37 @@ export async function getAllActiveBonos(): Promise<Bono[]> {
     const snap = await getDocs(
         query(collection(db, 'bonos'), where('estado', '==', 'activo'))
     );
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Bono));
+    return snap.docs.map((d) => normalizeBonoDoc(d.id, d.data() as BonoData));
+}
+
+/** Corrige bonos activos que quedaron por encima del tamano real. */
+export async function normalizeActiveBonoLimits(): Promise<void> {
+    const snap = await getDocs(
+        query(collection(db, 'bonos'), where('estado', '==', 'activo'))
+    );
+    const batch = writeBatch(db);
+    let updates = 0;
+
+    snap.docs.forEach((bonoDoc) => {
+        const data = bonoDoc.data() as BonoData;
+        const maxMinutes = getBonoMaxMinutes(data);
+        const normalizedRemaining = getBonoRemainingMinutes(data);
+        const needsUpdate =
+            data.minutosTotales !== maxMinutes ||
+            data.minutosRestantes !== normalizedRemaining;
+
+        if (needsUpdate) {
+            batch.update(bonoDoc.ref, {
+                minutosTotales: maxMinutes,
+                minutosRestantes: normalizedRemaining,
+            });
+            updates += 1;
+        }
+    });
+
+    if (updates > 0) {
+        await batch.commit();
+    }
 }
 
 /** Asignar un nuevo bono */
@@ -1101,12 +1157,17 @@ export async function addBonoMinutes(bonoId: string, minutes: number): Promise<v
         const bonoRef = doc(db, 'bonos', bonoId);
         const snap = await transaction.get(bonoRef);
         if (!snap.exists()) throw new Error('Bono no encontrado');
-        const bono = snap.data() as Omit<Bono, 'id'>;
-        const newRemaining = (bono.minutosRestantes ?? 0) + minutes;
+        const bono = snap.data() as BonoData;
+        const maxMinutes = getBonoMaxMinutes(bono);
+        const currentRemaining = getBonoRemainingMinutes(bono);
+        if (currentRemaining >= maxMinutes) {
+            throw new Error('El bono ya esta completo');
+        }
+        const newRemaining = Math.min(currentRemaining + minutes, maxMinutes);
         transaction.update(bonoRef, {
             minutosRestantes: newRemaining,
-            minutosTotales: (bono.minutosTotales ?? 0) + minutes,
-            estado: bono.estado === 'agotado' ? 'activo' : bono.estado,
+            minutosTotales: maxMinutes,
+            estado: newRemaining > 0 ? 'activo' : bono.estado,
         });
     });
 }
@@ -1118,11 +1179,16 @@ export async function deductBonoMinutes(bonoId: string, minutesToDeduct: number,
         const bonoSnap = await transaction.get(bonoRef);
         if (!bonoSnap.exists()) throw new Error('Bono no encontrado');
 
-        const bono = bonoSnap.data() as Omit<Bono, 'id'>;
-        const newRemaining = (bono.minutosRestantes ?? 0) - minutesToDeduct;
+        const bono = bonoSnap.data() as BonoData;
+        const currentRemaining = getBonoRemainingMinutes(bono);
+        if (currentRemaining < minutesToDeduct) {
+            throw new Error('Minutos insuficientes en el bono');
+        }
+        const newRemaining = Math.max(0, currentRemaining - minutesToDeduct);
 
         transaction.update(bonoRef, {
             minutosRestantes: newRemaining,
+            minutosTotales: getBonoMaxMinutes(bono),
             estado: newRemaining <= 0 ? 'agotado' : 'activo',
             historial: arrayUnion(entry),
         });
@@ -1136,7 +1202,7 @@ export async function returnBonoMinutes(bonoId: string, appointmentId: string): 
         const bonoSnap = await transaction.get(bonoRef);
         if (!bonoSnap.exists()) throw new Error('Bono no encontrado');
 
-        const bono = bonoSnap.data() as Omit<Bono, 'id'>;
+        const bono = bonoSnap.data() as BonoData;
 
         // No devolver minutos si el bono está expirado
         if (bono.estado === 'expirado') return;
@@ -1147,10 +1213,12 @@ export async function returnBonoMinutes(bonoId: string, appointmentId: string): 
         const minutesReturned = parseInt(entryToRemove.duracion, 10);
         if (isNaN(minutesReturned)) return; // entrada legacy sin duración válida
 
-        const newRemaining = (bono.minutosRestantes ?? 0) + minutesReturned;
+        const maxMinutes = getBonoMaxMinutes(bono);
+        const newRemaining = Math.min(getBonoRemainingMinutes(bono) + minutesReturned, maxMinutes);
 
         transaction.update(bonoRef, {
             minutosRestantes: newRemaining,
+            minutosTotales: maxMinutes,
             estado: newRemaining > 0 ? 'activo' : bono.estado,
             historial: arrayRemove(entryToRemove),
         });

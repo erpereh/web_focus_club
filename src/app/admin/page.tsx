@@ -127,6 +127,7 @@ import {
   deductBonoMinutes,
   returnBonoMinutes,
   manualDeductBonoMinutes,
+  normalizeActiveBonoLimits,
   recalculateAllBonoExpirations,
   expireOverdueBonos,
   getBrandingConfig,
@@ -960,6 +961,7 @@ export default function AdminPage() {
 
     // Bonos: expirar vencidos y cargar mapa de bonos activos por cliente
     await expireOverdueBonos();
+    await normalizeActiveBonoLimits();
     const activeBonos = await getAllActiveBonos();
     const bonoMap: Record<string, Bono | null> = {};
     for (const bono of activeBonos) {
@@ -2771,7 +2773,12 @@ export default function AdminPage() {
                               <div className="h-1.5 rounded-full bg-muted/30 overflow-hidden max-w-xs">
                                 <div
                                   className="h-full rounded-full bg-gradient-to-r from-[var(--color-accent-val)] to-emerald-bright transition-all"
-                                  style={{ width: `${(getBonoMinutosRestantes(clientBonos[client.uid]!) / getBonoMinutosTotales(clientBonos[client.uid]!)) * 100}%` }}
+                                  style={{
+                                    width: `${Math.min(
+                                      100,
+                                      (getBonoMinutosRestantes(clientBonos[client.uid]!) / getBonoMinutosTotales(clientBonos[client.uid]!)) * 100
+                                    )}%`,
+                                  }}
                                 />
                               </div>
                               <div className="flex flex-wrap gap-2">
@@ -2803,6 +2810,10 @@ export default function AdminPage() {
                                 <button
                                   onClick={async () => {
                                     const bono = clientBonos[client.uid]!;
+                                    if (getBonoMinutosRestantes(bono) >= getBonoMinutosTotales(bono)) {
+                                      alert('Este bono ya esta completo.');
+                                      return;
+                                    }
                                     if (!window.confirm(`¿Añadir 30 min al bono de ${client.name}?`)) return;
                                     try {
                                       await addBonoMinutes(bono.id, 30);
@@ -2810,10 +2821,15 @@ export default function AdminPage() {
                                       await refreshData();
                                     } catch (err) {
                                       console.error('Error adding minutes:', err);
-                                      alert('Error al añadir minutos');
+                                      alert(err instanceof Error ? err.message : 'Error al añadir minutos');
                                     }
                                   }}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)] transition-colors flex items-center gap-1"
+                                  disabled={getBonoMinutosRestantes(clientBonos[client.uid]!) >= getBonoMinutosTotales(clientBonos[client.uid]!)}
+                                  className={cn(
+                                    "px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)] transition-colors flex items-center gap-1",
+                                    getBonoMinutosRestantes(clientBonos[client.uid]!) >= getBonoMinutosTotales(clientBonos[client.uid]!) &&
+                                    "opacity-50 cursor-not-allowed hover:bg-[var(--color-accent-dim)]"
+                                  )}
                                 >
                                   <Plus className="w-3 h-3" /> Añadir 30 min
                                 </button>
