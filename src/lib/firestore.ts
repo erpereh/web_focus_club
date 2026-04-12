@@ -839,11 +839,18 @@ function slotOccupancyId(date: string, time: string): string {
 function getSlotBlocks(startTime: string, durationMinutes: number): string[] {
     const [h, m] = startTime.split(':').map(Number);
     const startTotal = h * 60 + m;
-    const numBlocks = Math.ceil(durationMinutes / 30);
-    return Array.from({ length: numBlocks }, (_, i) => {
-        const total = startTotal + i * 30;
-        return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-    });
+    const numBlocks = Math.ceil(durationMinutes / 15);
+    const blocks = new Set<string>();
+
+    for (let i = 0; i < numBlocks; i += 1) {
+        const total = startTotal + i * 15;
+        const legacyTotal = Math.floor(total / 30) * 30;
+        [total, legacyTotal].forEach((blockTotal) => {
+            blocks.add(`${String(Math.floor(blockTotal / 60)).padStart(2, '0')}:${String(blockTotal % 60).padStart(2, '0')}`);
+        });
+    }
+
+    return Array.from(blocks);
 }
 
 async function incrementSingleSlot(date: string, time: string): Promise<void> {
@@ -1021,16 +1028,50 @@ const DEFAULT_SITE_CONFIG: SiteConfig = {
     bonoExpirationMonths: 1,
 };
 
+const ALLOWED_SLOT_INTERVALS = [30, 45, 60] as const;
+
+function normalizeSlotInterval(value: unknown): number {
+    return ALLOWED_SLOT_INTERVALS.includes(value as 30 | 45 | 60) ? Number(value) : 30;
+}
+
+function normalizeHour(value: unknown, fallback: number): number {
+    const hour = Number(value);
+    if (!Number.isFinite(hour)) return fallback;
+    return Math.max(0, Math.min(23, Math.trunc(hour)));
+}
+
+export function normalizeSiteConfig(config: Partial<SiteConfig> = {}): SiteConfig {
+    let startHour = normalizeHour(config.startHour, DEFAULT_SITE_CONFIG.startHour);
+    let endHour = normalizeHour(config.endHour, DEFAULT_SITE_CONFIG.endHour);
+
+    if (startHour >= endHour) {
+        startHour = DEFAULT_SITE_CONFIG.startHour;
+        endHour = DEFAULT_SITE_CONFIG.endHour;
+    }
+
+    const expirationMonths = Number(config.bonoExpirationMonths ?? DEFAULT_SITE_CONFIG.bonoExpirationMonths);
+
+    return {
+        ...DEFAULT_SITE_CONFIG,
+        ...config,
+        startHour,
+        endHour,
+        slotInterval: normalizeSlotInterval(config.slotInterval ?? config.sessionDuration),
+        bonoExpirationMonths: Number.isFinite(expirationMonths) ? Math.max(1, Math.trunc(expirationMonths)) : 1,
+    };
+}
+
 /**
  * Genera un array de franjas horarias a partir de la configuración.
- * Ej: { startHour: 8, endHour: 20, slotInterval: 30 } → ['08:00', '08:30', '09:00', ..., '20:00']
+ * Ej: { startHour: 8, endHour: 20, slotInterval: 30 } → ['08:00', '08:30', '09:00', ..., '19:30']
  */
 export function generateTimeSlots(config: SiteConfig): string[] {
-    const interval = config.slotInterval ?? config.sessionDuration ?? 30;
+    const normalizedConfig = normalizeSiteConfig(config);
+    const interval = normalizedConfig.slotInterval;
     const slots: string[] = [];
-    const startMinutes = config.startHour * 60;
-    const endMinutes = config.endHour * 60;
-    for (let m = startMinutes; m <= endMinutes; m += interval) {
+    const startMinutes = normalizedConfig.startHour * 60;
+    const endMinutes = normalizedConfig.endHour * 60;
+    for (let m = startMinutes; m < endMinutes; m += interval) {
         const h = Math.floor(m / 60);
         const min = m % 60;
         slots.push(`${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
@@ -1041,11 +1082,45 @@ export function generateTimeSlots(config: SiteConfig): string[] {
 export async function getSiteConfig(): Promise<SiteConfig> {
     const snap = await getDoc(doc(db, 'site_config', 'main'));
     if (!snap.exists()) return { ...DEFAULT_SITE_CONFIG };
-    return { ...DEFAULT_SITE_CONFIG, ...snap.data() } as SiteConfig;
+    return normalizeSiteConfig(snap.data() as Partial<SiteConfig>);
 }
 
 export async function updateSiteConfig(data: Partial<SiteConfig>): Promise<void> {
-    await setDoc(doc(db, 'site_config', 'main'), data, { merge: true });
+    const sanitized: Partial<SiteConfig> = { ...data };
+
+    if ('slotInterval' in data || 'sessionDuration' in data) {
+        sanitized.slotInterval = normalizeSlotInterval(data.slotInterval ?? data.sessionDuration);
+    }
+
+    if ('startHour' in data) {
+        sanitized.startHour = normalizeHour(data.startHour, DEFAULT_SITE_CONFIG.startHour);
+    }
+
+    if ('endHour' in data) {
+        sanitized.endHour = normalizeHour(data.endHour, DEFAULT_SITE_CONFIG.endHour);
+    }
+
+    if ('startHour' in data || 'endHour' in data) {
+        const currentSnap = await getDoc(doc(db, 'site_config', 'main'));
+        const currentConfig = currentSnap.exists()
+            ? normalizeSiteConfig(currentSnap.data() as Partial<SiteConfig>)
+            : DEFAULT_SITE_CONFIG;
+        const nextStartHour = sanitized.startHour ?? currentConfig.startHour;
+        const nextEndHour = sanitized.endHour ?? currentConfig.endHour;
+
+        if (nextStartHour >= nextEndHour) {
+            throw new Error('La hora de inicio debe ser menor que la hora de fin.');
+        }
+    }
+
+    if ('bonoExpirationMonths' in data) {
+        const expirationMonths = Number(data.bonoExpirationMonths ?? DEFAULT_SITE_CONFIG.bonoExpirationMonths);
+        sanitized.bonoExpirationMonths = Number.isFinite(expirationMonths)
+            ? Math.max(1, Math.trunc(expirationMonths))
+            : DEFAULT_SITE_CONFIG.bonoExpirationMonths;
+    }
+
+    await setDoc(doc(db, 'site_config', 'main'), sanitized, { merge: true });
 }
 
 // ============================================

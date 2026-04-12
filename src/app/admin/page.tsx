@@ -116,6 +116,7 @@ import {
   getSiteConfig,
   updateSiteConfig as updateSiteConfigFS,
   generateTimeSlots,
+  normalizeSiteConfig,
   updateAppointmentSlot as updateAppointmentSlotFS,
   getAllActiveBonos,
   getActiveBonoByUser,
@@ -204,6 +205,23 @@ const durationLabels: Record<string, string> = {
   '60': '60 minutos',
   '90': '90 minutos', // legacy
 };
+
+function getCoveredSlotBlocks(startTime: string, durationMinutes: number): string[] {
+  const [h, m] = startTime.split(':').map(Number);
+  const startTotal = h * 60 + m;
+  const numBlocks = Math.ceil(durationMinutes / 15);
+  const blocks = new Set<string>();
+
+  for (let i = 0; i < numBlocks; i += 1) {
+    const total = startTotal + i * 15;
+    const legacyTotal = Math.floor(total / 30) * 30;
+    [total, legacyTotal].forEach((blockTotal) => {
+      blocks.add(`${String(Math.floor(blockTotal / 60)).padStart(2, '0')}:${String(blockTotal % 60).padStart(2, '0')}`);
+    });
+  }
+
+  return Array.from(blocks);
+}
 
 // ─── Sortable Timeline Item (for dnd-kit) ────────────────────────────────────
 function SortableTimelineItem({
@@ -4734,7 +4752,11 @@ export default function AdminPage() {
                               const isSelected = calSelectedDay === day;
                               const dateKey = fmtDate(day);
                               const blockedCount = blockedByDate[dateKey] || 0;
-                              const allBlocked = blockedCount >= timeSlots.length;
+                              const dayBlockedSet = new Set(blockedSlots.filter(s => s.date === dateKey).map(s => s.time));
+                              const allBlocked = timeSlots.length > 0 && timeSlots.every((time) => (
+                                getCoveredSlotBlocks(time, siteConfig.slotInterval ?? 30)
+                                  .some((blockTime) => dayBlockedSet.has(blockTime))
+                              ));
 
                               return (
                                 <button
@@ -4805,8 +4827,13 @@ export default function AdminPage() {
                           {(() => {
                             const dateKey = `${calYear}-${String(calMonth).padStart(2,'0')}-${String(calSelectedDay).padStart(2,'0')}`;
                             const blockedSet = new Set(blockedSlots.filter(s => s.date === dateKey).map(s => s.time));
-                            const allSlotsBlocked = timeSlots.every(t => blockedSet.has(t));
-                            const allPendingOrBlocked = timeSlots.every(t => blockedSet.has(t) || pendingBlocks.has(t));
+                            const blockedSlotInterval = siteConfig.slotInterval ?? 30;
+                            const isSlotBlockedByOverlap = (time: string) => {
+                              const coveredBlocks = getCoveredSlotBlocks(time, blockedSlotInterval);
+                              return coveredBlocks.some((blockTime) => blockedSet.has(blockTime));
+                            };
+                            const allSlotsBlocked = timeSlots.every(t => isSlotBlockedByOverlap(t));
+                            const allPendingOrBlocked = timeSlots.every(t => isSlotBlockedByOverlap(t) || pendingBlocks.has(t));
 
                             return (
                               <>
@@ -4830,7 +4857,7 @@ export default function AdminPage() {
                                         // Select all non-blocked slots
                                         const allNew = new Set<string>();
                                         timeSlots.forEach(t => {
-                                          if (!blockedSet.has(t)) allNew.add(t);
+                                          if (!isSlotBlockedByOverlap(t)) allNew.add(t);
                                         });
                                         setPendingBlocks(allNew);
                                       }
@@ -4861,7 +4888,7 @@ export default function AdminPage() {
                                 {/* Time slots grid */}
                                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2.5">
                                   {timeSlots.map((time) => {
-                                    const isBlocked = blockedSet.has(time);
+                                    const isBlocked = isSlotBlockedByOverlap(time);
                                     const isPending = pendingBlocks.has(time);
                                     const isRangeStart = rangeStart === time;
 
@@ -4879,7 +4906,7 @@ export default function AdminPage() {
                                             const [from, to] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
                                             const newPending = new Set(pendingBlocks);
                                             for (let j = from; j <= to; j++) {
-                                              if (!blockedSet.has(timeSlots[j])) {
+                                              if (!isSlotBlockedByOverlap(timeSlots[j])) {
                                                 newPending.add(timeSlots[j]);
                                               }
                                             }
@@ -5297,6 +5324,7 @@ export default function AdminPage() {
                             className="w-48 px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-[var(--color-text-primary)] focus:border-[var(--color-accent-val)] focus:outline-none"
                           >
                             <option value={30}>30 minutos</option>
+                            <option value={45}>45 minutos</option>
                             <option value={60}>60 minutos</option>
                           </select>
                           <p className="text-xs text-[var(--color-text-secondary)] mt-1">Cada cuánto tiempo empieza un nuevo slot en el calendario.</p>
@@ -5318,12 +5346,14 @@ export default function AdminPage() {
                           onClick={async () => {
                             setSavingConfig(true);
                             try {
-                              await updateSiteConfigFS(editConfig);
-                              setSiteConfig(editConfig);
+                              const normalizedConfig = normalizeSiteConfig(editConfig);
+                              await updateSiteConfigFS(normalizedConfig);
+                              setSiteConfig(normalizedConfig);
+                              setEditConfig(normalizedConfig);
                               await addActivityLog({
                                 action: 'site_config_updated',
                                 adminEmail: user?.email || 'unknown',
-                                details: `Horario: ${editConfig.startHour}:00-${editConfig.endHour}:00, Intervalo: ${editConfig.slotInterval ?? 30}min`,
+                                details: `Horario: ${normalizedConfig.startHour}:00-${normalizedConfig.endHour}:00, Intervalo: ${normalizedConfig.slotInterval}min`,
                               });
                             } catch (err) {
                               console.error('Error saving config:', err);
@@ -5374,7 +5404,7 @@ export default function AdminPage() {
                             ))}
                           </div>
                           <p className="text-xs text-[var(--color-text-secondary)]">
-                            Total: {generateTimeSlots(editConfig).length} franjas &middot; Cada {editConfig.slotInterval ?? 30} min &middot; De {String(editConfig.startHour).padStart(2, '0')}:00 a {String(editConfig.endHour).padStart(2, '0')}:00
+                            Total: {generateTimeSlots(editConfig).length} franjas &middot; Cada {editConfig.slotInterval ?? 30} min &middot; De {String(editConfig.startHour).padStart(2, '0')}:00 hasta antes de {String(editConfig.endHour).padStart(2, '0')}:00
                           </p>
                         </>
                       ) : (
@@ -6054,7 +6084,8 @@ export default function AdminPage() {
                                 >
                                   <option value="">Seleccionar hora</option>
                                   {timeSlots.map((t) => {
-                                    const isBlocked = blockedTimes.has(t);
+                                    const appointmentDuration = parseInt(appt?.duration || String(siteConfig.slotInterval ?? 30), 10);
+                                    const isBlocked = getCoveredSlotBlocks(t, appointmentDuration).some((blockTime) => blockedTimes.has(blockTime));
                                     const isOccupied = occupiedTimes.has(t);
                                     const isUnavailable = isBlocked || isOccupied;
                                     const label = isBlocked ? `${t} — Bloqueada` : isOccupied ? `${t} — Ocupada` : t;

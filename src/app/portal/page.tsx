@@ -265,11 +265,14 @@ export default function PortalPage() {
         const dur = parseInt(a.duration || '60', 10);
         const [h, m] = slot.time.split(':').map(Number);
         const startTotal = h * 60 + m;
-        const numBlocks = Math.ceil(dur / 30);
+        const numBlocks = Math.ceil(dur / 15);
         for (let i = 0; i < numBlocks; i++) {
-          const total = startTotal + i * 30;
-          const blockTime = `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-          keys.add(`${slot.date}_${blockTime}`);
+          const total = startTotal + i * 15;
+          const legacyTotal = Math.floor(total / 30) * 30;
+          [total, legacyTotal].forEach((blockTotal) => {
+            const blockTime = `${String(Math.floor(blockTotal / 60)).padStart(2, '0')}:${String(blockTotal % 60).padStart(2, '0')}`;
+            keys.add(`${slot.date}_${blockTime}`);
+          });
         }
       });
     return keys;

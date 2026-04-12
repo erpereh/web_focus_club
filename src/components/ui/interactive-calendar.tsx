@@ -14,6 +14,8 @@ import type { BlockedSlot, TimeSlot, SiteConfig } from '@/types';
 interface SlotStatus {
   occupancy: number;       // 0, 1, o 2
   isBlocked: boolean;
+  isBlockedExact?: boolean;
+  isBlockedByOverlap?: boolean;
   blockReason?: string;
 }
 
@@ -86,11 +88,18 @@ function isPastTime(year: number, month: number, day: number, time: string): boo
 function getCalendarSlotBlocks(startTime: string, durationMinutes: number): string[] {
   const [h, m] = startTime.split(':').map(Number);
   const startTotal = h * 60 + m;
-  const numBlocks = Math.ceil(durationMinutes / 30);
-  return Array.from({ length: numBlocks }, (_, i) => {
-    const total = startTotal + i * 30;
-    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-  });
+  const numBlocks = Math.ceil(durationMinutes / 15);
+  const blocks = new Set<string>();
+
+  for (let i = 0; i < numBlocks; i += 1) {
+    const total = startTotal + i * 15;
+    const legacyTotal = Math.floor(total / 30) * 30;
+    [total, legacyTotal].forEach((blockTotal) => {
+      blocks.add(`${String(Math.floor(blockTotal / 60)).padStart(2, '0')}:${String(blockTotal % 60).padStart(2, '0')}`);
+    });
+  }
+
+  return Array.from(blocks);
 }
 
 // ============================================
@@ -192,9 +201,15 @@ export function InteractiveCalendar({
   function getSlotStatus(day: number, time: string): SlotStatus {
     const dateKey = formatDateKey(currentYear, currentMonth, day);
     const slotKey = `${dateKey}_${time}`;
+    const coveredBlocks = getCalendarSlotBlocks(time, selectedDuration);
+    const isBlockedExact = blockedSet.has(slotKey);
+    const isBlockedByOverlap = coveredBlocks.some((blockTime) => blockedSet.has(`${dateKey}_${blockTime}`));
+
     return {
       occupancy: occupancy[slotKey] || 0,
-      isBlocked: blockedSet.has(slotKey),
+      isBlocked: isBlockedExact || isBlockedByOverlap,
+      isBlockedExact,
+      isBlockedByOverlap: !isBlockedExact && isBlockedByOverlap,
     };
   }
 
