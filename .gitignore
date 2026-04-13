@@ -60,9 +60,14 @@ firebase-debug.*.log
 /skills/
 
 # AI tools config (contains local paths)
+.mcp.json
 opencode.json
 skills-lock.json
 .agents/
+
+# Internal docs and non-deployed local services
+/docs/
+/mini-services/
 
 # Database files
 *.db

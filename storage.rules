@@ -6,8 +6,50 @@ service firebase.storage {
       return request.auth != null && request.auth.token.email_verified == true;
     }
 
+    function isAdmin() {
+      return isVerified()
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isOwner(uid) {
+      return isVerified() && request.auth.uid == uid;
+    }
+
+    function isImageUnder(maxBytes) {
+      return request.resource != null
+        && request.resource.size <= maxBytes
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    function isMediaUnder(maxBytes) {
+      return request.resource != null
+        && request.resource.size <= maxBytes
+        && (
+          request.resource.contentType.matches('image/.*')
+          || request.resource.contentType.matches('video/.*')
+        );
+    }
+
+    match /public/{allPaths=**} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isMediaUnder(50 * 1024 * 1024);
+      allow delete: if isAdmin();
+    }
+
+    match /media/{allPaths=**} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isMediaUnder(50 * 1024 * 1024);
+      allow delete: if isAdmin();
+    }
+
+    match /user-avatars/{uid}/{fileName} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create, update: if isOwner(uid) && isImageUnder(5 * 1024 * 1024);
+      allow delete: if isOwner(uid) || isAdmin();
+    }
+
     match /{allPaths=**} {
-      allow read, write: if isVerified();
+      allow read, write: if false;
     }
   }
 }

@@ -7,13 +7,8 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if (isVerified() && request.auth.uid == uid) || isAdmin();
       // Registration creates the profile before email verification.
-      allow create: if isSignedIn() && request.auth.uid == uid;
-      // A verified user can update their own profile, but not their role.
-      allow update: if (
-        isVerified()
-        && request.auth.uid == uid
-        && (!('role' in request.resource.data) || request.resource.data.role == resource.data.role)
-      ) || isAdmin();
+      allow create: if createsOwnUserProfile(uid) || isAdmin();
+      allow update: if (isVerified() && request.auth.uid == uid && onlyOwnUserProfileFieldsChanged()) || isAdmin();
       allow delete: if isAdmin();
     }
 
@@ -24,6 +19,7 @@ service cloud.firestore {
           isVerified()
           && request.resource.data.userId == request.auth.uid
           && request.resource.data.status == 'pending'
+          && isValidUserAppointmentCreate()
         );
 
       allow read: if (isVerified() && resource.data.userId == request.auth.uid)
@@ -64,7 +60,7 @@ service cloud.firestore {
     // TESTIMONIALS
     match /testimonials/{testimonialId} {
       allow read: if true;
-      allow create: if isVerified();
+      allow create: if isAdmin() || (isVerified() && isValidUserTestimonialCreate());
       allow update, delete: if isAdmin();
     }
 
@@ -146,6 +142,39 @@ service cloud.firestore {
     function onlyTrainerNotesChanged() {
       let diff = request.resource.data.diff(resource.data);
       return diff.affectedKeys().hasOnly(['trainerNotes', 'updatedAt']);
+    }
+
+    function createsOwnUserProfile(uid) {
+      return isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role == 'user'
+        && (!('isTrainer' in request.resource.data) || request.resource.data.isTrainer == false)
+        && request.resource.data.keys().hasOnly(['uid', 'email', 'name', 'phone', 'role', 'isTrainer', 'photoURL', 'createdAt']);
+    }
+
+    function onlyOwnUserProfileFieldsChanged() {
+      let diff = request.resource.data.diff(resource.data);
+      return diff.affectedKeys().hasOnly(['name', 'phone', 'photoURL']);
+    }
+
+    function isValidUserAppointmentCreate() {
+      return request.resource.data.keys().hasOnly(['userId', 'name', 'email', 'phone', 'serviceType', 'duration', 'preferredSlots', 'reason', 'status', 'createdAt'])
+        && request.resource.data.keys().hasAll(['userId', 'name', 'email', 'phone', 'serviceType', 'duration', 'preferredSlots', 'reason', 'status', 'createdAt'])
+        && request.resource.data.duration in ['30', '45', '60']
+        && request.resource.data.preferredSlots is list
+        && request.resource.data.preferredSlots.size() == 1;
+    }
+
+    function isValidUserTestimonialCreate() {
+      return request.resource.data.keys().hasOnly(['name', 'role', 'content', 'rating', 'image', 'source', 'approved'])
+        && request.resource.data.keys().hasAll(['name', 'role', 'content', 'rating', 'approved'])
+        && request.resource.data.approved == false
+        && (!('source' in request.resource.data) || request.resource.data.source == 'manual')
+        && request.resource.data.rating is number
+        && request.resource.data.rating >= 1
+        && request.resource.data.rating <= 5;
     }
   }
 }

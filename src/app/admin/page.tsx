@@ -61,7 +61,6 @@ import {
 } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
-import { ImageUpload } from '@/components/ui/ImageUpload';
 import { ContextualImageManager } from '@/components/ui/ContextualImageManager';
 import { GalleryManager } from '@/components/admin/GalleryManager';
 import { MediaPicker } from '@/components/admin/MediaPicker';
