@@ -307,7 +307,6 @@ export default function GaleriaClient({
     .filter((r) => r.active !== false)
     .map((r, i) => ({
       ...r,
-      image: `/imagenes/inventadas/resultado-${i + 1}.svg`,
       metric: r.metric ?? '',
       period: r.period ?? '',
       label: r.label ?? '',
@@ -383,9 +382,6 @@ export default function GaleriaClient({
               <motion.div key={r.name + i} className="flip-card h-80" initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: '-50px' }} transition={{ duration: 0.6, delay: i * 0.12 }}>
                 <div className="flip-card-inner w-full h-full">
                   <div className="flip-card-front glass-card flex flex-col items-center justify-center p-6 text-center">
-                    <div className="w-16 h-16 rounded-2xl overflow-hidden mb-4 border border-[var(--color-accent-border)]">
-                      <Image src={r.image} alt={r.name} width={64} height={64} unoptimized className="w-full h-full object-cover" />
-                    </div>
                     <div className="text-4xl font-black text-[var(--color-accent-val)] mb-1">{r.metric}</div>
                     <div className="text-[var(--color-text-secondary)] text-sm mb-3">{r.period}</div>
                     <div className="text-[var(--color-text-primary)] font-bold text-base mb-1">{r.name}</div>
