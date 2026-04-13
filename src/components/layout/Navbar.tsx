@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { Menu, X, User, LogOut, Settings } from 'lucide-react';
+import { Menu, X, User, LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { useAuth } from '@/contexts/AuthContext';
@@ -109,11 +109,13 @@ export function Navbar() {
           <div className="hidden md:flex items-center gap-3">
             {user && userProfile ? (
               <>
-                <Link href={isAdmin ? '/admin' : '/portal'}>
-                  <PremiumButton variant="outline" size="sm" icon={<User className="w-4 h-4" />}>
-                    {isAdmin ? 'Panel Admin' : 'Mi Cuenta'}
-                  </PremiumButton>
-                </Link>
+                {!isAdmin && (
+                  <Link href="/portal">
+                    <PremiumButton variant="outline" size="sm" icon={<User className="w-4 h-4" />}>
+                      Mi Cuenta
+                    </PremiumButton>
+                  </Link>
+                )}
                 <button
                   onClick={() => logout()}
                   className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors duration-300"
@@ -123,18 +125,11 @@ export function Navbar() {
                 </button>
               </>
             ) : (
-              <>
-                <Link href="/portal">
-                  <PremiumButton variant="outline" size="sm" icon={<User className="w-4 h-4" />}>
-                    Portal
-                  </PremiumButton>
-                </Link>
-                <Link href="/admin">
-                  <PremiumButton variant="ghost" size="sm" icon={<Settings className="w-4 h-4" />}>
-                    Admin
-                  </PremiumButton>
-                </Link>
-              </>
+              <Link href="/portal">
+                <PremiumButton variant="outline" size="sm" icon={<User className="w-4 h-4" />}>
+                  Portal
+                </PremiumButton>
+              </Link>
             )}
           </div>
 
@@ -178,11 +173,13 @@ export function Navbar() {
 
                 {user && userProfile ? (
                   <>
-                    <Link href={isAdmin ? '/admin' : '/portal'} onClick={() => setIsOpen(false)}>
-                      <PremiumButton variant="outline" size="sm" className="w-full" icon={<User className="w-4 h-4" />}>
-                        {isAdmin ? 'Panel Admin' : `Mi Cuenta (${userProfile.name.split(' ')[0]})`}
-                      </PremiumButton>
-                    </Link>
+                    {!isAdmin && (
+                      <Link href="/portal" onClick={() => setIsOpen(false)}>
+                        <PremiumButton variant="outline" size="sm" className="w-full" icon={<User className="w-4 h-4" />}>
+                          {`Mi Cuenta (${userProfile.name.split(' ')[0]})`}
+                        </PremiumButton>
+                      </Link>
+                    )}
                     <PremiumButton
                       variant="ghost"
                       size="sm"
@@ -197,18 +194,11 @@ export function Navbar() {
                     </PremiumButton>
                   </>
                 ) : (
-                  <>
-                    <Link href="/portal" onClick={() => setIsOpen(false)}>
-                      <PremiumButton variant="outline" size="sm" className="w-full" icon={<User className="w-4 h-4" />}>
-                        Portal Cliente
-                      </PremiumButton>
-                    </Link>
-                    <Link href="/admin" onClick={() => setIsOpen(false)}>
-                      <PremiumButton variant="ghost" size="sm" className="w-full" icon={<Settings className="w-4 h-4" />}>
-                        Admin
-                      </PremiumButton>
-                    </Link>
-                  </>
+                  <Link href="/portal" onClick={() => setIsOpen(false)}>
+                    <PremiumButton variant="outline" size="sm" className="w-full" icon={<User className="w-4 h-4" />}>
+                      Portal Cliente
+                    </PremiumButton>
+                  </Link>
                 )}
               </div>
             </div>

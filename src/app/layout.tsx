@@ -1,14 +1,8 @@
 import type { Metadata } from "next";
 import { GeistSans } from "geist/font/sans";
 import "./globals.css";
-import { Toaster } from "@/components/ui/toaster";
-import { Navbar } from "@/components/layout/Navbar";
-import { Footer } from "@/components/layout/Footer";
-import { FloatingWhatsApp } from "@/components/layout/FloatingWhatsApp";
-import { CookieConsent } from "@/components/layout/CookieConsent";
 import { Providers } from "./providers";
-import { AmbientBackground } from "@/components/layout/AmbientBackground";
-import { ScrollProgressBar } from "@/components/layout/ScrollProgressBar";
+import { AppShell } from "@/components/layout/AppShell";
 
 export const metadata: Metadata = {
   title: "Focus Club Vallecas | Entrenamiento Personal y Bienestar en Madrid",
@@ -56,16 +50,7 @@ export default function RootLayout({
         className={`${GeistSans.variable} antialiased bg-background text-foreground min-h-screen flex flex-col`}
       >
         <Providers>
-          <AmbientBackground />
-          <ScrollProgressBar />
-          <Navbar />
-          <main className="flex-1 pt-20">
-            {children}
-          </main>
-          <Footer />
-          <FloatingWhatsApp />
-          <CookieConsent />
-          <Toaster />
+          <AppShell>{children}</AppShell>
         </Providers>
       </body>
     </html>

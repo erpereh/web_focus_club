@@ -1291,6 +1291,7 @@ const DEFAULT_SITE_CONFIG: SiteConfig = {
     endHour: 20,
     slotInterval: 30,
     bonoExpirationMonths: 1,
+    maintenanceMode: false,
 };
 
 const ALLOWED_SLOT_INTERVALS = [30, 45, 60] as const;
@@ -1323,6 +1324,7 @@ export function normalizeSiteConfig(config: Partial<SiteConfig> = {}): SiteConfi
         endHour,
         slotInterval: normalizeSlotInterval(config.slotInterval ?? config.sessionDuration),
         bonoExpirationMonths: Number.isFinite(expirationMonths) ? Math.max(1, Math.trunc(expirationMonths)) : 1,
+        maintenanceMode: Boolean(config.maintenanceMode),
     };
 }
 
@@ -1396,6 +1398,10 @@ export async function updateSiteConfig(data: Partial<SiteConfig>): Promise<void>
         sanitized.bonoExpirationMonths = Number.isFinite(expirationMonths)
             ? Math.max(1, Math.trunc(expirationMonths))
             : DEFAULT_SITE_CONFIG.bonoExpirationMonths;
+    }
+
+    if ('maintenanceMode' in data) {
+        sanitized.maintenanceMode = Boolean(data.maintenanceMode);
     }
 
     await setDoc(doc(db, 'site_config', 'main'), sanitized, { merge: true });

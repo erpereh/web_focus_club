@@ -30,6 +30,7 @@ import {
   Users,
   TrendingUp,
   AlertCircle,
+  AlertTriangle,
   Plus,
   Star,
   Image as ImageIcon,
@@ -926,9 +927,11 @@ export default function AdminPage() {
   const [clientSearch, setClientSearch] = useState('');
 
   // Site config (dynamic time slots)
-  const [siteConfig, setSiteConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, slotInterval: 30, bonoExpirationMonths: 1 });
-  const [editConfig, setEditConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, slotInterval: 30, bonoExpirationMonths: 1 });
+  const [siteConfig, setSiteConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, slotInterval: 30, bonoExpirationMonths: 1, maintenanceMode: false });
+  const [editConfig, setEditConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, slotInterval: 30, bonoExpirationMonths: 1, maintenanceMode: false });
   const [savingConfig, setSavingConfig] = useState(false);
+  const [maintenanceConfirmValue, setMaintenanceConfirmValue] = useState<boolean | null>(null);
+  const [savingMaintenance, setSavingMaintenance] = useState(false);
   const timeSlots = generateTimeSlots(siteConfig);
 
   // Bonos
@@ -5448,8 +5451,17 @@ export default function AdminPage() {
                           onClick={async () => {
                             setSavingConfig(true);
                             try {
-                              const normalizedConfig = normalizeSiteConfig(editConfig);
-                              await updateSiteConfigFS(normalizedConfig);
+                              const normalizedConfig = normalizeSiteConfig({
+                                ...siteConfig,
+                                startHour: editConfig.startHour,
+                                endHour: editConfig.endHour,
+                                slotInterval: editConfig.slotInterval,
+                              });
+                              await updateSiteConfigFS({
+                                startHour: normalizedConfig.startHour,
+                                endHour: normalizedConfig.endHour,
+                                slotInterval: normalizedConfig.slotInterval,
+                              });
                               setSiteConfig(normalizedConfig);
                               setEditConfig(normalizedConfig);
                               await addActivityLog({
@@ -5603,6 +5615,41 @@ export default function AdminPage() {
                         </div>
                       </div>
                     </GlassCard>
+
+                    <GlassCard className="p-6 lg:col-span-2">
+                      <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <div className="flex items-center gap-3 mb-2">
+                            <AlertTriangle className="w-5 h-5 text-[var(--color-accent-val)]" />
+                            <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Modo Mantenimiento</h2>
+                          </div>
+                          <p className="text-sm text-[var(--color-text-secondary)] max-w-3xl">
+                            Bloquea temporalmente la web pública y el portal de clientes con una pantalla de mantenimiento. El panel de administración seguirá disponible desde la URL <span className="text-[var(--color-text-primary)] font-medium">/admin</span>.
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setMaintenanceConfirmValue(!siteConfig.maintenanceMode)}
+                          disabled={savingMaintenance}
+                          className={cn(
+                            'px-5 py-2.5 rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed',
+                            siteConfig.maintenanceMode
+                              ? 'bg-amber-500/15 text-amber-300 border border-amber-400/30 hover:bg-amber-500/20'
+                              : 'bg-[var(--color-accent-val)] text-[var(--color-bg-base)] hover:shadow-lg hover:shadow-emerald/25'
+                          )}
+                        >
+                          {siteConfig.maintenanceMode ? 'Desactivar mantenimiento' : 'Activar mantenimiento'}
+                        </button>
+                      </div>
+
+                      <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <p className="text-sm font-medium text-[var(--color-text-primary)] mb-1">Estado actual</p>
+                        <p className={cn('text-sm', siteConfig.maintenanceMode ? 'text-amber-300' : 'text-emerald-300')}>
+                          {siteConfig.maintenanceMode ? 'Mantenimiento activado' : 'Sitio operativo'}
+                        </p>
+                      </div>
+                    </GlassCard>
                   </div>
                 </motion.div>
               )}
@@ -5618,6 +5665,97 @@ export default function AdminPage() {
                   onSelect={activeImageManager.onSelect}
                   onClose={() => setActiveImageManager(null)}
                 />
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {maintenanceConfirmValue !== null && (
+                <motion.div
+                  key="maintenance-confirm-modal"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+                  onClick={() => !savingMaintenance && setMaintenanceConfirmValue(null)}
+                >
+                  <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full max-w-lg"
+                  >
+                    <GlassCard className="p-6">
+                      <div className="flex items-start gap-4">
+                        <div className={cn(
+                          'w-12 h-12 rounded-2xl flex items-center justify-center shrink-0',
+                          maintenanceConfirmValue ? 'bg-amber-500/15 text-amber-300' : 'bg-emerald-500/15 text-emerald-300'
+                        )}>
+                          <AlertTriangle className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-2">
+                            {maintenanceConfirmValue ? 'Activar modo mantenimiento' : 'Desactivar modo mantenimiento'}
+                          </h2>
+                          <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
+                            {maintenanceConfirmValue
+                              ? 'La web pública y el portal de clientes mostrarán la pantalla de mantenimiento. El admin seguirá accesible desde /admin.'
+                              : 'La web pública y el portal de clientes volverán a estar disponibles inmediatamente.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-6 flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
+                        <button
+                          type="button"
+                          disabled={savingMaintenance}
+                          onClick={() => setMaintenanceConfirmValue(null)}
+                          className="px-5 py-2.5 rounded-xl border border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-white/20 transition-colors disabled:opacity-50"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={savingMaintenance}
+                          onClick={async () => {
+                            const nextMaintenanceMode = maintenanceConfirmValue;
+                            setSavingMaintenance(true);
+                            try {
+                              await updateSiteConfigFS({ maintenanceMode: nextMaintenanceMode });
+                              setSiteConfig(prev => ({ ...prev, maintenanceMode: nextMaintenanceMode }));
+                              setEditConfig(prev => ({ ...prev, maintenanceMode: nextMaintenanceMode }));
+                              await addActivityLog({
+                                action: 'maintenance_mode_updated',
+                                adminEmail: user?.email || 'unknown',
+                                details: nextMaintenanceMode ? 'Modo mantenimiento activado' : 'Modo mantenimiento desactivado',
+                              });
+                              const t = toast({
+                                title: nextMaintenanceMode ? 'Mantenimiento activado' : 'Mantenimiento desactivado',
+                                description: nextMaintenanceMode ? 'La web pública queda protegida temporalmente.' : 'La web pública vuelve a estar disponible.',
+                              });
+                              setTimeout(() => t.dismiss(), 3500);
+                              setMaintenanceConfirmValue(null);
+                            } catch (err) {
+                              console.error('Error updating maintenance mode:', err);
+                              alert('Error al actualizar el modo mantenimiento');
+                            } finally {
+                              setSavingMaintenance(false);
+                            }
+                          }}
+                          className={cn(
+                            'px-5 py-2.5 rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2',
+                            maintenanceConfirmValue
+                              ? 'bg-amber-400 text-black hover:bg-amber-300'
+                              : 'bg-[var(--color-accent-val)] text-[var(--color-bg-base)] hover:shadow-lg hover:shadow-emerald/25'
+                          )}
+                        >
+                          {savingMaintenance && <RefreshCw className="w-4 h-4 animate-spin" />}
+                          Confirmar
+                        </button>
+                      </div>
+                    </GlassCard>
+                  </motion.div>
+                </motion.div>
               )}
             </AnimatePresence>
 
@@ -6422,6 +6560,3 @@ export default function AdminPage() {
     </div >
   );
 }
-
-
-
