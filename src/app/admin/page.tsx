@@ -2016,14 +2016,6 @@ export default function AdminPage() {
                 <PremiumButton
                   variant="ghost"
                   size="sm"
-                  icon={<RefreshCw className="w-4 h-4" />}
-                  onClick={() => refreshTrainerData()}
-                >
-                  <span className="hidden sm:inline">Actualizar</span>
-                </PremiumButton>
-                <PremiumButton
-                  variant="ghost"
-                  size="sm"
                   onClick={() => logout()}
                   icon={<LogOut className="w-4 h-4" />}
                 >
