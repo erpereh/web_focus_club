@@ -14,13 +14,7 @@ service cloud.firestore {
 
     // APPOINTMENTS
     match /appointments/{appointmentId} {
-      allow create: if isAdmin()
-        || (
-          isVerified()
-          && request.resource.data.userId == request.auth.uid
-          && request.resource.data.status == 'pending'
-          && isValidUserAppointmentCreate()
-        );
+      allow create: if isAdmin();
 
       allow read: if (isVerified() && resource.data.userId == request.auth.uid)
         || isAdmin()

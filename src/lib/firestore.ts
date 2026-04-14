@@ -18,8 +18,9 @@ import {
     arrayRemove,
     onSnapshot,
 } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
-import { db, storage } from './firebase';
+import { db, storage, functions as firebaseFunctions } from './firebase';
 import { v4 as uuidv4 } from 'uuid';
 import type {
     UserProfile,
@@ -607,6 +608,20 @@ export async function addAppointment(
         createdAt: new Date().toISOString(),
     });
     return docRef.id;
+}
+
+export async function createAppointmentSecure(input: {
+    duration: '30' | '45' | '60';
+    preferredSlot: TimeSlot;
+    reason: string;
+}): Promise<string> {
+    const callable = httpsCallable<
+        { duration: '30' | '45' | '60'; preferredSlot: TimeSlot; reason: string },
+        { appointmentId: string }
+    >(firebaseFunctions, 'createAppointment');
+
+    const result = await callable(input);
+    return result.data.appointmentId;
 }
 
 export async function updateAppointmentStatus(

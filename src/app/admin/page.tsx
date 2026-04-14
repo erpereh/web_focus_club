@@ -157,32 +157,6 @@ const DEFAULT_HERO_STATS: HeroStat[] = [
   { icon: 'Heart', value: '100%', label: 'Compromiso' },
 ];
 
-// --- Make.com Webhook ---
-const WEBHOOK_URL = 'https://hook.eu1.make.com/rnc4rpwq70l52h69qm8m21ekafbffcql';
-
-async function sendWebhook(payload: {
-  action: 'confirmed' | 'deleted';
-  customerName: string;
-  customerEmail: string;
-  date: string;
-  time: string;
-  sessionType: string;
-  trainerName: string;
-}) {
-  try {
-    console.log('[Webhook] Sending:', payload);
-    const res = await fetch(WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    console.log('[Webhook] Response status:', res.status);
-  } catch (err) {
-    console.error('[Webhook] Failed:', err);
-  }
-}
-
-
 type TabType = 'Inicio' | 'appointments' | 'availability' | 'clients' | 'team' | 'testimonials' | 'Hero' | 'Sandra' | 'Centro' | 'Servicios' | 'Galeria' | 'Contacto' | 'Footer' | 'config';
 type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
 
@@ -2694,17 +2668,6 @@ export default function AdminPage() {
                                   icon={<Trash2 className="w-4 h-4" />}
                                   onClick={async () => {
                                     if (confirm('¿Estás seguro de eliminar esta cita?')) {
-                                      // Webhook BEFORE delete — data still available
-                                      const trainerObj = trainers.find(t => t.id === appointment.assignedTrainer);
-                                      await sendWebhook({
-                                        action: 'deleted',
-                                        customerName: appointment.name,
-                                        customerEmail: appointment.email,
-                                        date: appointment.approvedSlot?.date || appointment.preferredSlots?.[0]?.date || '',
-                                        time: appointment.approvedSlot?.time || appointment.preferredSlots?.[0]?.time || '',
-                                        sessionType: appointment.sessionType || '',
-                                        trainerName: trainerObj?.name || '',
-                                      });
                                       // Decrement slot_occupancy if appointment was approved
                                       if (appointment.status === 'approved') {
                                         const slot = appointment.approvedSlot || appointment.preferredSlots?.[0];
@@ -5147,17 +5110,6 @@ export default function AdminPage() {
                                                 return matchesPreferred || matchesApproved;
                                               });
                                               for (const appt of toDelete) {
-                                                // Webhook BEFORE delete — data still available
-                                                const trainerObj = trainers.find(t => t.id === appt.assignedTrainer);
-                                                await sendWebhook({
-                                                  action: 'deleted',
-                                                  customerName: appt.name,
-                                                  customerEmail: appt.email,
-                                                  date: appt.approvedSlot?.date || appt.preferredSlots?.[0]?.date || '',
-                                                  time: appt.approvedSlot?.time || appt.preferredSlots?.[0]?.time || '',
-                                                  sessionType: appt.sessionType || '',
-                                                  trainerName: trainerObj?.name || '',
-                                                });
                                                 // Decrement slot_occupancy for approved appointments before deleting
                                                 if (appt.status === 'approved' && appt.approvedSlot) {
                                                   await decrementSlotOccupancy(appt.approvedSlot.date, appt.approvedSlot.time, parseInt(appt.duration, 10));
@@ -6217,19 +6169,6 @@ export default function AdminPage() {
                               extra.approvedSlot = appt.preferredSlots[0];
                             }
                             await handleStatusUpdate(selectedAppointmentId, 'approved', extra);
-                            // Webhook after approval — data is still in Firestore
-                            if (appt) {
-                              const trainerObj = trainers.find(t => t.id === (extra.assignedTrainer || appt.assignedTrainer));
-                              await sendWebhook({
-                                action: 'confirmed',
-                                customerName: appt.name,
-                                customerEmail: appt.email,
-                                date: extra.approvedSlot?.date || appt.preferredSlots?.[0]?.date || '',
-                                time: extra.approvedSlot?.time || appt.preferredSlots?.[0]?.time || '',
-                                sessionType: extra.sessionType || appt.serviceType || '',
-                                trainerName: trainerObj?.name || '',
-                              });
-                            }
                           }}
                         >
                           Confirmar Aprobación

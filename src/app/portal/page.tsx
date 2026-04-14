@@ -47,7 +47,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import type { TimeSlot, Appointment, Bono, Trainer } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import {
-  addAppointment as addAppointmentFS,
+  createAppointmentSecure,
   getAppointmentsByUser,
   getActiveBonoByUser,
   updateUserProfile,
@@ -158,6 +158,7 @@ export default function PortalPage() {
     reason: '',
   });
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   // Obtener citas del usuario desde Firestore
   const [userAppointments, setUserAppointments] = useState<Appointment[]>([]);
@@ -184,8 +185,6 @@ export default function PortalPage() {
   const [profilePhotoRemoved, setProfilePhotoRemoved] = useState(false);
 
   // Etiqueta del servicio derivada del bono activo
-  const bonoServiceLabel = activeBono ? 'Bono Mensual de Entrenamiento' : '';
-
   useEffect(() => {
     if (!user || !user.emailVerified) {
       setUserAppointments([]);
@@ -478,6 +477,7 @@ export default function PortalPage() {
 
   const handleSubmitAppointment = async () => {
     if (!user || !userProfile || !formData.preferredSlot) return;
+    setSubmitError('');
 
     // Verificar bono activo con minutos suficientes para la duración elegida
     const currentBono = await getActiveBonoByUser(user.uid);
@@ -492,14 +492,9 @@ export default function PortalPage() {
     }
 
     try {
-      await addAppointmentFS({
-        userId: user.uid,
-        name: userProfile.name,
-        email: userProfile.email,
-        phone: userProfile.phone || '',
-        serviceType: bonoServiceLabel,
+      await createAppointmentSecure({
         duration: formData.duration,
-        preferredSlots: [formData.preferredSlot],
+        preferredSlot: formData.preferredSlot,
         reason: formData.reason,
       });
 
@@ -510,6 +505,7 @@ export default function PortalPage() {
       setSubmitSuccess(true);
       setTimeout(() => {
         setSubmitSuccess(false);
+        setSubmitError('');
         setFormData({
           serviceType: '',
           duration: '60',
@@ -520,6 +516,10 @@ export default function PortalPage() {
       }, 2000);
     } catch (error) {
       console.error('Error al crear cita:', error);
+      const message = error instanceof Error && error.message
+        ? error.message
+        : 'No se pudo enviar la solicitud. Inténtalo de nuevo en unos minutos.';
+      setSubmitError(message);
     }
   };
 
@@ -1618,8 +1618,11 @@ export default function PortalPage() {
                     </GlassCard>
 
                     {/* Botones */}
+                    {submitError && (
+                      <p className="text-sm text-red-400">{submitError}</p>
+                    )}
                     <div className="flex gap-3">
-                      <PremiumButton variant="ghost" onClick={() => setShowReservaDrawer(false)} className="flex-1">
+                      <PremiumButton variant="ghost" onClick={() => { setSubmitError(''); setShowReservaDrawer(false); }} className="flex-1">
                         Cancelar
                       </PremiumButton>
                       <PremiumButton
