@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Clock, Users, Lock, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { generateTimeSlots, subscribeMonthAvailability, subscribeSiteConfig } from '@/lib/firestore';
+import { doesSessionFitWithinSchedule, generateTimeSlots, subscribeMonthAvailability, subscribeSiteConfig } from '@/lib/firestore';
 import type { BlockedSlot, TimeSlot, SiteConfig } from '@/types';
 
 // ============================================
@@ -44,6 +44,13 @@ const MONTH_NAMES = [
 ];
 
 const MAX_CAPACITY = 2;
+const DEFAULT_SITE_CONFIG: SiteConfig = {
+  startHour: 8,
+  endHour: 20,
+  slotInterval: 30,
+  bonoExpirationMonths: 1,
+  maintenanceMode: false,
+};
 
 // ============================================
 // HELPERS
@@ -122,6 +129,7 @@ export function InteractiveCalendar({
   const [loading, setLoading] = useState(true);
   const [fullMessage, setFullMessage] = useState<string | null>(null);
   const [timeSlots, setTimeSlots] = useState<string[]>([]);
+  const [siteConfig, setSiteConfig] = useState<SiteConfig>(DEFAULT_SITE_CONFIG);
 
   // Set de franjas bloqueadas para lookup rápido
   const blockedSet = useMemo(() => {
@@ -155,7 +163,7 @@ export function InteractiveCalendar({
   useEffect(() => {
     const unsubscribe = subscribeSiteConfig(
       (config) => {
-        setTimeSlots(generateTimeSlots(config));
+        setSiteConfig(config);
       },
       (err) => {
         console.error('Error cargando configuraciÃ³n de franjas:', err);
@@ -164,6 +172,10 @@ export function InteractiveCalendar({
 
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    setTimeSlots(generateTimeSlots(siteConfig, selectedDuration));
+  }, [siteConfig, selectedDuration]);
 
   // Reset día seleccionado al cambiar de mes
   // Auto-dismiss del mensaje de "sesión completa"
@@ -258,6 +270,11 @@ export function InteractiveCalendar({
     // Si está seleccionada, deseleccionar
     if (selectedSlot && selectedSlot.date === dateStr && selectedSlot.time === time) {
       onClearSlot();
+      return;
+    }
+
+    if (!doesSessionFitWithinSchedule(siteConfig, time, selectedDuration)) {
+      setFullMessage('Esta franja no estÃ¡ disponible para la duraciÃ³n seleccionada');
       return;
     }
 

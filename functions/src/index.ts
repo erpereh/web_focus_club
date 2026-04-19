@@ -159,6 +159,18 @@ function generateTimeSlots(config: SiteConfig): string[] {
   return slots;
 }
 
+function doesSessionFitWithinSchedule(config: SiteConfig, startTime: string, durationMinutes: number): boolean {
+  const normalizedConfig = normalizeSiteConfig(config);
+  const [hours, minutes] = startTime.split(":").map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(durationMinutes)) return false;
+
+  const startMinutes = hours * 60 + minutes;
+  const scheduleStart = normalizedConfig.startHour * 60;
+  const scheduleEnd = normalizedConfig.endHour * 60;
+
+  return startMinutes >= scheduleStart && startMinutes + durationMinutes <= scheduleEnd;
+}
+
 function getSlotBlocks(startTime: string, durationMinutes: number): string[] {
   const [hours, minutes] = startTime.split(":").map(Number);
   const startTotal = hours * 60 + minutes;
@@ -354,7 +366,7 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
         ? normalizeSiteConfig(siteConfigSnap.data() as Partial<SiteConfig>)
         : normalizeSiteConfig();
       const validSlots = new Set(generateTimeSlots(config));
-      if (!validSlots.has(preferredSlot.time)) {
+      if (!validSlots.has(preferredSlot.time) || !doesSessionFitWithinSchedule(config, preferredSlot.time, durationMinutes)) {
         throw toHttpsError("failed-precondition", "La franja seleccionada no es válida.");
       }
 

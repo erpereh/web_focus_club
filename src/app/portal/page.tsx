@@ -1563,7 +1563,11 @@ export default function PortalPage() {
                             <button
                               key={d.value}
                               disabled={!hasEnough}
-                              onClick={() => setFormData(prev => ({ ...prev, duration: d.value }))}
+                              onClick={() => setFormData(prev => ({
+                                ...prev,
+                                duration: d.value,
+                                preferredSlot: prev.duration === d.value ? prev.preferredSlot : null,
+                              }))}
                               className={cn(
                                 'flex-1 px-3 py-3 rounded-xl border text-sm font-medium transition-all',
                                 formData.duration === d.value

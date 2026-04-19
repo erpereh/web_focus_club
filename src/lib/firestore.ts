@@ -1347,7 +1347,19 @@ export function normalizeSiteConfig(config: Partial<SiteConfig> = {}): SiteConfi
  * Genera un array de franjas horarias a partir de la configuración.
  * Ej: { startHour: 8, endHour: 20, slotInterval: 30 } → ['08:00', '08:30', '09:00', ..., '19:30']
  */
-export function generateTimeSlots(config: SiteConfig): string[] {
+export function doesSessionFitWithinSchedule(config: SiteConfig, startTime: string, durationMinutes: number): boolean {
+    const normalizedConfig = normalizeSiteConfig(config);
+    const [h, min] = startTime.split(':').map(Number);
+    if (!Number.isFinite(h) || !Number.isFinite(min) || !Number.isFinite(durationMinutes)) return false;
+
+    const startMinutes = h * 60 + min;
+    const scheduleStart = normalizedConfig.startHour * 60;
+    const scheduleEnd = normalizedConfig.endHour * 60;
+
+    return startMinutes >= scheduleStart && startMinutes + durationMinutes <= scheduleEnd;
+}
+
+export function generateTimeSlots(config: SiteConfig, durationMinutes?: number): string[] {
     const normalizedConfig = normalizeSiteConfig(config);
     const interval = normalizedConfig.slotInterval;
     const slots: string[] = [];
@@ -1356,7 +1368,10 @@ export function generateTimeSlots(config: SiteConfig): string[] {
     for (let m = startMinutes; m < endMinutes; m += interval) {
         const h = Math.floor(m / 60);
         const min = m % 60;
-        slots.push(`${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
+        const time = `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+        if (durationMinutes == null || doesSessionFitWithinSchedule(normalizedConfig, time, durationMinutes)) {
+            slots.push(time);
+        }
     }
     return slots;
 }
