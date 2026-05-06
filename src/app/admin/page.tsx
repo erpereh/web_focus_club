@@ -2887,10 +2887,6 @@ export default function AdminPage() {
                                 <button
                                   onClick={async () => {
                                     const bono = clientBonos[client.uid]!;
-                                    if (getBonoMinutosRestantes(bono) >= getBonoMinutosTotales(bono)) {
-                                      alert('Este bono ya esta completo.');
-                                      return;
-                                    }
                                     if (!window.confirm(`¿Añadir 30 min al bono de ${client.name}?`)) return;
                                     try {
                                       await addBonoMinutes(bono.id, 30);
@@ -2901,12 +2897,7 @@ export default function AdminPage() {
                                       alert(err instanceof Error ? err.message : 'Error al añadir minutos');
                                     }
                                   }}
-                                  disabled={getBonoMinutosRestantes(clientBonos[client.uid]!) >= getBonoMinutosTotales(clientBonos[client.uid]!)}
-                                  className={cn(
-                                    "px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)] transition-colors flex items-center gap-1",
-                                    getBonoMinutosRestantes(clientBonos[client.uid]!) >= getBonoMinutosTotales(clientBonos[client.uid]!) &&
-                                    "opacity-50 cursor-not-allowed hover:bg-[var(--color-accent-dim)]"
-                                  )}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)] transition-colors flex items-center gap-1"
                                 >
                                   <Plus className="w-3 h-3" /> Añadir 30 min
                                 </button>

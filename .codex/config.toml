@@ -1,0 +1,3 @@
+[mcp_servers.firebase]
+args = ["mcp"]
+command = "firebase"

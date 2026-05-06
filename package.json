@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000",
+    "dev": "next dev --webpack -p 3000",
     "build": "node scripts/build-static.js",
     "start": "npx serve out -p 3000",
     "lint": "eslint .",

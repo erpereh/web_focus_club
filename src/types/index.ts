@@ -222,8 +222,11 @@ export function getBonoMinutosRestantes(bono: Bono): number {
 
 /** Devuelve los minutos totales del bono, con soporte para bonos legacy. */
 export function getBonoMinutosTotales(bono: Bono): number {
-    if (bono.tamano !== undefined) return bono.tamano;
+    if (bono.tamano !== undefined && bono.minutosTotales !== undefined) {
+        return Math.max(bono.tamano, bono.minutosTotales);
+    }
     if (bono.minutosTotales !== undefined) return bono.minutosTotales;
+    if (bono.tamano !== undefined) return bono.tamano;
     const minPerSession = bono.modalidad === '30min' ? 30 : 60;
     return (bono.sesionesTotales ?? 0) * minPerSession;
 }

@@ -1444,8 +1444,11 @@ export async function updateSiteConfig(data: Partial<SiteConfig>): Promise<void>
 type BonoData = Omit<Bono, 'id'>;
 
 function getBonoMaxMinutes(bono: Partial<BonoData>): number {
-    if (typeof bono.tamano === 'number') return bono.tamano;
+    if (typeof bono.tamano === 'number' && typeof bono.minutosTotales === 'number') {
+        return Math.max(bono.tamano, bono.minutosTotales);
+    }
     if (typeof bono.minutosTotales === 'number') return bono.minutosTotales;
+    if (typeof bono.tamano === 'number') return bono.tamano;
     const minPerSession = bono.modalidad === '30min' ? 30 : 60;
     return (bono.sesionesTotales ?? 0) * minPerSession;
 }
@@ -1526,7 +1529,7 @@ export function subscribeAllActiveBonos(
     );
 }
 
-/** Corrige bonos activos que quedaron por encima del tamano real. */
+/** Corrige bonos activos con totales/restantes incoherentes. */
 export async function normalizeActiveBonoLimits(): Promise<void> {
     const snap = await getDocs(
         query(collection(db, 'bonos'), where('estado', '==', 'activo'))
@@ -1584,13 +1587,11 @@ export async function addBonoMinutes(bonoId: string, minutes: number): Promise<v
         const bono = snap.data() as BonoData;
         const maxMinutes = getBonoMaxMinutes(bono);
         const currentRemaining = getBonoRemainingMinutes(bono);
-        if (currentRemaining >= maxMinutes) {
-            throw new Error('El bono ya esta completo');
-        }
-        const newRemaining = Math.min(currentRemaining + minutes, maxMinutes);
+        const newRemaining = Math.max(0, currentRemaining + minutes);
+        const newTotal = Math.max(maxMinutes, newRemaining);
         transaction.update(bonoRef, {
             minutosRestantes: newRemaining,
-            minutosTotales: maxMinutes,
+            minutosTotales: newTotal,
             estado: newRemaining > 0 ? 'activo' : bono.estado,
         });
     });

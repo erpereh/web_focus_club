@@ -199,8 +199,11 @@ function appointmentSlotKeys(appointment: AppointmentDoc): Set<string> {
 }
 
 function getBonoMinutosTotales(bono: BonoDoc): number {
-  if (typeof bono.tamano === "number") return bono.tamano;
+  if (typeof bono.tamano === "number" && typeof bono.minutosTotales === "number") {
+    return Math.max(bono.tamano, bono.minutosTotales);
+  }
   if (typeof bono.minutosTotales === "number") return bono.minutosTotales;
+  if (typeof bono.tamano === "number") return bono.tamano;
   const minPerSession = bono.modalidad === "30min" ? 30 : 60;
   return (bono.sesionesTotales ?? 0) * minPerSession;
 }
