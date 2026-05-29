@@ -704,7 +704,13 @@ export async function deleteService(id: string): Promise<void> {
 // ============================================
 
 function getTestimonialSortTime(testimonial: Testimonial): number {
-    const rawDate = testimonial.reviewCreateTime ?? testimonial.importedAt ?? '';
+    const rawDate = testimonial.reviewCreateTime
+        ?? testimonial.approvedAt
+        ?? testimonial.importedAt
+        ?? testimonial.createdAt
+        ?? testimonial.reviewUpdateTime
+        ?? testimonial.updatedAt
+        ?? '';
     const time = rawDate ? new Date(rawDate).getTime() : 0;
     return Number.isFinite(time) ? time : 0;
 }
@@ -713,9 +719,14 @@ function sortTestimonialsNewestFirst(testimonials: Testimonial[]): Testimonial[]
     return [...testimonials].sort((a, b) => getTestimonialSortTime(b) - getTestimonialSortTime(a));
 }
 
+function mapTestimonialDoc(document: { id: string; data: () => Record<string, unknown> }): Testimonial {
+    const data = document.data();
+    return { ...data, id: document.id } as Testimonial;
+}
+
 export async function getTestimonials(): Promise<Testimonial[]> {
     const snap = await getDocs(collection(db, 'testimonials'));
-    return sortTestimonialsNewestFirst(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Testimonial)));
+    return sortTestimonialsNewestFirst(snap.docs.map(mapTestimonialDoc));
 }
 
 export function subscribeTestimonials(
@@ -724,7 +735,7 @@ export function subscribeTestimonials(
 ): () => void {
     return onSnapshot(
         collection(db, 'testimonials'),
-        (snap) => callback(sortTestimonialsNewestFirst(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Testimonial)))),
+        (snap) => callback(sortTestimonialsNewestFirst(snap.docs.map(mapTestimonialDoc))),
         onError
     );
 }
@@ -733,7 +744,7 @@ export async function getApprovedTestimonials(): Promise<Testimonial[]> {
     const snap = await getDocs(
         query(collection(db, 'testimonials'), where('approved', '==', true))
     );
-    return sortTestimonialsNewestFirst(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Testimonial)));
+    return sortTestimonialsNewestFirst(snap.docs.map(mapTestimonialDoc));
 }
 
 export function subscribeApprovedTestimonials(
@@ -742,7 +753,7 @@ export function subscribeApprovedTestimonials(
 ): () => void {
     return onSnapshot(
         query(collection(db, 'testimonials'), where('approved', '==', true)),
-        (snap) => callback(sortTestimonialsNewestFirst(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Testimonial)))),
+        (snap) => callback(sortTestimonialsNewestFirst(snap.docs.map(mapTestimonialDoc))),
         onError
     );
 }
@@ -750,7 +761,15 @@ export function subscribeApprovedTestimonials(
 export async function addTestimonial(
     data: Omit<Testimonial, 'id' | 'approved'>
 ): Promise<void> {
-    await addDoc(collection(db, 'testimonials'), { ...data, source: data.source ?? 'manual', approved: false });
+    const { approvedAt: _approvedAt, updatedAt: _updatedAt, ...testimonialData } = data;
+    const now = new Date().toISOString();
+    await addDoc(collection(db, 'testimonials'), {
+        ...testimonialData,
+        source: testimonialData.source ?? 'manual',
+        approved: false,
+        createdAt: testimonialData.createdAt ?? now,
+        updatedAt: now,
+    });
 }
 
 export async function upsertGoogleTestimonial(
@@ -785,7 +804,13 @@ export async function updateTestimonial(
     id: string,
     data: Partial<Testimonial>
 ): Promise<void> {
-    await updateDoc(doc(db, 'testimonials', id), data);
+    const { id: _id, ...testimonialData } = data;
+    const now = new Date().toISOString();
+    await updateDoc(doc(db, 'testimonials', id), {
+        ...testimonialData,
+        updatedAt: now,
+        ...(testimonialData.approved === true && !testimonialData.approvedAt ? { approvedAt: now } : {}),
+    });
 }
 
 export async function deleteTestimonial(id: string): Promise<void> {
@@ -793,7 +818,8 @@ export async function deleteTestimonial(id: string): Promise<void> {
 }
 
 export async function approveTestimonial(id: string): Promise<void> {
-    await updateDoc(doc(db, 'testimonials', id), { approved: true });
+    const now = new Date().toISOString();
+    await updateDoc(doc(db, 'testimonials', id), { approved: true, approvedAt: now, updatedAt: now });
 }
 
 // ============================================

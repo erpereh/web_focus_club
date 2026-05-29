@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -8,6 +9,7 @@ import type { LucideIcon } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { DynamicIcon } from '@/components/ui/DynamicIcon';
+import { subscribeApprovedTestimonials } from '@/lib/firestore';
 import type { CMSContent, Service, Testimonial, HeroStat } from '@/types';
 
 const containerVariants = {
@@ -81,7 +83,13 @@ interface HomeClientProps {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function HomeClient({ initialCMS: cmsContent, initialServices: services, initialTestimonials: testimonials }: HomeClientProps) {
+export default function HomeClient({ initialCMS: cmsContent, initialServices: services, initialTestimonials }: HomeClientProps) {
+  const [testimonials, setTestimonials] = useState<Testimonial[]>(initialTestimonials);
+
+  useEffect(() => {
+    return subscribeApprovedTestimonials(setTestimonials, console.error);
+  }, []);
+
   const heroBackgroundType = cmsContent.heroBackgroundType === 'image' ? 'image' : 'video';
   const heroBackgroundUrl = cmsContent.heroBackgroundUrl ?? '/imagenes/hero.mp4';
   const aboutEyebrow = cmsContent.aboutEyebrow ?? 'Conoce a tu entrenadora';

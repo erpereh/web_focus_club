@@ -89,6 +89,9 @@ export interface Testimonial {
     reviewCreateTime?: string;
     reviewUpdateTime?: string;
     importedAt?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    approvedAt?: string;
 }
 
 export interface SandraAchievement {

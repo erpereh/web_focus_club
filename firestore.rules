@@ -10,6 +10,12 @@ service cloud.firestore {
       allow create: if createsOwnUserProfile(uid) || isAdmin();
       allow update: if (isVerified() && request.auth.uid == uid && onlyOwnUserProfileFieldsChanged()) || isAdmin();
       allow delete: if isAdmin();
+
+      match /fcmTokens/{token} {
+        allow read: if (isVerified() && request.auth.uid == uid) || isAdmin();
+        allow create, update: if (isVerified() && request.auth.uid == uid && isValidOwnFcmToken(token)) || isAdmin();
+        allow delete: if (isVerified() && request.auth.uid == uid) || isAdmin();
+      }
     }
 
     // APPOINTMENTS
@@ -145,12 +151,24 @@ service cloud.firestore {
         && request.resource.data.email == request.auth.token.email
         && request.resource.data.role == 'user'
         && (!('isTrainer' in request.resource.data) || request.resource.data.isTrainer == false)
-        && request.resource.data.keys().hasOnly(['uid', 'email', 'name', 'phone', 'role', 'isTrainer', 'photoURL', 'createdAt']);
+        && (!('pushNotificationsEnabled' in request.resource.data) || request.resource.data.pushNotificationsEnabled is bool)
+        && request.resource.data.keys().hasOnly(['uid', 'email', 'name', 'phone', 'role', 'isTrainer', 'photoURL', 'createdAt', 'pushNotificationsEnabled']);
     }
 
     function onlyOwnUserProfileFieldsChanged() {
       let diff = request.resource.data.diff(resource.data);
-      return diff.affectedKeys().hasOnly(['name', 'phone', 'photoURL']);
+      return diff.affectedKeys().hasOnly(['name', 'phone', 'photoURL', 'pushNotificationsEnabled'])
+        && (!('pushNotificationsEnabled' in request.resource.data) || request.resource.data.pushNotificationsEnabled is bool);
+    }
+
+    function isValidOwnFcmToken(token) {
+      return request.resource.data.keys().hasOnly(['token', 'platform', 'createdAt', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['token', 'platform', 'createdAt', 'updatedAt'])
+        && request.resource.data.token == token
+        && request.resource.data.token is string
+        && request.resource.data.platform in ['android', 'ios', 'macos', 'web', 'windows', 'linux', 'unknown']
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp;
     }
 
     function isValidUserAppointmentCreate() {

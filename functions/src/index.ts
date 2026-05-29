@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import { DocumentReference, getFirestore } from "firebase-admin/firestore";
+import { getMessaging } from "firebase-admin/messaging";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import { onDocumentDeleted, onDocumentUpdated } from "firebase-functions/v2/firestore";
@@ -37,6 +38,7 @@ interface UserProfile {
   email: string;
   name: string;
   phone?: string;
+  pushNotificationsEnabled?: boolean;
 }
 
 interface AppointmentDoc {
@@ -49,6 +51,8 @@ interface AppointmentDoc {
   preferredSlots: TimeSlot[];
   reason: string;
   status: "pending" | "approved" | "rejected";
+  date?: string;
+  time?: string;
   approvedSlot?: TimeSlot;
   assignedTrainer?: string;
   sessionType?: string;
@@ -100,6 +104,11 @@ interface MakePayload {
   time: string;
   sessionType: string;
   trainerName: string;
+}
+
+interface FcmTokenDoc {
+  token?: string;
+  platform?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -268,6 +277,32 @@ function buildMakePayload(action: "confirmed" | "deleted", appointment: Appointm
     sessionType: appointment.sessionType || appointment.serviceType || "",
     trainerName,
   };
+}
+
+function notificationSlot(appointment: AppointmentDoc): TimeSlot | undefined {
+  return appointment.approvedSlot
+    ?? appointment.preferredSlots?.[0]
+    ?? (appointment.date && appointment.time ? { date: appointment.date, time: appointment.time } : undefined);
+}
+
+function appointmentStatusNotification(status: "approved" | "rejected", appointment: AppointmentDoc): { title: string; body: string } {
+  if (status === "approved") {
+    const slot = notificationSlot(appointment);
+    return {
+      title: "Cita aprobada",
+      body: `Tu sesion del ${slot?.date ?? ""} a las ${slot?.time ?? ""} ha sido aprobada.`,
+    };
+  }
+
+  return {
+    title: "Cita rechazada",
+    body: "Tu solicitud de cita no ha podido ser aprobada. Revisa tus citas en la app.",
+  };
+}
+
+function isInvalidFcmTokenError(code?: string): boolean {
+  return code === "messaging/registration-token-not-registered"
+    || code === "messaging/invalid-registration-token";
 }
 
 export const createAppointment = onCall<CreateAppointmentRequest>(
@@ -458,5 +493,65 @@ export const onAppointmentDeleted = onDocumentDeleted(
 
     const trainerName = await resolveTrainerName(appointment.assignedTrainer);
     await sendMakeWebhook(buildMakePayload("deleted", appointment, trainerName));
+  },
+);
+
+export const onAppointmentStatusPushNotification = onDocumentUpdated(
+  {
+    document: "appointments/{appointmentId}",
+    region: REGION,
+  },
+  async (event) => {
+    const before = event.data?.before.data() as AppointmentDoc | undefined;
+    const after = event.data?.after.data() as AppointmentDoc | undefined;
+    const appointmentId = String(event.params.appointmentId);
+
+    if (!before || !after) return;
+
+    const changedToApproved = before.status !== "approved" && after.status === "approved";
+    const changedToRejected = before.status !== "rejected" && after.status === "rejected";
+    if (!changedToApproved && !changedToRejected) return;
+
+    const status = after.status as "approved" | "rejected";
+    const userSnap = await db.collection("users").doc(after.userId).get();
+    const user = userSnap.data() as UserProfile | undefined;
+    if (!user || user.pushNotificationsEnabled !== true) return;
+
+    const tokenSnap = await userSnap.ref.collection("fcmTokens").get();
+    const tokenRefs = tokenSnap.docs
+      .map((docSnap) => {
+        const tokenDoc = docSnap.data() as FcmTokenDoc;
+        const token = typeof tokenDoc.token === "string" ? tokenDoc.token.trim() : "";
+        return token ? { ref: docSnap.ref, token } : null;
+      })
+      .filter((entry): entry is { ref: DocumentReference; token: string } => entry !== null);
+
+    if (tokenRefs.length === 0) return;
+
+    const notification = appointmentStatusNotification(status, after);
+    const messaging = getMessaging();
+
+    for (let index = 0; index < tokenRefs.length; index += 500) {
+      const batch = tokenRefs.slice(index, index + 500);
+      const response = await messaging.sendEachForMulticast({
+        tokens: batch.map((entry) => entry.token),
+        notification,
+        data: {
+          type: "appointment_status",
+          appointmentId,
+          status,
+        },
+      });
+
+      await Promise.all(
+        response.responses.map((sendResponse, responseIndex) => {
+          const code = sendResponse.error?.code;
+          if (!sendResponse.success && isInvalidFcmTokenError(code)) {
+            return batch[responseIndex].ref.delete();
+          }
+          return Promise.resolve();
+        }),
+      );
+    }
   },
 );
