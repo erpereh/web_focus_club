@@ -203,6 +203,7 @@ export const defaultCMS: CMSContent = {
         ],
         formTitle: '',
         formSubtitle: '',
+        formRecipientEmail: '',
         nameLabel: 'Nombre completo',
         namePlaceholder: 'Tu nombre',
         emailLabel: 'Email',

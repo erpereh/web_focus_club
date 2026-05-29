@@ -4517,6 +4517,17 @@ export default function AdminPage() {
                             <input type="text" value={editedContent?.contacto?.formSubtitle ?? ''} onChange={(e) => updateContactoField('formSubtitle', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" />
                           </div>
                         </div>
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Email receptor del formulario</label>
+                          <input
+                            type="email"
+                            value={editedContent?.contacto?.formRecipientEmail ?? ''}
+                            onChange={(e) => updateContactoField('formRecipientEmail', e.target.value)}
+                            placeholder="infofocusclub2026@gmail.com"
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                          />
+                          <p className="mt-2 text-xs text-[var(--color-text-secondary)]">Email donde se recibiran los mensajes del formulario</p>
+                        </div>
                         <div className="grid sm:grid-cols-2 gap-4">
                           <div><label className="block text-sm text-[var(--color-text-secondary)] mb-2">Nombre label</label><input type="text" value={editedContent?.contacto?.nameLabel ?? ''} onChange={(e) => updateContactoField('nameLabel', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" /></div>
                           <div><label className="block text-sm text-[var(--color-text-secondary)] mb-2">Nombre placeholder</label><input type="text" value={editedContent?.contacto?.namePlaceholder ?? ''} onChange={(e) => updateContactoField('namePlaceholder', e.target.value)} className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]" /></div>

@@ -309,6 +309,7 @@ export interface ContactoConfig {
     cards: ContactoCard[];
     formTitle?: string;
     formSubtitle?: string;
+    formRecipientEmail?: string;
     nameLabel: string;
     namePlaceholder: string;
     emailLabel: string;

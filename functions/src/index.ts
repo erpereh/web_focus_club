@@ -1,17 +1,24 @@
 import { initializeApp } from "firebase-admin/app";
-import { DocumentReference, getFirestore } from "firebase-admin/firestore";
+import { createHash } from "node:crypto";
+import { DocumentReference, FieldValue, getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import { onDocumentDeleted, onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { Resend } from "resend";
 
 initializeApp();
 
 const db = getFirestore();
 const MAKE_WEBHOOK_URL = defineSecret("MAKE_WEBHOOK_URL");
+const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
 const REGION = "europe-west1";
 const MAX_CAPACITY = 2;
 const APPOINTMENT_SERVICE_TYPE = "Bono Mensual de Entrenamiento";
+const CONTACT_EMAIL_FROM = "Focus Club <noreply@focusclub.es>";
+const CONTACT_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const CONTACT_RATE_LIMIT_MAX_REQUESTS = 5;
+const CONTACT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DEFAULT_SITE_CONFIG = {
   startHour: 8,
   endHour: 20,
@@ -31,6 +38,23 @@ interface CreateAppointmentRequest {
   duration: AppointmentDuration;
   preferredSlot: TimeSlot;
   reason?: string;
+}
+
+interface ContactMessageRequest {
+  name: unknown;
+  email: unknown;
+  phone?: unknown;
+  subject: unknown;
+  message: unknown;
+  company?: unknown;
+}
+
+interface ContactMessage {
+  name: string;
+  email: string;
+  phone: string;
+  subject: string;
+  message: string;
 }
 
 interface UserProfile {
@@ -234,8 +258,198 @@ function slotDateTime(slot: TimeSlot): Date {
   return new Date(`${slot.date}T${slot.time}:00`);
 }
 
-function toHttpsError(code: "invalid-argument" | "failed-precondition" | "permission-denied" | "internal", message: string): HttpsError {
+function toHttpsError(
+  code: "invalid-argument" | "failed-precondition" | "permission-denied" | "resource-exhausted" | "internal",
+  message: string,
+): HttpsError {
   return new HttpsError(code, message);
+}
+
+function normalizeTextField(value: unknown, fieldName: string, maxLength: number, required = true): string {
+  if (typeof value !== "string") {
+    if (!required && value === undefined) return "";
+    throw toHttpsError("invalid-argument", `El campo ${fieldName} no es valido.`);
+  }
+
+  const text = value.trim();
+  if (required && !text) {
+    throw toHttpsError("invalid-argument", `El campo ${fieldName} es obligatorio.`);
+  }
+  if (text.length > maxLength) {
+    throw toHttpsError("invalid-argument", `El campo ${fieldName} es demasiado largo.`);
+  }
+
+  return text;
+}
+
+function isValidEmail(value: string): boolean {
+  return value.length <= 254 && CONTACT_EMAIL_RE.test(value);
+}
+
+function parseContactMessage(data: unknown): ContactMessage {
+  if (!isRecord(data)) {
+    throw toHttpsError("invalid-argument", "Los datos del formulario no son validos.");
+  }
+
+  const honeypot = typeof data.company === "string" ? data.company.trim() : "";
+  if (honeypot) {
+    throw toHttpsError("invalid-argument", "Los datos del formulario no son validos.");
+  }
+
+  const name = normalizeTextField(data.name, "nombre", 120);
+  const email = normalizeTextField(data.email, "email", 254);
+  const phone = normalizeTextField(data.phone, "telefono", 40, false);
+  const subject = normalizeTextField(data.subject, "asunto", 140);
+  const message = normalizeTextField(data.message, "mensaje", 3000);
+
+  if (!isValidEmail(email)) {
+    throw toHttpsError("invalid-argument", "El email no tiene un formato valido.");
+  }
+
+  return { name, email, phone, subject, message };
+}
+
+function getClientIp(rawRequest: { ip?: string; headers?: Record<string, string | string[] | undefined> }): string {
+  const forwardedHeader = rawRequest.headers?.["x-forwarded-for"];
+  const forwarded = Array.isArray(forwardedHeader) ? forwardedHeader[0] : forwardedHeader;
+  return forwarded?.split(",")[0]?.trim() || rawRequest.ip || "unknown";
+}
+
+function rateLimitDocId(ip: string): string {
+  return createHash("sha256").update(ip).digest("hex");
+}
+
+async function enforceContactRateLimit(docId: string): Promise<void> {
+  const now = Date.now();
+  const ref = db.collection("contact_rate_limits").doc(docId);
+
+  await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(ref);
+    const data = snap.exists ? snap.data() : undefined;
+    const windowStartMillis = typeof data?.windowStartMillis === "number" ? data.windowStartMillis : 0;
+    const count = typeof data?.count === "number" ? data.count : 0;
+    const resetWindow = !snap.exists || now - windowStartMillis >= CONTACT_RATE_LIMIT_WINDOW_MS;
+
+    if (resetWindow) {
+      transaction.set(ref, {
+        windowStartMillis: now,
+        count: 1,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+      return;
+    }
+
+    if (count >= CONTACT_RATE_LIMIT_MAX_REQUESTS) {
+      throw toHttpsError("resource-exhausted", "Has enviado demasiados mensajes. Intentalo de nuevo mas tarde.");
+    }
+
+    transaction.set(ref, {
+      count: count + 1,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
+}
+
+function getNestedString(value: unknown, path: string[]): string {
+  let current: unknown = value;
+  for (const segment of path) {
+    if (!isRecord(current)) return "";
+    current = current[segment];
+  }
+  return typeof current === "string" ? current.trim() : "";
+}
+
+async function resolveContactRecipientEmail(): Promise<string> {
+  const snap = await db.collection("site_content").doc("main").get();
+  const data = snap.exists ? snap.data() : undefined;
+  const formRecipientEmail = getNestedString(data, ["contacto", "formRecipientEmail"]);
+  if (isValidEmail(formRecipientEmail)) return formRecipientEmail;
+
+  const publicEmail = getNestedString(data, ["email"]);
+  if (isValidEmail(publicEmail)) return publicEmail;
+
+  throw toHttpsError("failed-precondition", "No hay un email receptor valido configurado.");
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function formatSubmittedAt(date: Date): string {
+  return new Intl.DateTimeFormat("es-ES", {
+    dateStyle: "full",
+    timeStyle: "short",
+    timeZone: "Europe/Madrid",
+  }).format(date);
+}
+
+function buildContactEmail(message: ContactMessage, submittedAt: Date): { subject: string; html: string; text: string } {
+  const displayDate = formatSubmittedAt(submittedAt);
+  const subject = `Nuevo mensaje de contacto - Focus Club - ${message.subject}`;
+  const rows = [
+    ["Nombre", message.name],
+    ["Email", message.email],
+    ["Telefono", message.phone || "No indicado"],
+    ["Asunto", message.subject],
+    ["Fecha/hora", displayDate],
+  ];
+
+  const htmlRows = rows.map(([label, value]) => `
+    <tr>
+      <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-weight:600;color:#111827;">${escapeHtml(label)}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;color:#374151;">${escapeHtml(value)}</td>
+    </tr>
+  `).join("");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827;">
+      <h1 style="font-size:20px;margin:0 0 16px;">Nuevo mensaje de contacto</h1>
+      <table style="border-collapse:collapse;width:100%;max-width:640px;margin-bottom:20px;">${htmlRows}</table>
+      <h2 style="font-size:16px;margin:0 0 8px;">Mensaje</h2>
+      <div style="white-space:pre-wrap;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;">${escapeHtml(message.message)}</div>
+    </div>
+  `;
+
+  const text = [
+    "Nuevo mensaje de contacto",
+    "",
+    `Nombre: ${message.name}`,
+    `Email: ${message.email}`,
+    `Telefono: ${message.phone || "No indicado"}`,
+    `Asunto: ${message.subject}`,
+    `Fecha/hora: ${displayDate}`,
+    "",
+    "Mensaje:",
+    message.message,
+  ].join("\n");
+
+  return { subject, html, text };
+}
+
+async function saveContactSubmission(
+  message: ContactMessage,
+  recipientEmail: string,
+  createdAt: string,
+  status: "sent" | "failed",
+  extra: Record<string, unknown> = {},
+): Promise<void> {
+  await db.collection("contact_submissions").add({
+    name: message.name,
+    email: message.email,
+    phone: message.phone,
+    subject: message.subject,
+    message: message.message,
+    recipientEmail,
+    createdAt,
+    status,
+    source: "website",
+    ...extra,
+  });
 }
 
 async function resolveTrainerName(trainerId?: string): Promise<string> {
@@ -304,6 +518,60 @@ function isInvalidFcmTokenError(code?: string): boolean {
   return code === "messaging/registration-token-not-registered"
     || code === "messaging/invalid-registration-token";
 }
+
+export const sendContactMessage = onCall<ContactMessageRequest>(
+  {
+    region: REGION,
+    secrets: [RESEND_API_KEY],
+  },
+  async (request) => {
+    const contactMessage = parseContactMessage(request.data);
+    const submittedAt = new Date();
+    const createdAt = submittedAt.toISOString();
+    const ip = getClientIp(request.rawRequest);
+    await enforceContactRateLimit(rateLimitDocId(ip));
+
+    let recipientEmail = "";
+    try {
+      recipientEmail = await resolveContactRecipientEmail();
+    } catch (error) {
+      await saveContactSubmission(contactMessage, recipientEmail, createdAt, "failed", {
+        errorMessage: error instanceof Error ? error.message : "No hay email receptor valido.",
+      });
+      throw error;
+    }
+
+    const resend = new Resend(RESEND_API_KEY.value());
+    const email = buildContactEmail(contactMessage, submittedAt);
+
+    try {
+      const result = await resend.emails.send({
+        from: CONTACT_EMAIL_FROM,
+        to: [recipientEmail],
+        subject: email.subject,
+        html: email.html,
+        text: email.text,
+        replyTo: contactMessage.email,
+      });
+
+      if (result.error) {
+        throw new Error(result.error.message);
+      }
+
+      await saveContactSubmission(contactMessage, recipientEmail, createdAt, "sent", {
+        resendEmailId: result.data?.id ?? "",
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error("[Contact] Failed to send contact email", error);
+      await saveContactSubmission(contactMessage, recipientEmail, createdAt, "failed", {
+        errorMessage: error instanceof Error ? error.message : "Error desconocido al enviar el email.",
+      });
+      throw toHttpsError("internal", "No se ha podido enviar el mensaje. Intentalo de nuevo mas tarde.");
+    }
+  },
+);
 
 export const createAppointment = onCall<CreateAppointmentRequest>(
   {

@@ -7,6 +7,7 @@ import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { DynamicIcon } from '@/components/ui/DynamicIcon';
 import { useCMS } from '@/hooks/useFirestore';
+import { sendContactMessage } from '@/lib/firestore';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -21,25 +22,61 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.5 } },
 };
 
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const emptyFormData = {
+  name: '',
+  email: '',
+  phone: '',
+  subject: '',
+  message: '',
+  company: '',
+};
+
 export default function ContactoPage() {
   const { cmsContent } = useCMS();
   const contacto = cmsContent.contacto!;
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    subject: '',
-    message: '',
-  });
+  const [formData, setFormData] = useState(emptyFormData);
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const validateForm = () => {
+    if (!formData.name.trim()) return 'El nombre es obligatorio.';
+    if (!emailRegex.test(formData.email.trim())) return 'Introduce un email valido.';
+    if (!formData.subject.trim()) return 'Selecciona un asunto.';
+    if (!formData.message.trim()) return 'El mensaje es obligatorio.';
+    return '';
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitted(true);
-    setTimeout(() => {
-      setSubmitted(false);
-      setFormData({ name: '', email: '', phone: '', subject: '', message: '' });
-    }, 3000);
+    setErrorMessage('');
+
+    const validationError = validateForm();
+    if (validationError) {
+      setErrorMessage(validationError);
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await sendContactMessage({
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        subject: formData.subject,
+        message: formData.message,
+        company: formData.company,
+      });
+      setSubmitted(true);
+      setFormData(emptyFormData);
+      setTimeout(() => setSubmitted(false), 5000);
+    } catch (error) {
+      console.error(error);
+      setErrorMessage('No se ha podido enviar el mensaje. Intentalo de nuevo mas tarde.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -141,6 +178,16 @@ export default function ContactoPage() {
                         {contacto.formSubtitle && <p className="text-[var(--color-text-secondary)] text-sm">{contacto.formSubtitle}</p>}
                       </div>
                     )}
+                    <input
+                      type="text"
+                      name="company"
+                      value={formData.company}
+                      onChange={handleChange}
+                      className="hidden"
+                      tabIndex={-1}
+                      autoComplete="off"
+                      aria-hidden="true"
+                    />
                     <div className="grid sm:grid-cols-2 gap-6">
                       <div>
                         <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
@@ -222,15 +269,22 @@ export default function ContactoPage() {
                       />
                     </div>
 
+                    {errorMessage && (
+                      <p role="alert" className="text-sm text-red-400">
+                        {errorMessage}
+                      </p>
+                    )}
+
                     <PremiumButton
                       type="submit"
                       variant="cta"
                       size="lg"
                       icon={<Send className="w-4 h-4" />}
                       iconPosition="right"
+                      loading={isSubmitting}
                       className="w-full sm:w-auto"
                     >
-                      {contacto.submitText}
+                      {isSubmitting ? 'Enviando...' : contacto.submitText}
                     </PremiumButton>
                   </form>
                 )}

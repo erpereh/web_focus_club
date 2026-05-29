@@ -201,6 +201,7 @@ export const DEFAULT_CONTACTO_CONFIG: ContactoConfig = {
     cards: DEFAULT_CONTACTO_CARDS,
     formTitle: '',
     formSubtitle: '',
+    formRecipientEmail: '',
     nameLabel: 'Nombre completo',
     namePlaceholder: 'Tu nombre',
     emailLabel: 'Email',
@@ -428,6 +429,7 @@ export function normalizeContactoConfig(rawContacto: unknown): ContactoConfig {
         cards: cards.length > 0 ? cards : DEFAULT_CONTACTO_CARDS.map((item) => ({ ...item })),
         formTitle: typeof raw.formTitle === 'string' ? raw.formTitle : DEFAULT_CONTACTO_CONFIG.formTitle,
         formSubtitle: typeof raw.formSubtitle === 'string' ? raw.formSubtitle : DEFAULT_CONTACTO_CONFIG.formSubtitle,
+        formRecipientEmail: typeof raw.formRecipientEmail === 'string' ? raw.formRecipientEmail.trim() : DEFAULT_CONTACTO_CONFIG.formRecipientEmail,
         nameLabel: asNonEmptyString(raw.nameLabel, DEFAULT_CONTACTO_CONFIG.nameLabel),
         namePlaceholder: asNonEmptyString(raw.namePlaceholder, DEFAULT_CONTACTO_CONFIG.namePlaceholder),
         emailLabel: asNonEmptyString(raw.emailLabel, DEFAULT_CONTACTO_CONFIG.emailLabel),
@@ -622,6 +624,22 @@ export async function createAppointmentSecure(input: {
 
     const result = await callable(input);
     return result.data.appointmentId;
+}
+
+export async function sendContactMessage(input: {
+    name: string;
+    email: string;
+    phone: string;
+    subject: string;
+    message: string;
+    company: string;
+}): Promise<void> {
+    const callable = httpsCallable<
+        { name: string; email: string; phone: string; subject: string; message: string; company: string },
+        { success: boolean }
+    >(firebaseFunctions, 'sendContactMessage');
+
+    await callable(input);
 }
 
 export async function updateAppointmentStatus(
