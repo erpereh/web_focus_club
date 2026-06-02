@@ -4,14 +4,22 @@ import { DocumentReference, FieldValue, getFirestore } from "firebase-admin/fire
 import { getMessaging } from "firebase-admin/messaging";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
-import { onDocumentDeleted, onDocumentUpdated } from "firebase-functions/v2/firestore";
+import { onDocumentDeleted, onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
+import { calendar_v3, google } from "googleapis";
 import { Resend } from "resend";
+import {
+  buildCalendarEventPayload,
+  buildCalendarSyncHash,
+  normalizeAppointmentStatus,
+  onlyGoogleCalendarSyncFieldsChanged,
+} from "./googleCalendarSync";
 
 initializeApp();
 
 const db = getFirestore();
 const MAKE_WEBHOOK_URL = defineSecret("MAKE_WEBHOOK_URL");
 const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
+const GOOGLE_CALENDAR_ID = defineSecret("GOOGLE_CALENDAR_ID");
 const REGION = "europe-west1";
 const MAX_CAPACITY = 2;
 const APPOINTMENT_SERVICE_TYPE = "Bono Mensual de Entrenamiento";
@@ -81,6 +89,11 @@ interface AppointmentDoc {
   assignedTrainer?: string;
   sessionType?: string;
   trainerNotes?: string;
+  googleCalendarEventId?: string;
+  googleCalendarSyncedAt?: string;
+  googleCalendarSyncStatus?: "synced" | "error" | "deleted";
+  googleCalendarSyncError?: string | null;
+  googleCalendarSyncHash?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -519,6 +532,122 @@ function isInvalidFcmTokenError(code?: string): boolean {
     || code === "messaging/invalid-registration-token";
 }
 
+function googleCalendarErrorStatus(error: unknown): number | undefined {
+  if (!isRecord(error)) return undefined;
+
+  if (typeof error.code === "number") return error.code;
+  if (typeof error.status === "number") return error.status;
+
+  const response = error.response;
+  if (isRecord(response) && typeof response.status === "number") return response.status;
+
+  return undefined;
+}
+
+function isGoogleCalendarMissingEventError(error: unknown): boolean {
+  const status = googleCalendarErrorStatus(error);
+  return status === 404 || status === 410;
+}
+
+function shortGoogleCalendarError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "Error desconocido al sincronizar Google Calendar.";
+  return message.replace(/\s+/g, " ").trim().slice(0, 300);
+}
+
+function getGoogleCalendarService(): calendar_v3.Calendar {
+  const auth = new google.auth.GoogleAuth({
+    scopes: ["https://www.googleapis.com/auth/calendar"],
+  });
+
+  return google.calendar({ version: "v3", auth });
+}
+
+function getGoogleCalendarId(): string {
+  const calendarId = GOOGLE_CALENDAR_ID.value().trim();
+  if (!calendarId) {
+    throw new Error("GOOGLE_CALENDAR_ID no esta configurado.");
+  }
+  return calendarId;
+}
+
+async function resolveAppointmentClient(appointment: AppointmentDoc): Promise<{ name: string; email: string; phone: string }> {
+  if (appointment.userId) {
+    const userSnap = await db.collection("users").doc(appointment.userId).get();
+    if (userSnap.exists) {
+      const user = userSnap.data() as Partial<UserProfile> | undefined;
+      return {
+        name: user?.name || appointment.name || "Cliente",
+        email: user?.email || appointment.email || "",
+        phone: user?.phone || appointment.phone || "",
+      };
+    }
+  }
+
+  return {
+    name: appointment.name || "Cliente",
+    email: appointment.email || "",
+    phone: appointment.phone || "",
+  };
+}
+
+async function deleteGoogleCalendarEventIfExists(
+  calendar: calendar_v3.Calendar,
+  calendarId: string,
+  eventId?: string,
+): Promise<void> {
+  if (!eventId) return;
+
+  try {
+    await calendar.events.delete({
+      calendarId,
+      eventId,
+      sendUpdates: "none",
+    });
+  } catch (error) {
+    if (isGoogleCalendarMissingEventError(error)) return;
+    throw error;
+  }
+}
+
+async function writeGoogleCalendarSyncError(ref: DocumentReference, error: unknown): Promise<void> {
+  await ref.set({
+    googleCalendarSyncStatus: "error",
+    googleCalendarSyncError: shortGoogleCalendarError(error),
+  }, { merge: true });
+}
+
+async function upsertGoogleCalendarEvent(
+  calendar: calendar_v3.Calendar,
+  calendarId: string,
+  eventId: string | undefined,
+  payload: calendar_v3.Schema$Event,
+): Promise<string> {
+  if (eventId) {
+    try {
+      const response = await calendar.events.update({
+        calendarId,
+        eventId,
+        requestBody: payload,
+        sendUpdates: "none",
+      });
+      return response.data.id ?? eventId;
+    } catch (error) {
+      if (!isGoogleCalendarMissingEventError(error)) throw error;
+    }
+  }
+
+  const response = await calendar.events.insert({
+    calendarId,
+    requestBody: payload,
+    sendUpdates: "none",
+  });
+  const createdEventId = response.data.id;
+  if (!createdEventId) {
+    throw new Error("Google Calendar no devolvio ID de evento.");
+  }
+  return createdEventId;
+}
+
 export const sendContactMessage = onCall<ContactMessageRequest>(
   {
     region: REGION,
@@ -569,6 +698,103 @@ export const sendContactMessage = onCall<ContactMessageRequest>(
         errorMessage: error instanceof Error ? error.message : "Error desconocido al enviar el email.",
       });
       throw toHttpsError("internal", "No se ha podido enviar el mensaje. Intentalo de nuevo mas tarde.");
+    }
+  },
+);
+
+export const syncAppointmentWithGoogleCalendar = onDocumentWritten(
+  {
+    document: "appointments/{appointmentId}",
+    region: REGION,
+    secrets: [GOOGLE_CALENDAR_ID],
+  },
+  async (event) => {
+    const appointmentId = String(event.params.appointmentId);
+    const beforeSnap = event.data?.before;
+    const afterSnap = event.data?.after;
+    const before = beforeSnap?.exists ? beforeSnap.data() as AppointmentDoc : undefined;
+    const after = afterSnap?.exists ? afterSnap.data() as AppointmentDoc : undefined;
+    const previousEventId = after?.googleCalendarEventId || before?.googleCalendarEventId;
+
+    if (!before && !after) return;
+
+    if (before && after && onlyGoogleCalendarSyncFieldsChanged({ ...before }, { ...after })) {
+      return;
+    }
+
+    if (!after) {
+      const calendar = getGoogleCalendarService();
+      const calendarId = getGoogleCalendarId();
+      await deleteGoogleCalendarEventIfExists(calendar, calendarId, previousEventId);
+      return;
+    }
+
+    const appointmentRef = afterSnap?.ref;
+    if (!appointmentRef) return;
+
+    try {
+      const status = normalizeAppointmentStatus(after.status);
+      if (!status) {
+        throw new Error("Estado de cita no compatible con Google Calendar.");
+      }
+
+      const calendar = getGoogleCalendarService();
+      const calendarId = getGoogleCalendarId();
+
+      if (status === "rejected") {
+        await deleteGoogleCalendarEventIfExists(calendar, calendarId, previousEventId);
+        await appointmentRef.set({
+          googleCalendarEventId: FieldValue.delete(),
+          googleCalendarSyncedAt: new Date().toISOString(),
+          googleCalendarSyncStatus: "deleted",
+          googleCalendarSyncError: FieldValue.delete(),
+          googleCalendarSyncHash: FieldValue.delete(),
+        }, { merge: true });
+        return;
+      }
+
+      const [client, trainerName] = await Promise.all([
+        resolveAppointmentClient(after),
+        resolveTrainerName(after.assignedTrainer),
+      ]);
+      const syncHash = buildCalendarSyncHash({
+        appointmentId,
+        appointment: after,
+        client,
+        trainerName,
+      });
+
+      if (after.googleCalendarEventId && after.googleCalendarSyncHash === syncHash) {
+        return;
+      }
+
+      const eventPayload = buildCalendarEventPayload({
+        appointmentId,
+        appointment: after,
+        client,
+        trainerName,
+      });
+      if (!eventPayload) {
+        throw new Error("No hay fecha/hora valida para sincronizar con Google Calendar.");
+      }
+
+      const syncedEventId = await upsertGoogleCalendarEvent(
+        calendar,
+        calendarId,
+        after.googleCalendarEventId,
+        eventPayload,
+      );
+
+      await appointmentRef.set({
+        googleCalendarEventId: syncedEventId,
+        googleCalendarSyncedAt: new Date().toISOString(),
+        googleCalendarSyncStatus: "synced",
+        googleCalendarSyncError: FieldValue.delete(),
+        googleCalendarSyncHash: syncHash,
+      }, { merge: true });
+    } catch (error) {
+      console.error("[GoogleCalendar] Failed to sync appointment", appointmentId, error);
+      await writeGoogleCalendarSyncError(appointmentRef, error);
     }
   },
 );

@@ -46,6 +46,8 @@ local-*
 .z-ai-config
 dev.log
 test
+!/functions/test/
+!/functions/test/googleCalendarSync.test.cjs
 prompt
 
 server.log
@@ -66,7 +68,8 @@ skills-lock.json
 .agents/
 
 # Internal docs and non-deployed local services
-/docs/
+/docs/*
+!/docs/google_calendar_sync.md
 /mini-services/
 
 # Database files
