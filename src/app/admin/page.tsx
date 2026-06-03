@@ -122,6 +122,7 @@ import {
   getActiveBonoByUser,
   getBonosByUser,
   assignBono,
+  updateBonoDates,
   deactivateBono,
   deleteBono,
   addBonoMinutes,
@@ -191,6 +192,88 @@ const durationLabels: Record<string, string> = {
   '60': '60 minutos',
   '90': '90 minutos', // legacy
 };
+
+function formatDateInputLocal(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateInputLocal(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const date = new Date(year, monthIndex, day);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== monthIndex ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+  return date;
+}
+
+function dateValueToInputLocal(value: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return formatDateInputLocal(date);
+}
+
+function startOfLocalDayIso(dateInput: string): string | null {
+  const date = parseDateInputLocal(dateInput);
+  if (!date) return null;
+  date.setHours(0, 0, 0, 0);
+  return date.toISOString();
+}
+
+function endOfLocalDayIso(dateInput: string): string | null {
+  const date = parseDateInputLocal(dateInput);
+  if (!date) return null;
+  date.setHours(23, 59, 59, 999);
+  return date.toISOString();
+}
+
+function addLocalMonthsClamped(date: Date, months: number): Date {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const day = date.getDate();
+  const targetMonthIndex = month + months;
+  const lastTargetDay = new Date(year, targetMonthIndex + 1, 0).getDate();
+  const result = new Date(date);
+  result.setFullYear(year, targetMonthIndex, Math.min(day, lastTargetDay));
+  return result;
+}
+
+function getDefaultBonoDateRange(): { startDate: string; endDate: string } {
+  const today = new Date();
+  return {
+    startDate: formatDateInputLocal(today),
+    endDate: formatDateInputLocal(addLocalMonthsClamped(today, 1)),
+  };
+}
+
+function validateBonoDateInputs(startDate: string, endDate: string): string {
+  const parsedStart = parseDateInputLocal(startDate);
+  const parsedEnd = parseDateInputLocal(endDate);
+
+  if (!startDate || !parsedStart) return 'La fecha de inicio es obligatoria.';
+  if (!endDate || !parsedEnd) return 'La fecha de fin es obligatoria.';
+  if (parsedEnd.getTime() < parsedStart.getTime()) {
+    return 'La fecha de fin no puede ser anterior a la fecha de inicio.';
+  }
+  return '';
+}
+
+function formatBonoDate(value: string): string {
+  const date = parseDateInputLocal(dateValueToInputLocal(value));
+  if (!date) return 'Fecha no valida';
+  return date.toLocaleDateString('es-ES');
+}
 
 function getCoveredSlotBlocks(startTime: string, durationMinutes: number): string[] {
   const [h, m] = startTime.split(':').map(Number);
@@ -914,6 +997,9 @@ export default function AdminPage() {
   const [showAssignBonoModal, setShowAssignBonoModal] = useState(false);
   const [assignBonoClient, setAssignBonoClient] = useState<UserProfile | null>(null);
   const [assignBonoTamano, setAssignBonoTamano] = useState<240 | 360 | 480>(240);
+  const [assignBonoStartDate, setAssignBonoStartDate] = useState('');
+  const [assignBonoEndDate, setAssignBonoEndDate] = useState('');
+  const [assignBonoError, setAssignBonoError] = useState('');
   const [savingBono, setSavingBono] = useState(false);
   const [showBonoHistoryModal, setShowBonoHistoryModal] = useState(false);
   const [bonoHistoryData, setBonoHistoryData] = useState<Bono[]>([]);
@@ -921,6 +1007,12 @@ export default function AdminPage() {
   const [clientAppointmentsHistory, setClientAppointmentsHistory] = useState<Appointment[]>([]);
   const [showDeleteBonoModal, setShowDeleteBonoModal] = useState(false);
   const [deleteBonoClient, setDeleteBonoClient] = useState<UserProfile | null>(null);
+  const [showEditBonoDatesModal, setShowEditBonoDatesModal] = useState(false);
+  const [editBonoDatesClient, setEditBonoDatesClient] = useState<UserProfile | null>(null);
+  const [editBonoStartDate, setEditBonoStartDate] = useState('');
+  const [editBonoEndDate, setEditBonoEndDate] = useState('');
+  const [editBonoDatesError, setEditBonoDatesError] = useState('');
+  const [savingBonoDates, setSavingBonoDates] = useState(false);
 
   // Delete appointments when blocking
   const [deleteOnBlock, setDeleteOnBlock] = useState(false);
@@ -2843,7 +2935,7 @@ export default function AdminPage() {
                                   {formatMinutos(getBonoMinutosRestantes(clientBonos[client.uid]!))} / {formatMinutos(getBonoMinutosTotales(clientBonos[client.uid]!))}
                                 </span>
                                 <span className="text-xs text-[var(--color-text-secondary)]">
-                                  Expira: {new Date(clientBonos[client.uid]!.fechaExpiracion).toLocaleDateString('es-ES')}
+                                  Válido: {formatBonoDate(clientBonos[client.uid]!.fechaAsignacion)} - {formatBonoDate(clientBonos[client.uid]!.fechaExpiracion)}
                                 </span>
                               </div>
                               {/* Progress bar */}
@@ -2902,6 +2994,19 @@ export default function AdminPage() {
                                   <Plus className="w-3 h-3" /> Añadir 30 min
                                 </button>
                                 <button
+                                  onClick={() => {
+                                    const bono = clientBonos[client.uid]!;
+                                    setEditBonoDatesClient(client);
+                                    setEditBonoStartDate(dateValueToInputLocal(bono.fechaAsignacion));
+                                    setEditBonoEndDate(dateValueToInputLocal(bono.fechaExpiracion));
+                                    setEditBonoDatesError('');
+                                    setShowEditBonoDatesModal(true);
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-muted/20 text-[var(--color-text-secondary)] border border-white/10 hover:text-[var(--color-text-primary)] hover:border-white/20 transition-colors flex items-center gap-1"
+                                >
+                                  <Edit3 className="w-3 h-3" /> Editar fechas
+                                </button>
+                                <button
                                   onClick={() => { setDeleteBonoClient(client); setShowDeleteBonoModal(true); }}
                                   className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors flex items-center gap-1"
                                 >
@@ -2915,8 +3020,12 @@ export default function AdminPage() {
                           <div className="mt-2 flex flex-wrap gap-2">
                             <button
                               onClick={() => {
+                                const defaults = getDefaultBonoDateRange();
                                 setAssignBonoClient(client);
                                 setAssignBonoTamano(240);
+                                setAssignBonoStartDate(defaults.startDate);
+                                setAssignBonoEndDate(defaults.endDate);
+                                setAssignBonoError('');
                                 setShowAssignBonoModal(true);
                               }}
                               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)] transition-colors flex items-center gap-1"
@@ -5844,6 +5953,34 @@ export default function AdminPage() {
                           </div>
                         </div>
 
+                        {/* Fechas de validez */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Fecha de inicio</label>
+                            <input
+                              type="date"
+                              value={assignBonoStartDate}
+                              onChange={(e) => {
+                                setAssignBonoStartDate(e.target.value);
+                                setAssignBonoError('');
+                              }}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Fecha de fin</label>
+                            <input
+                              type="date"
+                              value={assignBonoEndDate}
+                              onChange={(e) => {
+                                setAssignBonoEndDate(e.target.value);
+                                setAssignBonoError('');
+                              }}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            />
+                          </div>
+                        </div>
+
                         {/* Summary */}
                         <div className="p-4 rounded-xl bg-muted/10 border border-white/5">
                           <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-3">Resumen del Bono</h3>
@@ -5863,18 +6000,21 @@ export default function AdminPage() {
                               </span>
                             </div>
                             <div className="flex justify-between">
-                              <span className="text-[var(--color-text-secondary)]">Expira</span>
+                              <span className="text-[var(--color-text-secondary)]">Validez</span>
                               <span className="text-[var(--color-text-primary)]">
-                                {(() => {
-                                  const exp = new Date();
-                                  exp.setMonth(exp.getMonth() + (siteConfig.bonoExpirationMonths || 1));
-                                  return exp.toLocaleDateString('es-ES');
-                                })()}
+                                {assignBonoStartDate || '--'} - {assignBonoEndDate || '--'}
                               </span>
                             </div>
                           </div>
                         </div>
                       </div>
+
+                      {assignBonoError && (
+                        <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          {assignBonoError}
+                        </div>
+                      )}
 
                       {/* Actions */}
                       <div className="flex gap-3 justify-end mt-6">
@@ -5887,6 +6027,15 @@ export default function AdminPage() {
                         <button
                           disabled={savingBono}
                           onClick={async () => {
+                            const validationError = validateBonoDateInputs(assignBonoStartDate, assignBonoEndDate);
+                            const fechaAsignacion = startOfLocalDayIso(assignBonoStartDate);
+                            const fechaExpiracion = endOfLocalDayIso(assignBonoEndDate);
+
+                            if (validationError || !fechaAsignacion || !fechaExpiracion) {
+                              setAssignBonoError(validationError || 'Revisa las fechas del bono.');
+                              return;
+                            }
+
                             setSavingBono(true);
                             try {
                               // Deactivate existing bono if any
@@ -5895,17 +6044,13 @@ export default function AdminPage() {
                                 await deactivateBono(existingBono.id);
                               }
 
-                              const now = new Date();
-                              const expiration = new Date(now);
-                              expiration.setMonth(expiration.getMonth() + (siteConfig.bonoExpirationMonths || 1));
-
                               await assignBono({
                                 userId: assignBonoClient.uid,
                                 tamano: assignBonoTamano,
                                 minutosTotales: assignBonoTamano,
                                 minutosRestantes: assignBonoTamano,
-                                fechaAsignacion: now.toISOString(),
-                                fechaExpiracion: expiration.toISOString(),
+                                fechaAsignacion,
+                                fechaExpiracion,
                                 estado: 'activo',
                                 historial: [],
                                 asignadoPor: user?.email || 'admin',
@@ -5914,10 +6059,11 @@ export default function AdminPage() {
                               await addActivityLog({
                                 action: 'bono_assigned',
                                 adminEmail: user?.email || 'unknown',
-                                details: `Cliente: ${assignBonoClient.name}, Bono Mensual ${assignBonoTamano / 60}h`,
+                                details: `Cliente: ${assignBonoClient.name}, Bono Mensual ${assignBonoTamano / 60}h, Validez: ${assignBonoStartDate} - ${assignBonoEndDate}`,
                               });
 
                               setShowAssignBonoModal(false);
+                              setAssignBonoError('');
                               await refreshData();
                             } catch (err) {
                               console.error('Error assigning bono:', err);
@@ -5930,6 +6076,133 @@ export default function AdminPage() {
                         >
                           {savingBono ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Ticket className="w-4 h-4" />}
                           {savingBono ? 'Asignando...' : 'Asignar Bono'}
+                        </button>
+                      </div>
+                    </GlassCard>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ============================================
+                EDIT BONO DATES MODAL
+                ============================================ */}
+            <AnimatePresence>
+              {showEditBonoDatesModal && editBonoDatesClient && (
+                <motion.div
+                  key="edit-bono-dates-modal"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                  onClick={() => {
+                    setShowEditBonoDatesModal(false);
+                    setEditBonoDatesClient(null);
+                    setEditBonoDatesError('');
+                  }}
+                >
+                  <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full max-w-md"
+                  >
+                    <GlassCard className="p-6">
+                      <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-1">Editar fechas</h2>
+                      <p className="text-sm text-[var(--color-text-secondary)] mb-6">
+                        Actualiza la validez del bono activo de <strong className="text-[var(--color-text-primary)]">{editBonoDatesClient.name}</strong>
+                      </p>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Fecha de inicio</label>
+                          <input
+                            type="date"
+                            value={editBonoStartDate}
+                            onChange={(e) => {
+                              setEditBonoStartDate(e.target.value);
+                              setEditBonoDatesError('');
+                            }}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Fecha de fin</label>
+                          <input
+                            type="date"
+                            value={editBonoEndDate}
+                            onChange={(e) => {
+                              setEditBonoEndDate(e.target.value);
+                              setEditBonoDatesError('');
+                            }}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                          />
+                        </div>
+                      </div>
+
+                      {editBonoDatesError && (
+                        <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 shrink-0" />
+                          {editBonoDatesError}
+                        </div>
+                      )}
+
+                      <div className="flex gap-3 justify-end mt-6">
+                        <button
+                          onClick={() => {
+                            setShowEditBonoDatesModal(false);
+                            setEditBonoDatesClient(null);
+                            setEditBonoDatesError('');
+                          }}
+                          className="px-4 py-2.5 rounded-xl border border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          disabled={savingBonoDates}
+                          onClick={async () => {
+                            const activeBono = clientBonos[editBonoDatesClient.uid];
+                            const validationError = validateBonoDateInputs(editBonoStartDate, editBonoEndDate);
+                            const fechaAsignacion = startOfLocalDayIso(editBonoStartDate);
+                            const fechaExpiracion = endOfLocalDayIso(editBonoEndDate);
+
+                            if (!activeBono) {
+                              setEditBonoDatesError('No se ha encontrado un bono activo para este cliente.');
+                              return;
+                            }
+
+                            if (validationError || !fechaAsignacion || !fechaExpiracion) {
+                              setEditBonoDatesError(validationError || 'Revisa las fechas del bono.');
+                              return;
+                            }
+
+                            setSavingBonoDates(true);
+                            try {
+                              await updateBonoDates(activeBono.id, {
+                                fechaAsignacion,
+                                fechaExpiracion,
+                              });
+                              await addActivityLog({
+                                action: 'bono_dates_updated',
+                                adminEmail: user?.email || 'unknown',
+                                details: `Cliente: ${editBonoDatesClient.name}, Bono: ${activeBono.id}, Validez: ${editBonoStartDate} - ${editBonoEndDate}`,
+                              });
+                              setShowEditBonoDatesModal(false);
+                              setEditBonoDatesClient(null);
+                              setEditBonoDatesError('');
+                              await refreshData();
+                            } catch (err) {
+                              console.error('Error updating bono dates:', err);
+                              setEditBonoDatesError('Error al guardar las fechas del bono.');
+                            } finally {
+                              setSavingBonoDates(false);
+                            }
+                          }}
+                          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[var(--color-accent-val)] to-emerald-bright text-[var(--color-bg-base)] font-semibold hover:shadow-lg hover:shadow-emerald/25 transition-all disabled:opacity-50 flex items-center gap-2"
+                        >
+                          {savingBonoDates ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                          {savingBonoDates ? 'Guardando...' : 'Guardar fechas'}
                         </button>
                       </div>
                     </GlassCard>

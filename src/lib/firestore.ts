@@ -1612,6 +1612,17 @@ export async function assignBono(data: Omit<Bono, 'id' | 'createdAt'>): Promise<
     return docRef.id;
 }
 
+/** Actualizar solo las fechas de validez de un bono existente */
+export async function updateBonoDates(
+    bonoId: string,
+    dates: Pick<Bono, 'fechaAsignacion' | 'fechaExpiracion'>
+): Promise<void> {
+    await updateDoc(doc(db, 'bonos', bonoId), {
+        fechaAsignacion: dates.fechaAsignacion,
+        fechaExpiracion: dates.fechaExpiracion,
+    });
+}
+
 /** Marcar un bono como agotado (cuando se reemplaza por uno nuevo) */
 export async function deactivateBono(bonoId: string): Promise<void> {
     await updateDoc(doc(db, 'bonos', bonoId), { estado: 'agotado' });

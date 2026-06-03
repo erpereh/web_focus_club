@@ -200,8 +200,8 @@ export interface Bono {
     tamano: 240 | 360 | 480;  // tamaño del bono: 4h, 6h u 8h en minutos
     minutosTotales: number;    // minutos totales al crear el bono
     minutosRestantes: number;  // minutos disponibles
-    fechaAsignacion: string;   // ISO date
-    fechaExpiracion: string;   // calculada: fechaAsignacion + bonoExpirationMonths
+    fechaAsignacion: string;   // ISO date de inicio del bono
+    fechaExpiracion: string;   // ISO date de fin del bono
     estado: 'activo' | 'agotado' | 'expirado' | 'eliminado';
     historial: BonoHistorialEntry[];
     asignadoPor: string;       // admin email
