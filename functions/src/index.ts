@@ -5,7 +5,7 @@ import { DocumentReference, FieldValue, getFirestore, QueryDocumentSnapshot, Tra
 import { getMessaging } from "firebase-admin/messaging";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
-import { onDocumentDeleted, onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentDeleted, onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { calendar_v3, google } from "googleapis";
 import { Resend } from "resend";
 import {
@@ -24,6 +24,7 @@ const GOOGLE_CALENDAR_ID = defineSecret("GOOGLE_CALENDAR_ID");
 const REGION = "europe-west1";
 const MAX_CAPACITY = 2;
 const APPOINTMENT_SERVICE_TYPE = "Bono Mensual de Entrenamiento";
+const ADMIN_NOTIFICATION_EMAIL = "infofocusclub2026@gmail.com";
 const CONTACT_EMAIL_FROM = "Focus Club <noreply@focusclub.es>";
 const CONTACT_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const CONTACT_RATE_LIMIT_MAX_REQUESTS = 5;
@@ -200,12 +201,20 @@ interface ServiceDoc {
 
 interface MakePayload {
   action: "confirmed" | "deleted";
+  recipientType: "customer" | "admin";
   customerName: string;
   customerEmail: string;
   date: string;
   time: string;
   sessionType: string;
   trainerName: string;
+  clientName?: string;
+  clientEmail?: string;
+  clientPhone?: string;
+  appointmentStatus?: AppointmentDoc["status"] | "deleted";
+  appointmentId?: string;
+  duration?: AppointmentDuration;
+  serviceType?: string;
 }
 
 interface FcmTokenDoc {
@@ -558,17 +567,92 @@ async function sendMakeWebhook(payload: MakePayload): Promise<void> {
   }
 }
 
-function buildMakePayload(action: "confirmed" | "deleted", appointment: AppointmentDoc, trainerName: string): MakePayload {
+function buildMakePayload(
+  action: "confirmed" | "deleted",
+  appointment: AppointmentDoc,
+  trainerName: string,
+  recipientType: "customer" | "admin",
+  recipientEmail: string,
+  appointmentId?: string,
+  appointmentStatus: AppointmentDoc["status"] | "deleted" = appointment.status,
+): MakePayload {
   const slot = appointment.approvedSlot ?? appointment.preferredSlots?.[0];
-  return {
+  const payload: MakePayload = {
     action,
+    recipientType,
     customerName: appointment.name,
-    customerEmail: appointment.email,
+    customerEmail: recipientEmail,
     date: slot?.date ?? "",
     time: slot?.time ?? "",
     sessionType: appointment.sessionType || appointment.serviceType || "",
     trainerName,
   };
+
+  if (recipientType === "admin") {
+    payload.clientName = appointment.name;
+    payload.clientEmail = appointment.email;
+    payload.clientPhone = appointment.phone;
+    payload.appointmentStatus = appointmentStatus;
+    payload.appointmentId = appointmentId;
+    payload.duration = appointment.duration;
+    payload.serviceType = appointment.serviceType;
+  }
+
+  return payload;
+}
+
+async function sendAppointmentMakeNotification(
+  appointmentId: string,
+  appointment: AppointmentDoc,
+  action: "confirmed" | "deleted",
+  recipientType: "customer" | "admin",
+  recipientEmail: string,
+  appointmentStatus?: AppointmentDoc["status"] | "deleted",
+): Promise<void> {
+  const trainerName = await resolveTrainerName(appointment.assignedTrainer);
+  await sendMakeWebhook(buildMakePayload(
+    action,
+    appointment,
+    trainerName,
+    recipientType,
+    recipientEmail,
+    appointmentId,
+    appointmentStatus,
+  ));
+  console.log("[Make] Appointment notification sent", {
+    appointmentId,
+    action,
+    recipientType,
+    recipientEmail,
+  });
+}
+
+async function sendAppointmentMakeNotificationSafely(
+  appointmentId: string,
+  appointment: AppointmentDoc,
+  action: "confirmed" | "deleted",
+  recipientType: "customer" | "admin",
+  recipientEmail: string,
+  appointmentStatus?: AppointmentDoc["status"] | "deleted",
+): Promise<void> {
+  try {
+    await sendAppointmentMakeNotification(
+      appointmentId,
+      appointment,
+      action,
+      recipientType,
+      recipientEmail,
+      appointmentStatus,
+    );
+  } catch (error) {
+    console.error("[Make] Failed to send appointment notification", {
+      appointmentId,
+      action,
+      recipientType,
+      recipientEmail,
+      error,
+    });
+  }
 }
 
 function notificationSlot(appointment: AppointmentDoc): TimeSlot | undefined {
@@ -1249,6 +1333,7 @@ export const deleteUserFromAdmin = onCall<DeleteUserFromAdminRequest>(
 export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminRequest>(
   {
     region: REGION,
+    secrets: [MAKE_WEBHOOK_URL],
   },
   async (request) => {
     if (!request.auth) {
@@ -1403,6 +1488,23 @@ export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminReque
       } catch (error) {
         console.error("[Push] Failed to send admin-created approved appointment notification", result.appointmentId, error);
       }
+
+      await Promise.all([
+        sendAppointmentMakeNotificationSafely(
+          result.appointmentId,
+          result.appointment,
+          "confirmed",
+          "customer",
+          result.appointment.email,
+        ),
+        sendAppointmentMakeNotificationSafely(
+          result.appointmentId,
+          result.appointment,
+          "confirmed",
+          "admin",
+          ADMIN_NOTIFICATION_EMAIL,
+        ),
+      ]);
     }
 
     return {
@@ -1722,6 +1824,28 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
   },
 );
 
+export const onAppointmentCreated = onDocumentCreated(
+  {
+    document: "appointments/{appointmentId}",
+    region: REGION,
+    secrets: [MAKE_WEBHOOK_URL],
+  },
+  async (event) => {
+    const appointment = event.data?.data() as AppointmentDoc | undefined;
+    const appointmentId = String(event.params.appointmentId);
+
+    if (!appointment || appointment.status !== "pending") return;
+
+    await sendAppointmentMakeNotificationSafely(
+      appointmentId,
+      appointment,
+      "confirmed",
+      "admin",
+      ADMIN_NOTIFICATION_EMAIL,
+    );
+  },
+);
+
 export const onAppointmentApproved = onDocumentUpdated(
   {
     document: "appointments/{appointmentId}",
@@ -1731,12 +1855,19 @@ export const onAppointmentApproved = onDocumentUpdated(
   async (event) => {
     const before = event.data?.before.data() as AppointmentDoc | undefined;
     const after = event.data?.after.data() as AppointmentDoc | undefined;
+    const appointmentId = String(event.params.appointmentId);
 
     if (!before || !after) return;
-    if (before.status === "approved" || after.status !== "approved") return;
 
-    const trainerName = await resolveTrainerName(after.assignedTrainer);
-    await sendMakeWebhook(buildMakePayload("confirmed", after, trainerName));
+    const changedToApproved = before.status !== "approved" && after.status === "approved";
+    const changedToRejected = before.status !== "rejected" && after.status === "rejected";
+    if (!changedToApproved && !changedToRejected) return;
+
+    const action = changedToApproved ? "confirmed" : "deleted";
+    await Promise.all([
+      sendAppointmentMakeNotificationSafely(appointmentId, after, action, "customer", after.email),
+      sendAppointmentMakeNotificationSafely(appointmentId, after, action, "admin", ADMIN_NOTIFICATION_EMAIL),
+    ]);
   },
 );
 
@@ -1748,10 +1879,27 @@ export const onAppointmentDeleted = onDocumentDeleted(
   },
   async (event) => {
     const appointment = event.data?.data() as AppointmentDoc | undefined;
+    const appointmentId = String(event.params.appointmentId);
     if (!appointment) return;
 
-    const trainerName = await resolveTrainerName(appointment.assignedTrainer);
-    await sendMakeWebhook(buildMakePayload("deleted", appointment, trainerName));
+    await Promise.all([
+      sendAppointmentMakeNotificationSafely(
+        appointmentId,
+        appointment,
+        "deleted",
+        "customer",
+        appointment.email,
+        "deleted",
+      ),
+      sendAppointmentMakeNotificationSafely(
+        appointmentId,
+        appointment,
+        "deleted",
+        "admin",
+        ADMIN_NOTIFICATION_EMAIL,
+        "deleted",
+      ),
+    ]);
   },
 );
 
