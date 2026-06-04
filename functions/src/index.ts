@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase-admin/app";
 import { createHash, randomBytes } from "node:crypto";
 import { getAuth } from "firebase-admin/auth";
-import { DocumentReference, FieldValue, getFirestore } from "firebase-admin/firestore";
+import { DocumentReference, FieldValue, getFirestore, QueryDocumentSnapshot, Transaction } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
@@ -99,12 +99,34 @@ interface DeleteUserFromAdminRequest {
   targetUid?: unknown;
 }
 
+interface CreateAppointmentFromAdminRequest {
+  userId?: unknown;
+  date?: unknown;
+  time?: unknown;
+  durationMinutes?: unknown;
+  serviceType?: unknown;
+  assignedTrainer?: unknown;
+  status?: unknown;
+  comment?: unknown;
+}
+
 interface ParsedAdminUserData {
   name: string;
   email: string;
   phone: string;
   role: AdminUserRole;
   isTrainer: boolean;
+}
+
+interface ParsedAdminAppointmentData {
+  userId: string;
+  slot: TimeSlot;
+  duration: AppointmentDuration;
+  durationMinutes: number;
+  serviceType: string;
+  assignedTrainer: string;
+  status: "pending" | "approved";
+  comment: string;
 }
 
 interface AppointmentDoc {
@@ -128,6 +150,8 @@ interface AppointmentDoc {
   googleCalendarSyncStatus?: "synced" | "error" | "deleted";
   googleCalendarSyncError?: string | null;
   googleCalendarSyncHash?: string;
+  createdByAdmin?: boolean;
+  createdByAdminUid?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -165,6 +189,13 @@ interface TrainerDoc {
   id?: string;
   uid: string;
   name: string;
+  active?: boolean;
+}
+
+interface ServiceDoc {
+  title?: string;
+  duration?: string;
+  active?: boolean;
 }
 
 interface MakePayload {
@@ -566,6 +597,53 @@ function isInvalidFcmTokenError(code?: string): boolean {
     || code === "messaging/invalid-registration-token";
 }
 
+async function sendAppointmentStatusPushNotification(
+  appointmentId: string,
+  appointment: AppointmentDoc,
+  status: "approved" | "rejected",
+): Promise<void> {
+  const userSnap = await db.collection("users").doc(appointment.userId).get();
+  const user = userSnap.data() as UserProfile | undefined;
+  if (!user || user.pushNotificationsEnabled !== true) return;
+
+  const tokenSnap = await userSnap.ref.collection("fcmTokens").get();
+  const tokenRefs = tokenSnap.docs
+    .map((docSnap) => {
+      const tokenDoc = docSnap.data() as FcmTokenDoc;
+      const token = typeof tokenDoc.token === "string" ? tokenDoc.token.trim() : "";
+      return token ? { ref: docSnap.ref, token } : null;
+    })
+    .filter((entry): entry is { ref: DocumentReference; token: string } => entry !== null);
+
+  if (tokenRefs.length === 0) return;
+
+  const notification = appointmentStatusNotification(status, appointment);
+  const messaging = getMessaging();
+
+  for (let index = 0; index < tokenRefs.length; index += 500) {
+    const batch = tokenRefs.slice(index, index + 500);
+    const response = await messaging.sendEachForMulticast({
+      tokens: batch.map((entry) => entry.token),
+      notification,
+      data: {
+        type: "appointment_status",
+        appointmentId,
+        status,
+      },
+    });
+
+    await Promise.all(
+      response.responses.map((sendResponse, responseIndex) => {
+        const code = sendResponse.error?.code;
+        if (!sendResponse.success && isInvalidFcmTokenError(code)) {
+          return batch[responseIndex].ref.delete();
+        }
+        return Promise.resolve();
+      }),
+    );
+  }
+}
+
 function googleCalendarErrorStatus(error: unknown): number | undefined {
   if (!isRecord(error)) return undefined;
 
@@ -770,6 +848,42 @@ function parseDeleteUserFromAdminData(data: unknown): { targetUid: string } {
   };
 }
 
+function parseCreateAppointmentFromAdminData(data: unknown): ParsedAdminAppointmentData {
+  if (!isRecord(data)) {
+    throw toHttpsError("invalid-argument", "Los datos de la cita no son validos.");
+  }
+
+  const userId = normalizeTextField(data.userId, "cliente", 128);
+  const date = normalizeTextField(data.date, "fecha", 10);
+  const time = normalizeTextField(data.time, "hora", 5);
+  const durationMinutes = Number(data.durationMinutes);
+  const serviceType = normalizeTextField(data.serviceType, "servicio", 180);
+  const assignedTrainer = normalizeTextField(data.assignedTrainer, "entrenador", 128);
+  const status = data.status;
+  const comment = normalizeTextField(data.comment, "comentario", 1000, false);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
+    throw toHttpsError("invalid-argument", "La fecha u hora no tiene un formato valido.");
+  }
+  if (![30, 45, 60].includes(durationMinutes)) {
+    throw toHttpsError("invalid-argument", "La duracion de la cita no es valida.");
+  }
+  if (status !== "pending" && status !== "approved") {
+    throw toHttpsError("invalid-argument", "El estado inicial de la cita no es valido.");
+  }
+
+  return {
+    userId,
+    slot: { date, time },
+    duration: String(durationMinutes) as AppointmentDuration,
+    durationMinutes,
+    serviceType,
+    assignedTrainer,
+    status,
+    comment,
+  };
+}
+
 function generateTemporaryPassword(): string {
   return `${randomBytes(24).toString("base64url")}Aa1!`;
 }
@@ -846,6 +960,102 @@ async function addAdminUserActivityLog(data: Record<string, unknown>): Promise<v
   } catch (error) {
     console.error("[AdminUsers] Failed to write activity log", error);
   }
+}
+
+function slotOccupancyDocId(date: string, time: string): string {
+  return `${date}_${time}`;
+}
+
+function validateAdminAppointmentSlot(
+  input: ParsedAdminAppointmentData,
+  config: SiteConfig,
+  blockedTimes: Set<string>,
+  occupancyByTime: Map<string, number>,
+  userAppointments: AppointmentDoc[],
+): void {
+  const slotBlocks = getSlotBlocks(input.slot.time, input.durationMinutes);
+  const targetSlotKeys = new Set(slotBlocks.map((time) => `${input.slot.date}_${time}`));
+
+  const slotDate = slotDateTime(input.slot);
+  if (Number.isNaN(slotDate.getTime()) || slotDate <= getNowDate()) {
+    throw toHttpsError("failed-precondition", "La franja seleccionada ya no esta disponible.");
+  }
+
+  const validSlots = new Set(generateTimeSlots(config));
+  if (!validSlots.has(input.slot.time) || !doesSessionFitWithinSchedule(config, input.slot.time, input.durationMinutes)) {
+    throw toHttpsError("failed-precondition", "La franja seleccionada no es valida para el horario configurado.");
+  }
+
+  if (slotBlocks.some((time) => blockedTimes.has(time))) {
+    throw toHttpsError("failed-precondition", "La franja seleccionada esta bloqueada.");
+  }
+
+  if (slotBlocks.some((time) => (occupancyByTime.get(time) ?? 0) >= MAX_CAPACITY)) {
+    throw toHttpsError("failed-precondition", "La franja seleccionada esta llena.");
+  }
+
+  const hasConflict = userAppointments.some((appointment) => {
+    const existingKeys = appointmentSlotKeys(appointment);
+    for (const key of existingKeys) {
+      if (targetSlotKeys.has(key)) return true;
+    }
+    return false;
+  });
+
+  if (hasConflict) {
+    throw toHttpsError("failed-precondition", "El cliente ya tiene una cita en esta franja.");
+  }
+}
+
+function applyApprovedAppointmentWrites(
+  transaction: Transaction,
+  input: ParsedAdminAppointmentData,
+  appointmentRef: DocumentReference,
+  bonoDoc: QueryDocumentSnapshot | undefined,
+  now: string,
+): { bonoWarning?: string } {
+  const slotBlocks = getSlotBlocks(input.slot.time, input.durationMinutes);
+  slotBlocks.forEach((time) => {
+    transaction.set(
+      db.collection("slot_occupancy").doc(slotOccupancyDocId(input.slot.date, time)),
+      { date: input.slot.date, time, count: FieldValue.increment(1) },
+      { merge: true },
+    );
+  });
+
+  if (!bonoDoc) {
+    return { bonoWarning: "Cita creada aprobada sin descuento: el cliente no tiene bono activo." };
+  }
+
+  const bono = { id: bonoDoc.id, ...bonoDoc.data() } as BonoDoc;
+  if (bono.fechaExpiracion && new Date(bono.fechaExpiracion) < getNowDate()) {
+    return { bonoWarning: "Cita creada aprobada sin descuento: el bono activo esta expirado." };
+  }
+
+  const availableMinutes = getBonoMinutosRestantes(bono);
+  if (availableMinutes < input.durationMinutes) {
+    return {
+      bonoWarning: `Cita creada aprobada sin descuento: el bono solo tiene ${availableMinutes} min disponibles.`,
+    };
+  }
+
+  const remainingMinutes = Math.max(0, availableMinutes - input.durationMinutes);
+  const update: Record<string, unknown> = {
+    minutosRestantes: remainingMinutes,
+    historial: FieldValue.arrayUnion({
+      fecha: now,
+      tipo: input.serviceType,
+      duracion: input.duration,
+      appointmentId: appointmentRef.id,
+    }),
+  };
+
+  if (remainingMinutes <= 0) {
+    update.estado = "agotado";
+  }
+
+  transaction.set(bonoDoc.ref, update, { merge: true });
+  return {};
 }
 
 export const createUserFromAdmin = onCall<CreateUserFromAdminRequest>(
@@ -1032,6 +1242,173 @@ export const deleteUserFromAdmin = onCall<DeleteUserFromAdminRequest>(
     return {
       success: true,
       uid: input.targetUid,
+    };
+  },
+);
+
+export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminRequest>(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw toHttpsError("permission-denied", "Debes iniciar sesion como admin.");
+    }
+
+    await requireAdmin(request.auth.uid);
+    const adminUid = request.auth.uid;
+    const adminEmail = request.auth.token.email ?? "";
+    const input = parseCreateAppointmentFromAdminData(request.data);
+    const appointmentRef = db.collection("appointments").doc();
+    const userRef = db.collection("users").doc(input.userId);
+    const trainerRef = db.collection("trainers").doc(input.assignedTrainer);
+    const serviceRef = input.serviceType.includes("/")
+      ? null
+      : db.collection("services").doc(input.serviceType);
+    const siteConfigRef = db.collection("site_config").doc("main");
+    const blockedSlotsQuery = db.collection("blocked_slots").where("date", "==", input.slot.date);
+    const occupancyQuery = db.collection("slot_occupancy").where("date", "==", input.slot.date);
+    const userAppointmentsQuery = db.collection("appointments")
+      .where("userId", "==", input.userId)
+      .where("status", "in", ["pending", "approved"]);
+    const serviceTitleQuery = db.collection("services").where("title", "==", input.serviceType).limit(1);
+    const bonosQuery = db.collection("bonos")
+      .where("userId", "==", input.userId)
+      .where("estado", "==", "activo")
+      .limit(1);
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [
+        userSnap,
+        trainerSnap,
+        serviceIdSnap,
+        siteConfigSnap,
+        blockedSlotsSnap,
+        occupancySnap,
+        userAppointmentsSnap,
+        serviceTitleSnap,
+        bonosSnap,
+      ] = await Promise.all([
+        transaction.get(userRef),
+        transaction.get(trainerRef),
+        serviceRef ? transaction.get(serviceRef) : Promise.resolve(undefined),
+        transaction.get(siteConfigRef),
+        transaction.get(blockedSlotsQuery),
+        transaction.get(occupancyQuery),
+        transaction.get(userAppointmentsQuery),
+        transaction.get(serviceTitleQuery),
+        transaction.get(bonosQuery),
+      ]);
+
+      if (!userSnap.exists) {
+        throw toHttpsError("failed-precondition", "No se ha encontrado el cliente indicado.");
+      }
+
+      const userProfile = userSnap.data() as UserProfile;
+      if (!userProfile.email || !userProfile.name) {
+        throw toHttpsError("failed-precondition", "El perfil del cliente no esta completo.");
+      }
+
+      if (!trainerSnap.exists) {
+        throw toHttpsError("failed-precondition", "No se ha encontrado el entrenador indicado.");
+      }
+      const trainer = trainerSnap.data() as TrainerDoc;
+      if (trainer.active === false) {
+        throw toHttpsError("failed-precondition", "El entrenador seleccionado no esta activo.");
+      }
+
+      const service = serviceIdSnap?.exists
+        ? serviceIdSnap.data() as ServiceDoc
+        : serviceTitleSnap.docs[0]?.data() as ServiceDoc | undefined;
+      if (!service) {
+        throw toHttpsError("failed-precondition", "No se ha encontrado el servicio seleccionado.");
+      }
+      if (service.active === false) {
+        throw toHttpsError("failed-precondition", "El servicio seleccionado no esta activo.");
+      }
+
+      const config = siteConfigSnap.exists
+        ? normalizeSiteConfig(siteConfigSnap.data() as Partial<SiteConfig>)
+        : normalizeSiteConfig();
+      const blockedTimes = new Set<string>();
+      blockedSlotsSnap.docs.forEach((docSnap) => {
+        const blocked = docSnap.data() as TimeSlot;
+        if (typeof blocked.time === "string") blockedTimes.add(blocked.time);
+      });
+      const occupancyByTime = new Map<string, number>();
+      occupancySnap.docs.forEach((docSnap) => {
+        const occupancy = docSnap.data() as SlotOccupancy;
+        occupancyByTime.set(occupancy.time, occupancy.count ?? 0);
+      });
+      const userAppointments = userAppointmentsSnap.docs.map((docSnap) => docSnap.data() as AppointmentDoc);
+
+      validateAdminAppointmentSlot(input, config, blockedTimes, occupancyByTime, userAppointments);
+
+      const now = new Date().toISOString();
+      const appointment: AppointmentDoc = {
+        userId: input.userId,
+        name: userProfile.name,
+        email: userProfile.email,
+        phone: userProfile.phone || "",
+        serviceType: input.serviceType,
+        sessionType: service.title || input.serviceType,
+        duration: input.duration,
+        preferredSlots: [input.slot],
+        reason: input.comment,
+        status: input.status,
+        date: input.slot.date,
+        time: input.slot.time,
+        assignedTrainer: input.assignedTrainer,
+        createdByAdmin: true,
+        createdByAdminUid: adminUid,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      let bonoWarning: string | undefined;
+      if (input.status === "approved") {
+        appointment.approvedSlot = input.slot;
+        const writeResult = applyApprovedAppointmentWrites(
+          transaction,
+          input,
+          appointmentRef,
+          bonosSnap.docs[0],
+          now,
+        );
+        bonoWarning = writeResult.bonoWarning;
+      }
+
+      transaction.create(appointmentRef, appointment);
+      transaction.create(db.collection("activity_logs").doc(), {
+        action: "appointment_created_by_admin",
+        adminUid,
+        adminEmail,
+        appointmentId: appointmentRef.id,
+        targetUid: input.userId,
+        targetEmail: userProfile.email,
+        status: input.status,
+        date: input.slot.date,
+        time: input.slot.time,
+        serviceType: input.serviceType,
+        createdAt: now,
+        timestamp: now,
+      });
+
+      return { appointmentId: appointmentRef.id, appointment, bonoWarning };
+    });
+
+    if (result.appointment.status === "approved") {
+      try {
+        await sendAppointmentStatusPushNotification(result.appointmentId, result.appointment, "approved");
+      } catch (error) {
+        console.error("[Push] Failed to send admin-created approved appointment notification", result.appointmentId, error);
+      }
+    }
+
+    return {
+      success: true,
+      appointmentId: result.appointmentId,
+      bonoWarning: result.bonoWarning,
     };
   },
 );
@@ -1395,45 +1772,6 @@ export const onAppointmentStatusPushNotification = onDocumentUpdated(
     if (!changedToApproved && !changedToRejected) return;
 
     const status = after.status as "approved" | "rejected";
-    const userSnap = await db.collection("users").doc(after.userId).get();
-    const user = userSnap.data() as UserProfile | undefined;
-    if (!user || user.pushNotificationsEnabled !== true) return;
-
-    const tokenSnap = await userSnap.ref.collection("fcmTokens").get();
-    const tokenRefs = tokenSnap.docs
-      .map((docSnap) => {
-        const tokenDoc = docSnap.data() as FcmTokenDoc;
-        const token = typeof tokenDoc.token === "string" ? tokenDoc.token.trim() : "";
-        return token ? { ref: docSnap.ref, token } : null;
-      })
-      .filter((entry): entry is { ref: DocumentReference; token: string } => entry !== null);
-
-    if (tokenRefs.length === 0) return;
-
-    const notification = appointmentStatusNotification(status, after);
-    const messaging = getMessaging();
-
-    for (let index = 0; index < tokenRefs.length; index += 500) {
-      const batch = tokenRefs.slice(index, index + 500);
-      const response = await messaging.sendEachForMulticast({
-        tokens: batch.map((entry) => entry.token),
-        notification,
-        data: {
-          type: "appointment_status",
-          appointmentId,
-          status,
-        },
-      });
-
-      await Promise.all(
-        response.responses.map((sendResponse, responseIndex) => {
-          const code = sendResponse.error?.code;
-          if (!sendResponse.success && isInvalidFcmTokenError(code)) {
-            return batch[responseIndex].ref.delete();
-          }
-          return Promise.resolve();
-        }),
-      );
-    }
+    await sendAppointmentStatusPushNotification(appointmentId, after, status);
   },
 );

@@ -100,6 +100,7 @@ import {
   getGaleriaConfig as getGaleriaConfigFS,
   getUsers,
   getUserProfile,
+  createAppointmentFromAdmin as createAppointmentFromAdminFS,
   createUserFromAdmin as createUserFromAdminFS,
   updateUserFromAdmin as updateUserFromAdminFS,
   deleteUserFromAdmin as deleteUserFromAdminFS,
@@ -121,6 +122,7 @@ import {
   updateSiteConfig as updateSiteConfigFS,
   generateTimeSlots,
   normalizeSiteConfig,
+  doesSessionFitWithinSchedule,
   updateAppointmentSlot as updateAppointmentSlotFS,
   getAllActiveBonos,
   getActiveBonoByUser,
@@ -185,6 +187,17 @@ interface EditClientFormState {
   role: AdminUserRole;
 }
 
+interface AdminAppointmentFormState {
+  userId: string;
+  date: string;
+  time: string;
+  durationMinutes: 30 | 45 | 60;
+  serviceType: string;
+  assignedTrainer: string;
+  status: 'pending' | 'approved';
+  comment: string;
+}
+
 const EMPTY_CREATE_CLIENT_FORM: CreateClientFormState = {
   name: '',
   email: '',
@@ -201,6 +214,17 @@ const EMPTY_EDIT_CLIENT_FORM: EditClientFormState = {
   email: '',
   phone: '',
   role: 'user',
+};
+
+const EMPTY_ADMIN_APPOINTMENT_FORM: AdminAppointmentFormState = {
+  userId: '',
+  date: '',
+  time: '',
+  durationMinutes: 60,
+  serviceType: '',
+  assignedTrainer: '',
+  status: 'pending',
+  comment: '',
 };
 
 const CLIENT_ROLE_OPTIONS: { value: AdminUserRole; label: string }[] = [
@@ -240,6 +264,8 @@ const durationLabels: Record<string, string> = {
   '60': '60 minutos',
   '90': '90 minutos', // legacy
 };
+
+const ADMIN_MAX_CAPACITY = 2;
 
 function formatDateInputLocal(date: Date): string {
   const year = date.getFullYear();
@@ -338,6 +364,18 @@ function getCoveredSlotBlocks(startTime: string, durationMinutes: number): strin
   }
 
   return Array.from(blocks);
+}
+
+function getAppointmentPrimarySlot(appointment: Appointment): TimeSlot | undefined {
+  return appointment.approvedSlot ?? appointment.preferredSlots?.[0];
+}
+
+function getAppointmentSlotKeys(appointment: Appointment): Set<string> {
+  const slot = getAppointmentPrimarySlot(appointment);
+  if (!slot) return new Set<string>();
+  return new Set(
+    getCoveredSlotBlocks(slot.time, parseInt(appointment.duration, 10)).map((time) => `${slot.date}_${time}`)
+  );
 }
 
 // ─── Sortable Timeline Item (for dnd-kit) ────────────────────────────────────
@@ -1041,6 +1079,13 @@ export default function AdminPage() {
   const [deleteClientConfirmEmail, setDeleteClientConfirmEmail] = useState('');
   const [deleteClientError, setDeleteClientError] = useState('');
   const [deletingClient, setDeletingClient] = useState(false);
+  const [showCreateAppointmentModal, setShowCreateAppointmentModal] = useState(false);
+  const [createAppointmentForm, setCreateAppointmentForm] = useState<AdminAppointmentFormState>(EMPTY_ADMIN_APPOINTMENT_FORM);
+  const [createAppointmentClientSearch, setCreateAppointmentClientSearch] = useState('');
+  const [createAppointmentError, setCreateAppointmentError] = useState('');
+  const [createAppointmentWarning, setCreateAppointmentWarning] = useState('');
+  const [creatingAppointment, setCreatingAppointment] = useState(false);
+  const [appointmentClientLocked, setAppointmentClientLocked] = useState(false);
 
   // Site config (dynamic time slots)
   const [siteConfig, setSiteConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, slotInterval: 30, bonoExpirationMonths: 1, maintenanceMode: false });
@@ -1255,9 +1300,87 @@ export default function AdminPage() {
     : appointments.filter((a) => a.status === statusFilter);
   const clientsByUid = useMemo(() => new Map(clients.map((client) => [client.uid, client])), [clients]);
   const clientsByEmail = useMemo(() => new Map(clients.map((client) => [client.email, client])), [clients]);
+  const activeTrainers = useMemo(() => trainers.filter((trainer) => trainer.active !== false), [trainers]);
+  const appointmentServices = useMemo(() => services.filter((service) => service.active !== false), [services]);
 
   const getClientForAppointment = (appointment: Appointment): UserProfile | undefined =>
     clientsByUid.get(appointment.userId) ?? clientsByEmail.get(appointment.email);
+
+  const selectedCreateAppointmentClient = createAppointmentForm.userId
+    ? clientsByUid.get(createAppointmentForm.userId)
+    : undefined;
+  const selectedCreateAppointmentBono = createAppointmentForm.userId
+    ? clientBonos[createAppointmentForm.userId]
+    : null;
+
+  const filteredCreateAppointmentClients = useMemo(() => {
+    const queryText = createAppointmentClientSearch.trim().toLowerCase();
+    if (!queryText) return clients.slice(0, 20);
+    return clients
+      .filter((client) =>
+        client.name.toLowerCase().includes(queryText) ||
+        client.email.toLowerCase().includes(queryText)
+      )
+      .slice(0, 20);
+  }, [clients, createAppointmentClientSearch]);
+
+  const getAdminAppointmentSlotStatus = (time: string) => {
+    const date = createAppointmentForm.date;
+    const userId = createAppointmentForm.userId;
+    const durationMinutes = createAppointmentForm.durationMinutes;
+
+    if (!date) {
+      return { disabled: true, label: 'Elige fecha', tone: 'muted' as const, occupancy: 0 };
+    }
+
+    if (!doesSessionFitWithinSchedule(siteConfig, time, durationMinutes)) {
+      return { disabled: true, label: 'Fuera de horario', tone: 'muted' as const, occupancy: 0 };
+    }
+
+    const blocks = getCoveredSlotBlocks(time, durationMinutes);
+    const blockedTimes = new Set(blockedSlots.filter((slot) => slot.date === date).map((slot) => slot.time));
+    const blocked = blocks.some((blockTime) => blockedTimes.has(blockTime));
+    if (blocked) {
+      return { disabled: true, label: 'Bloqueado', tone: 'blocked' as const, occupancy: 0 };
+    }
+
+    const occupancyByTime = new Map<string, number>();
+    appointments
+      .filter((appointment) => appointment.status === 'approved')
+      .forEach((appointment) => {
+        const slot = getAppointmentPrimarySlot(appointment);
+        if (!slot || slot.date !== date) return;
+        getCoveredSlotBlocks(slot.time, parseInt(appointment.duration, 10)).forEach((blockTime) => {
+          occupancyByTime.set(blockTime, (occupancyByTime.get(blockTime) ?? 0) + 1);
+        });
+      });
+    const occupancy = Math.max(...blocks.map((blockTime) => occupancyByTime.get(blockTime) ?? 0), 0);
+    if (occupancy >= ADMIN_MAX_CAPACITY) {
+      return { disabled: true, label: 'Lleno', tone: 'full' as const, occupancy };
+    }
+
+    if (userId) {
+      const targetKeys = new Set(blocks.map((blockTime) => `${date}_${blockTime}`));
+      const duplicated = appointments
+        .filter((appointment) => appointment.userId === userId && ['pending', 'approved'].includes(appointment.status))
+        .some((appointment) => {
+          const keys = getAppointmentSlotKeys(appointment);
+          for (const key of keys) {
+            if (targetKeys.has(key)) return true;
+          }
+          return false;
+        });
+      if (duplicated) {
+        return { disabled: true, label: 'Duplicado', tone: 'duplicate' as const, occupancy };
+      }
+    }
+
+    if (occupancy > 0) {
+      return { disabled: false, label: `${occupancy}/${ADMIN_MAX_CAPACITY}`, tone: 'partial' as const, occupancy };
+    }
+
+    return { disabled: false, label: 'Libre', tone: 'free' as const, occupancy };
+  };
 
   // Manejar inicio de sesión admin con Firebase Auth
   const handleLogin = async (e: React.FormEvent) => {
@@ -1302,6 +1425,73 @@ export default function AdminPage() {
   };
 
   // Manejar actualización de estado
+  const openCreateAppointmentModal = (client?: UserProfile) => {
+    const firstTrainer = activeTrainers[0];
+    setCreateAppointmentForm({
+      ...EMPTY_ADMIN_APPOINTMENT_FORM,
+      userId: client?.uid ?? '',
+      date: formatDateInputLocal(new Date()),
+      serviceType: 'Bono Mensual de Entrenamiento',
+      assignedTrainer: firstTrainer?.id ?? '',
+    });
+    setAppointmentClientLocked(Boolean(client));
+    setCreateAppointmentClientSearch(client ? `${client.name} ${client.email}` : '');
+    setCreateAppointmentError('');
+    setCreateAppointmentWarning('');
+    setShowCreateAppointmentModal(true);
+  };
+
+  const closeCreateAppointmentModal = () => {
+    setShowCreateAppointmentModal(false);
+    setCreateAppointmentForm(EMPTY_ADMIN_APPOINTMENT_FORM);
+    setCreateAppointmentClientSearch('');
+    setCreateAppointmentError('');
+    setCreateAppointmentWarning('');
+    setCreatingAppointment(false);
+    setAppointmentClientLocked(false);
+  };
+
+  const validateCreateAppointmentForm = () => {
+    if (!createAppointmentForm.userId) return 'Selecciona un cliente.';
+    if (!createAppointmentForm.date) return 'Selecciona una fecha.';
+    if (!createAppointmentForm.time) return 'Selecciona una hora disponible.';
+    if (!createAppointmentForm.serviceType) return 'Selecciona un servicio.';
+    if (!createAppointmentForm.assignedTrainer) return 'Selecciona un entrenador.';
+    return '';
+  };
+
+  const handleCreateAppointmentFromAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const validationError = validateCreateAppointmentForm();
+    if (validationError) {
+      setCreateAppointmentError(validationError);
+      return;
+    }
+
+    setCreatingAppointment(true);
+    setCreateAppointmentError('');
+    setCreateAppointmentWarning('');
+
+    try {
+      const result = await createAppointmentFromAdminFS({
+        ...createAppointmentForm,
+        comment: createAppointmentForm.comment.trim(),
+      });
+      await refreshData();
+      closeCreateAppointmentModal();
+      const t = toast({
+        title: 'Cita creada',
+        description: result.bonoWarning || 'La cita se ha creado correctamente.',
+      });
+      setTimeout(() => t.dismiss(), 4500);
+    } catch (err) {
+      console.error('Error creating appointment from admin:', err);
+      setCreateAppointmentError(getAdminCallableErrorMessage(err, 'Error al crear la cita.'));
+    } finally {
+      setCreatingAppointment(false);
+    }
+  };
+
   const closeCreateClientModal = () => {
     setShowCreateClientModal(false);
     setCreateClientForm(EMPTY_CREATE_CLIENT_FORM);
@@ -2786,6 +2976,14 @@ export default function AdminPage() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                     <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Gestión de Citas</h1>
                     <div className="flex flex-wrap gap-2">
+                      <PremiumButton
+                        variant="cta"
+                        size="sm"
+                        icon={<Plus className="w-4 h-4" />}
+                        onClick={() => openCreateAppointmentModal()}
+                      >
+                        Crear cita
+                      </PremiumButton>
                       {(['all', 'pending', 'approved', 'rejected'] as StatusFilter[]).map(
                         (filter) => (
                           <button
@@ -3166,6 +3364,13 @@ export default function AdminPage() {
                               className="px-3 py-1.5 rounded-lg text-xs font-medium bg-muted/20 text-[var(--color-text-secondary)] border border-white/10 hover:text-[var(--color-text-primary)] hover:border-white/20 transition-colors flex items-center gap-1"
                             >
                               <Edit3 className="w-3 h-3" /> Editar datos
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openCreateAppointmentModal(client)}
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)] transition-colors flex items-center gap-1"
+                            >
+                              <CalendarClock className="w-3 h-3" /> Dar cita
                             </button>
                           </div>
                         </div>
@@ -6144,6 +6349,249 @@ export default function AdminPage() {
                 setAboutHomePickerOpen(false);
               }}
             />
+
+            {/* ============================================
+                CREATE APPOINTMENT MODAL
+                ============================================ */}
+            <AnimatePresence>
+              {showCreateAppointmentModal && (
+                <motion.div
+                  key="create-appointment-modal"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                  onClick={closeCreateAppointmentModal}
+                >
+                  <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full max-w-3xl max-h-[92vh] overflow-y-auto"
+                  >
+                    <GlassCard className="p-6">
+                      <div className="flex items-start justify-between gap-4 mb-6">
+                        <div>
+                          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Crear cita</h2>
+                          <p className="text-sm text-[var(--color-text-secondary)] mt-1">
+                            La disponibilidad y el bono se validan de nuevo en backend.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={closeCreateAppointmentModal}
+                          className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-muted/20"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+
+                      <form onSubmit={handleCreateAppointmentFromAdmin} className="space-y-5">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Cliente *</label>
+                          {appointmentClientLocked && selectedCreateAppointmentClient ? (
+                            <div className="px-4 py-3 rounded-xl bg-muted/30 border border-border text-[var(--color-text-primary)]">
+                              <p className="font-medium">{selectedCreateAppointmentClient.name}</p>
+                              <p className="text-xs text-[var(--color-text-secondary)]">{selectedCreateAppointmentClient.email}</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <div className="relative">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-secondary)]" />
+                                <input
+                                  type="text"
+                                  value={createAppointmentClientSearch}
+                                  onChange={(e) => setCreateAppointmentClientSearch(e.target.value)}
+                                  placeholder="Buscar cliente por nombre o email"
+                                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                                />
+                              </div>
+                              <div className="max-h-36 overflow-y-auto rounded-xl border border-border bg-muted/10">
+                                {filteredCreateAppointmentClients.map((client) => (
+                                  <button
+                                    key={client.uid}
+                                    type="button"
+                                    onClick={() => {
+                                      setCreateAppointmentForm(prev => ({ ...prev, userId: client.uid, time: '' }));
+                                      setCreateAppointmentClientSearch(`${client.name} ${client.email}`);
+                                    }}
+                                    className={cn(
+                                      'w-full px-4 py-2.5 text-left text-sm transition-colors border-b border-white/5 last:border-b-0',
+                                      createAppointmentForm.userId === client.uid
+                                        ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)]'
+                                        : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-muted/20'
+                                    )}
+                                  >
+                                    <span className="block font-medium">{client.name}</span>
+                                    <span className="block text-xs opacity-80">{client.email}</span>
+                                  </button>
+                                ))}
+                                {filteredCreateAppointmentClients.length === 0 && (
+                                  <p className="px-4 py-3 text-sm text-[var(--color-text-secondary)]">No hay clientes con esa busqueda.</p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Fecha *</label>
+                            <input
+                              type="date"
+                              value={createAppointmentForm.date}
+                              min={formatDateInputLocal(new Date())}
+                              onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, date: e.target.value, time: '' }))}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Duracion *</label>
+                            <select
+                              value={createAppointmentForm.durationMinutes}
+                              onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, durationMinutes: Number(e.target.value) as 30 | 45 | 60, time: '' }))}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            >
+                              <option value={30}>30 minutos</option>
+                              <option value={45}>45 minutos</option>
+                              <option value={60}>60 minutos</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Servicio *</label>
+                            <input
+                              type="text"
+                              value={createAppointmentForm.serviceType}
+                              readOnly
+                              className="w-full px-4 py-3 rounded-xl bg-muted/30 border border-border text-[var(--color-text-secondary)] cursor-not-allowed"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Entrenador *</label>
+                            <select
+                              value={createAppointmentForm.assignedTrainer}
+                              onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, assignedTrainer: e.target.value }))}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            >
+                              <option value="">Seleccionar entrenador</option>
+                              {activeTrainers.map((trainer) => (
+                                <option key={trainer.id} value={trainer.id}>{trainer.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Estado inicial *</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {(['pending', 'approved'] as const).map((status) => (
+                              <button
+                                key={status}
+                                type="button"
+                                onClick={() => setCreateAppointmentForm(prev => ({ ...prev, status }))}
+                                className={cn(
+                                  'px-4 py-3 rounded-xl border text-sm font-medium transition-colors',
+                                  createAppointmentForm.status === status
+                                    ? 'bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)]'
+                                    : 'bg-muted/10 border-border text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                                )}
+                              >
+                                {status === 'pending' ? 'Pendiente' : 'Aprobada'}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="block text-sm text-[var(--color-text-secondary)]">Hora *</label>
+                            <div className="flex flex-wrap gap-3 text-[10px] text-[var(--color-text-secondary)]">
+                              <span>Libre</span>
+                              <span className="text-amber-300">Parcial</span>
+                              <span className="text-red-300">No disponible</span>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                            {timeSlots.map((time) => {
+                              const slotStatus = getAdminAppointmentSlotStatus(time);
+                              const selected = createAppointmentForm.time === time;
+                              return (
+                                <button
+                                  key={time}
+                                  type="button"
+                                  disabled={slotStatus.disabled}
+                                  onClick={() => setCreateAppointmentForm(prev => ({ ...prev, time }))}
+                                  className={cn(
+                                    'min-h-14 rounded-xl border px-2 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed',
+                                    selected && 'bg-[var(--color-accent-val)] text-[var(--color-bg-base)] border-[var(--color-accent-val)]',
+                                    !selected && slotStatus.tone === 'free' && 'bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)] hover:shadow-emerald-glow',
+                                    !selected && slotStatus.tone === 'partial' && 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20',
+                                    !selected && ['blocked', 'full', 'duplicate'].includes(slotStatus.tone) && 'bg-red-500/10 border-red-500/20 text-red-300/70',
+                                    !selected && slotStatus.tone === 'muted' && 'bg-muted/10 border-border text-[var(--color-text-secondary)]'
+                                  )}
+                                >
+                                  <span className="block">{time}</span>
+                                  <span className="block text-[10px] mt-0.5">{slotStatus.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Comentario</label>
+                          <textarea
+                            value={createAppointmentForm.comment}
+                            onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, comment: e.target.value }))}
+                            rows={3}
+                            maxLength={1000}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] resize-none"
+                            placeholder="Notas internas o comentario visible de la cita"
+                          />
+                        </div>
+
+                        {selectedCreateAppointmentClient && !selectedCreateAppointmentBono && (
+                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-sm flex gap-2">
+                            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                            <span>Este cliente no tiene bono activo. Si creas una cita aprobada, se creara sin descuento y el backend devolvera aviso.</span>
+                          </div>
+                        )}
+                        {selectedCreateAppointmentBono && getBonoMinutosRestantes(selectedCreateAppointmentBono) < createAppointmentForm.durationMinutes && (
+                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-sm flex gap-2">
+                            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                            <span>El bono activo tiene {formatMinutos(getBonoMinutosRestantes(selectedCreateAppointmentBono))}. Si la cita nace aprobada, se creara sin descuento.</span>
+                          </div>
+                        )}
+                        {createAppointmentWarning && (
+                          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-sm">{createAppointmentWarning}</div>
+                        )}
+                        {createAppointmentError && (
+                          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/25 text-red-300 text-sm">{createAppointmentError}</div>
+                        )}
+
+                        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2">
+                          <PremiumButton type="button" variant="ghost" onClick={closeCreateAppointmentModal}>
+                            Cancelar
+                          </PremiumButton>
+                          <PremiumButton
+                            type="submit"
+                            variant="cta"
+                            disabled={creatingAppointment}
+                            icon={creatingAppointment ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CalendarClock className="w-4 h-4" />}
+                          >
+                            {creatingAppointment ? 'Creando...' : 'Crear cita'}
+                          </PremiumButton>
+                        </div>
+                      </form>
+                    </GlassCard>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* ============================================
                 CREATE CLIENT MODAL

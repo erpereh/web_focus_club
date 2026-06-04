@@ -519,6 +519,17 @@ export function subscribeUsers(
 export type AdminUserRole = 'admin' | 'trainer' | 'user';
 export type AdminUserAccessMethod = 'password' | 'email-reset';
 
+export interface CreateAppointmentFromAdminInput {
+    userId: string;
+    date: string;
+    time: string;
+    durationMinutes: 30 | 45 | 60;
+    serviceType: string;
+    assignedTrainer: string;
+    status: 'pending' | 'approved';
+    comment: string;
+}
+
 export interface CreateUserFromAdminInput {
     name: string;
     email: string;
@@ -679,6 +690,18 @@ export async function createAppointmentSecure(input: {
 
     const result = await callable(input);
     return result.data.appointmentId;
+}
+
+export async function createAppointmentFromAdmin(
+    input: CreateAppointmentFromAdminInput
+): Promise<{ success: boolean; appointmentId: string; bonoWarning?: string }> {
+    const callable = httpsCallable<
+        CreateAppointmentFromAdminInput,
+        { success: boolean; appointmentId: string; bonoWarning?: string }
+    >(firebaseFunctions, 'createAppointmentFromAdmin');
+
+    const result = await callable(input);
+    return result.data;
 }
 
 export async function sendContactMessage(input: {
