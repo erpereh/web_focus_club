@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePathname } from 'next/navigation';
+import { sendPasswordResetEmail } from 'firebase/auth';
 
 import Link from 'next/link';
 import Image from 'next/image';
@@ -99,6 +100,9 @@ import {
   getGaleriaConfig as getGaleriaConfigFS,
   getUsers,
   getUserProfile,
+  createUserFromAdmin as createUserFromAdminFS,
+  updateUserFromAdmin as updateUserFromAdminFS,
+  deleteUserFromAdmin as deleteUserFromAdminFS,
   addActivityLog,
   getBlockedSlots,
   addBlockedSlot as addBlockedSlotFS,
@@ -148,6 +152,8 @@ import {
   subscribeUsers,
 
 } from '@/lib/firestore';
+import type { AdminUserAccessMethod, AdminUserRole } from '@/lib/firestore';
+import { auth } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
 import type { UserProfile } from '@/types';
 
@@ -160,6 +166,48 @@ const DEFAULT_HERO_STATS: HeroStat[] = [
 
 type TabType = 'Inicio' | 'appointments' | 'availability' | 'clients' | 'team' | 'testimonials' | 'Hero' | 'Sandra' | 'Centro' | 'Servicios' | 'Galeria' | 'Contacto' | 'Footer' | 'config';
 type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
+
+interface CreateClientFormState {
+  name: string;
+  email: string;
+  phone: string;
+  role: AdminUserRole;
+  accessMethod: AdminUserAccessMethod;
+  password: string;
+  confirmPassword: string;
+}
+
+interface EditClientFormState {
+  targetUid: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: AdminUserRole;
+}
+
+const EMPTY_CREATE_CLIENT_FORM: CreateClientFormState = {
+  name: '',
+  email: '',
+  phone: '',
+  role: 'user',
+  accessMethod: 'password',
+  password: '',
+  confirmPassword: '',
+};
+
+const EMPTY_EDIT_CLIENT_FORM: EditClientFormState = {
+  targetUid: '',
+  name: '',
+  email: '',
+  phone: '',
+  role: 'user',
+};
+
+const CLIENT_ROLE_OPTIONS: { value: AdminUserRole; label: string }[] = [
+  { value: 'user', label: 'Cliente' },
+  { value: 'trainer', label: 'Entrenador' },
+  { value: 'admin', label: 'Admin' },
+];
 
 const statusConfig = {
   pending: {
@@ -981,6 +1029,18 @@ export default function AdminPage() {
 
   // Client search
   const [clientSearch, setClientSearch] = useState('');
+  const [showCreateClientModal, setShowCreateClientModal] = useState(false);
+  const [editingClient, setEditingClient] = useState<UserProfile | null>(null);
+  const [createClientForm, setCreateClientForm] = useState<CreateClientFormState>(EMPTY_CREATE_CLIENT_FORM);
+  const [editClientForm, setEditClientForm] = useState<EditClientFormState>(EMPTY_EDIT_CLIENT_FORM);
+  const [clientFormError, setClientFormError] = useState('');
+  const [clientFormNotice, setClientFormNotice] = useState<{ type: 'success' | 'warning'; message: string } | null>(null);
+  const [savingClient, setSavingClient] = useState(false);
+  const [roleUpdatingUid, setRoleUpdatingUid] = useState<string | null>(null);
+  const [showDeleteClientConfirm, setShowDeleteClientConfirm] = useState(false);
+  const [deleteClientConfirmEmail, setDeleteClientConfirmEmail] = useState('');
+  const [deleteClientError, setDeleteClientError] = useState('');
+  const [deletingClient, setDeletingClient] = useState(false);
 
   // Site config (dynamic time slots)
   const [siteConfig, setSiteConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, slotInterval: 30, bonoExpirationMonths: 1, maintenanceMode: false });
@@ -1242,6 +1302,199 @@ export default function AdminPage() {
   };
 
   // Manejar actualización de estado
+  const closeCreateClientModal = () => {
+    setShowCreateClientModal(false);
+    setCreateClientForm(EMPTY_CREATE_CLIENT_FORM);
+    setClientFormError('');
+    setClientFormNotice(null);
+    setSavingClient(false);
+  };
+
+  const openEditClientModal = (client: UserProfile) => {
+    setEditingClient(client);
+    setEditClientForm({
+      targetUid: client.uid,
+      name: client.name ?? '',
+      email: client.email ?? '',
+      phone: client.phone ?? '',
+      role: client.role,
+    });
+    setClientFormError('');
+    setClientFormNotice(null);
+    setShowDeleteClientConfirm(false);
+    setDeleteClientConfirmEmail('');
+    setDeleteClientError('');
+  };
+
+  const closeEditClientModal = () => {
+    setEditingClient(null);
+    setEditClientForm(EMPTY_EDIT_CLIENT_FORM);
+    setClientFormError('');
+    setClientFormNotice(null);
+    setSavingClient(false);
+    setShowDeleteClientConfirm(false);
+    setDeleteClientConfirmEmail('');
+    setDeleteClientError('');
+    setDeletingClient(false);
+  };
+
+  const getAdminCallableErrorMessage = (error: unknown, fallback: string) => {
+    const code = (error as { code?: string })?.code;
+    const message = error instanceof Error ? error.message : '';
+    if (code === 'functions/already-exists') return 'Ya existe un usuario con este email.';
+    if (code === 'functions/permission-denied') return message || 'Permisos insuficientes.';
+    if (code === 'functions/invalid-argument') return message || 'Revisa los campos obligatorios.';
+    if (code === 'functions/failed-precondition') return message || fallback;
+    return message || fallback;
+  };
+
+  const validateCreateClientForm = () => {
+    const email = createClientForm.email.trim();
+    if (!createClientForm.name.trim()) return 'El nombre completo es obligatorio.';
+    if (!email) return 'El email es obligatorio.';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'El email no tiene un formato valido.';
+    if (createClientForm.accessMethod === 'password') {
+      if (!createClientForm.password) return 'La contrasena temporal es obligatoria.';
+      if (createClientForm.password.length < 8) return 'La contrasena temporal debe tener al menos 8 caracteres.';
+      if (createClientForm.password !== createClientForm.confirmPassword) return 'Las contrasenas no coinciden.';
+    }
+    return '';
+  };
+
+  const handleCreateClient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const validationError = validateCreateClientForm();
+    if (validationError) {
+      setClientFormError(validationError);
+      return;
+    }
+
+    setSavingClient(true);
+    setClientFormError('');
+    setClientFormNotice(null);
+
+    try {
+      const result = await createUserFromAdminFS({
+        name: createClientForm.name.trim(),
+        email: createClientForm.email.trim().toLowerCase(),
+        phone: createClientForm.phone.trim(),
+        role: createClientForm.role,
+        accessMethod: createClientForm.accessMethod,
+        password: createClientForm.accessMethod === 'password' ? createClientForm.password : undefined,
+      });
+
+      await refreshData();
+
+      if (createClientForm.accessMethod === 'email-reset') {
+        try {
+          await sendPasswordResetEmail(auth, result.email);
+          setClientFormNotice({
+            type: 'success',
+            message: 'Cliente creado. Se ha enviado un email para que establezca su contrasena.',
+          });
+        } catch (resetError) {
+          console.error('Error sending password reset email:', resetError);
+          setClientFormNotice({
+            type: 'warning',
+            message: 'El cliente se ha creado, pero no se pudo enviar el email. Puedes reenviarlo desde Firebase/Auth o intentar de nuevo.',
+          });
+        }
+        setCreateClientForm(EMPTY_CREATE_CLIENT_FORM);
+        return;
+      }
+
+      closeCreateClientModal();
+      const t = toast({ title: 'Cliente creado', description: 'El cliente se ha creado correctamente.' });
+      setTimeout(() => t.dismiss(), 3500);
+    } catch (err) {
+      console.error('Error creating client:', err);
+      setClientFormError(getAdminCallableErrorMessage(err, 'Error al crear el cliente.'));
+    } finally {
+      setSavingClient(false);
+    }
+  };
+
+  const handleEditClient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editClientForm.name.trim()) {
+      setClientFormError('El nombre completo es obligatorio.');
+      return;
+    }
+    if (editClientForm.targetUid === user?.uid && editClientForm.role !== 'admin') {
+      setClientFormError('No puedes quitarte tu propio rol admin.');
+      return;
+    }
+
+    setSavingClient(true);
+    setClientFormError('');
+
+    try {
+      await updateUserFromAdminFS({
+        targetUid: editClientForm.targetUid,
+        name: editClientForm.name.trim(),
+        phone: editClientForm.phone.trim(),
+        role: editClientForm.role,
+      });
+      await refreshData();
+      closeEditClientModal();
+      const t = toast({ title: 'Cliente actualizado', description: 'Los datos del cliente se han guardado correctamente.' });
+      setTimeout(() => t.dismiss(), 3500);
+    } catch (err) {
+      console.error('Error updating client:', err);
+      setClientFormError(getAdminCallableErrorMessage(err, 'Error al actualizar el cliente.'));
+    } finally {
+      setSavingClient(false);
+    }
+  };
+
+  const handleDeleteClient = async () => {
+    if (!editingClient) return;
+    if (deleteClientConfirmEmail !== editingClient.email) {
+      setDeleteClientError('Escribe el email exacto del usuario para confirmar.');
+      return;
+    }
+
+    setDeletingClient(true);
+    setDeleteClientError('');
+
+    try {
+      await deleteUserFromAdminFS(editingClient.uid);
+      await refreshData();
+      closeEditClientModal();
+      const t = toast({ title: 'Usuario eliminado', description: 'El acceso y los datos basicos del usuario se han eliminado.' });
+      setTimeout(() => t.dismiss(), 3500);
+    } catch (err) {
+      console.error('Error deleting client:', err);
+      setDeleteClientError(getAdminCallableErrorMessage(err, 'Error al eliminar el usuario.'));
+    } finally {
+      setDeletingClient(false);
+    }
+  };
+
+  const handleClientRoleChange = async (client: UserProfile, newRole: AdminUserRole) => {
+    if (newRole === client.role) return;
+    if (client.uid === user?.uid && newRole !== 'admin') {
+      alert('No puedes quitarte tu propio rol admin.');
+      return;
+    }
+
+    setRoleUpdatingUid(client.uid);
+    try {
+      await updateUserFromAdminFS({
+        targetUid: client.uid,
+        name: client.name,
+        phone: client.phone ?? '',
+        role: newRole,
+      });
+      await refreshData();
+    } catch (err) {
+      console.error('Error updating role:', err);
+      alert(getAdminCallableErrorMessage(err, 'Error al cambiar el rol.'));
+    } finally {
+      setRoleUpdatingUid(null);
+    }
+  };
+
   const handleStatusUpdate = async (
     id: string,
     status: 'pending' | 'approved' | 'rejected',
@@ -2809,10 +3062,25 @@ export default function AdminPage() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -20 }}
                 >
-                  <div className="flex items-center justify-between mb-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
                     <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Gestión de Clientes</h1>
-                    <div className="flex gap-2 text-sm text-[var(--color-text-secondary)]">
-                      Total: <span className="text-[var(--color-text-primary)] font-semibold">{clients.length}</span>
+                    <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--color-text-secondary)]">
+                      <div className="flex gap-2">
+                        Total: <span className="text-[var(--color-text-primary)] font-semibold">{clients.length}</span>
+                      </div>
+                      <PremiumButton
+                        variant="cta"
+                        size="sm"
+                        icon={<Plus className="w-4 h-4" />}
+                        onClick={() => {
+                          setCreateClientForm(EMPTY_CREATE_CLIENT_FORM);
+                          setClientFormError('');
+                          setClientFormNotice(null);
+                          setShowCreateClientModal(true);
+                        }}
+                      >
+                        Crear cliente
+                      </PremiumButton>
                     </div>
                   </div>
 
@@ -2877,37 +3145,10 @@ export default function AdminPage() {
                             {/* Role dropdown */}
                             <select
                               value={client.role}
-                              onChange={async (e) => {
-                                const newRole = e.target.value as 'admin' | 'trainer' | 'user';
-                                const oldRole = client.role;
-                                if (newRole === oldRole) return;
-                                try {
-                                  if (newRole === 'trainer') {
-                                    // ENTRENADOR: role → trainer, isTrainer → true, crear trainer doc
-                                    await updateUserProfile(client.uid, { role: 'trainer', isTrainer: true });
-                                    const existingTrainer = await getTrainerByUid(client.uid);
-                                    if (!existingTrainer) {
-                                      await addTrainerFS({ uid: client.uid, name: client.name, active: true });
-                                    }
-                                  } else if (newRole === 'user') {
-                                    // CLIENTE: role → user, isTrainer → false, eliminar trainer doc
-                                    await updateUserProfile(client.uid, { role: 'user', isTrainer: false });
-                                    const trainerDoc = await getTrainerByUid(client.uid);
-                                    if (trainerDoc) {
-                                      await deleteTrainerFS(trainerDoc.id);
-                                    }
-                                  } else if (newRole === 'admin') {
-                                    // ADMIN: solo cambiar role a admin. NO tocar isTrainer ni trainer doc
-                                    await updateUserProfile(client.uid, { role: 'admin' });
-                                  }
-                                  await refreshData();
-                                } catch (err) {
-                                  console.error('Error updating role:', err);
-                                  alert('Error al cambiar el rol.');
-                                }
-                              }}
+                              disabled={roleUpdatingUid === client.uid}
+                              onChange={(e) => handleClientRoleChange(client, e.target.value as AdminUserRole)}
                               className={cn(
-                                "px-2 py-1 rounded-lg text-xs font-medium uppercase tracking-tight border bg-input focus:outline-none focus:border-[var(--color-accent-val)] cursor-pointer",
+                                "px-2 py-1 rounded-lg text-xs font-medium uppercase tracking-tight border bg-input focus:outline-none focus:border-[var(--color-accent-val)] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed",
                                 client.role === 'admin'
                                   ? "text-[var(--color-accent-val)] border-accent/30"
                                   : client.role === 'trainer'
@@ -2915,10 +3156,17 @@ export default function AdminPage() {
                                     : "text-[var(--color-text-primary)] border-border"
                               )}
                             >
-                              <option value="user">Cliente</option>
-                              <option value="trainer">Entrenador</option>
-                              <option value="admin">Admin</option>
+                              {CLIENT_ROLE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
                             </select>
+                            <button
+                              type="button"
+                              onClick={() => openEditClientModal(client)}
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-muted/20 text-[var(--color-text-secondary)] border border-white/10 hover:text-[var(--color-text-primary)] hover:border-white/20 transition-colors flex items-center gap-1"
+                            >
+                              <Edit3 className="w-3 h-3" /> Editar datos
+                            </button>
                           </div>
                         </div>
 
@@ -5896,6 +6144,339 @@ export default function AdminPage() {
                 setAboutHomePickerOpen(false);
               }}
             />
+
+            {/* ============================================
+                CREATE CLIENT MODAL
+                ============================================ */}
+            <AnimatePresence>
+              {showCreateClientModal && (
+                <motion.div
+                  key="create-client-modal"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                  onClick={closeCreateClientModal}
+                >
+                  <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full max-w-2xl"
+                  >
+                    <GlassCard className="p-6">
+                      <div className="flex items-start justify-between gap-4 mb-6">
+                        <div>
+                          <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-1">Crear cliente</h2>
+                          <p className="text-sm text-[var(--color-text-secondary)]">Alta segura en Firebase Auth y Firestore.</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={closeCreateClientModal}
+                          className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] rounded-lg hover:bg-white/5 transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {clientFormNotice ? (
+                        <>
+                          <div className={cn(
+                            "rounded-xl border p-4 mb-6 text-sm",
+                            clientFormNotice.type === 'success'
+                              ? "bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)]"
+                              : "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                          )}>
+                            {clientFormNotice.message}
+                          </div>
+                          <div className="flex justify-end">
+                            <PremiumButton variant="cta" onClick={closeCreateClientModal}>
+                              Cerrar
+                            </PremiumButton>
+                          </div>
+                        </>
+                      ) : (
+                        <form onSubmit={handleCreateClient} className="space-y-5">
+                          <div className="grid sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Nombre completo *</label>
+                              <input
+                                type="text"
+                                value={createClientForm.name}
+                                onChange={(e) => setCreateClientForm(prev => ({ ...prev, name: e.target.value }))}
+                                className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Email *</label>
+                              <input
+                                type="email"
+                                value={createClientForm.email}
+                                onChange={(e) => setCreateClientForm(prev => ({ ...prev, email: e.target.value }))}
+                                className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Telefono</label>
+                              <input
+                                type="tel"
+                                value={createClientForm.phone}
+                                onChange={(e) => setCreateClientForm(prev => ({ ...prev, phone: e.target.value }))}
+                                className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Rol *</label>
+                              <select
+                                value={createClientForm.role}
+                                onChange={(e) => setCreateClientForm(prev => ({ ...prev, role: e.target.value as AdminUserRole }))}
+                                className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              >
+                                {CLIENT_ROLE_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Metodo de acceso *</label>
+                            <select
+                              value={createClientForm.accessMethod}
+                              onChange={(e) => setCreateClientForm(prev => ({ ...prev, accessMethod: e.target.value as AdminUserAccessMethod, password: '', confirmPassword: '' }))}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            >
+                              <option value="password">Crear con contrasena temporal</option>
+                              <option value="email-reset">Enviar email para establecer contrasena</option>
+                            </select>
+                          </div>
+
+                          {createClientForm.accessMethod === 'password' && (
+                            <div className="grid sm:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Contrasena temporal *</label>
+                                <input
+                                  type="password"
+                                  value={createClientForm.password}
+                                  onChange={(e) => setCreateClientForm(prev => ({ ...prev, password: e.target.value }))}
+                                  className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Confirmar contrasena *</label>
+                                <input
+                                  type="password"
+                                  value={createClientForm.confirmPassword}
+                                  onChange={(e) => setCreateClientForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                                  className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {clientFormError && (
+                            <div className="rounded-xl border border-red-500/30 bg-red-500/10 text-red-300 px-4 py-3 text-sm">
+                              {clientFormError}
+                            </div>
+                          )}
+
+                          <div className="flex flex-col sm:flex-row gap-3 justify-end">
+                            <PremiumButton type="button" variant="outline" onClick={closeCreateClientModal} disabled={savingClient}>
+                              Cancelar
+                            </PremiumButton>
+                            <PremiumButton type="submit" variant="cta" icon={<Plus className="w-4 h-4" />} disabled={savingClient}>
+                              {savingClient ? 'Creando...' : 'Crear cliente'}
+                            </PremiumButton>
+                          </div>
+                        </form>
+                      )}
+                    </GlassCard>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ============================================
+                EDIT CLIENT MODAL
+                ============================================ */}
+            <AnimatePresence>
+              {editingClient && (
+                <motion.div
+                  key="edit-client-modal"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                  onClick={closeEditClientModal}
+                >
+                  <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full max-w-2xl"
+                  >
+                    <GlassCard className="p-6">
+                      <div className="flex items-start justify-between gap-4 mb-6">
+                        <div>
+                          <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-1">Editar datos</h2>
+                          <p className="text-sm text-[var(--color-text-secondary)]">{editingClient.email}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={closeEditClientModal}
+                          className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] rounded-lg hover:bg-white/5 transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      <form onSubmit={handleEditClient} className="space-y-5">
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Nombre completo *</label>
+                            <input
+                              type="text"
+                              value={editClientForm.name}
+                              onChange={(e) => setEditClientForm(prev => ({ ...prev, name: e.target.value }))}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Email</label>
+                            <input
+                              type="email"
+                              value={editClientForm.email}
+                              readOnly
+                              className="w-full px-4 py-3 rounded-xl bg-muted/30 border border-border text-[var(--color-text-secondary)] cursor-not-allowed"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Telefono</label>
+                            <input
+                              type="tel"
+                              value={editClientForm.phone}
+                              onChange={(e) => setEditClientForm(prev => ({ ...prev, phone: e.target.value }))}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Rol</label>
+                            <select
+                              value={editClientForm.role}
+                              onChange={(e) => setEditClientForm(prev => ({ ...prev, role: e.target.value as AdminUserRole }))}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                            >
+                              {CLIENT_ROLE_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        {clientFormError && (
+                          <div className="rounded-xl border border-red-500/30 bg-red-500/10 text-red-300 px-4 py-3 text-sm">
+                            {clientFormError}
+                          </div>
+                        )}
+
+                        <div className="flex flex-col sm:flex-row gap-3 justify-end">
+                          <PremiumButton type="button" variant="outline" onClick={closeEditClientModal} disabled={savingClient}>
+                            Cancelar
+                          </PremiumButton>
+                          <PremiumButton type="submit" variant="cta" icon={<Save className="w-4 h-4" />} disabled={savingClient}>
+                            {savingClient ? 'Guardando...' : 'Guardar cambios'}
+                          </PremiumButton>
+                        </div>
+                      </form>
+
+                      <div className="mt-6 pt-6 border-t border-red-500/20">
+                        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+                          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                            <div>
+                              <h3 className="text-sm font-semibold text-red-300">Zona de peligro</h3>
+                              <p className="text-sm text-[var(--color-text-secondary)] mt-1">
+                                Elimina el acceso del usuario y sus datos básicos del panel.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowDeleteClientConfirm(true);
+                                setDeleteClientConfirmEmail('');
+                                setDeleteClientError('');
+                              }}
+                              disabled={deletingClient}
+                              className="px-4 py-2 rounded-xl bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/30 transition-colors text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              <Trash2 className="w-4 h-4" /> Eliminar usuario
+                            </button>
+                          </div>
+
+                          {showDeleteClientConfirm && (
+                            <div className="mt-4 rounded-xl border border-red-500/30 bg-black/20 p-4">
+                              <h4 className="text-base font-semibold text-[var(--color-text-primary)] mb-2">Eliminar usuario</h4>
+                              <p className="text-sm text-[var(--color-text-secondary)] mb-4">
+                                Esta acción eliminará el acceso del usuario y sus datos básicos del panel. No se puede deshacer.
+                              </p>
+                              <label className="block text-sm text-[var(--color-text-secondary)] mb-2">
+                                Escribe <span className="text-[var(--color-text-primary)] font-medium">{editingClient.email}</span> para confirmar
+                              </label>
+                              <input
+                                type="email"
+                                value={deleteClientConfirmEmail}
+                                onChange={(e) => {
+                                  setDeleteClientConfirmEmail(e.target.value);
+                                  setDeleteClientError('');
+                                }}
+                                className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-red-400"
+                              />
+
+                              {deleteClientError && (
+                                <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 text-red-300 px-4 py-3 text-sm">
+                                  {deleteClientError}
+                                </div>
+                              )}
+
+                              <div className="mt-4 flex flex-col sm:flex-row gap-3 justify-end">
+                                <PremiumButton
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setShowDeleteClientConfirm(false);
+                                    setDeleteClientConfirmEmail('');
+                                    setDeleteClientError('');
+                                  }}
+                                  disabled={deletingClient}
+                                >
+                                  Cancelar
+                                </PremiumButton>
+                                <button
+                                  type="button"
+                                  onClick={handleDeleteClient}
+                                  disabled={deletingClient || deleteClientConfirmEmail !== editingClient.email}
+                                  className="px-4 py-2 rounded-xl bg-red-600 text-white border border-red-500 hover:bg-red-500 transition-colors text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  {deletingClient ? 'Eliminando...' : 'Eliminar definitivamente'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </GlassCard>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* ============================================
                 ASSIGN BONO MODAL

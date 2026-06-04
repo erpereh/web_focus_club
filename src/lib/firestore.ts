@@ -516,6 +516,61 @@ export function subscribeUsers(
     );
 }
 
+export type AdminUserRole = 'admin' | 'trainer' | 'user';
+export type AdminUserAccessMethod = 'password' | 'email-reset';
+
+export interface CreateUserFromAdminInput {
+    name: string;
+    email: string;
+    phone: string;
+    role: AdminUserRole;
+    accessMethod: AdminUserAccessMethod;
+    password?: string;
+}
+
+export interface CreateUserFromAdminResult {
+    success: boolean;
+    uid: string;
+    email: string;
+}
+
+export interface UpdateUserFromAdminInput {
+    targetUid: string;
+    name: string;
+    phone: string;
+    role: AdminUserRole;
+}
+
+export async function createUserFromAdmin(input: CreateUserFromAdminInput): Promise<CreateUserFromAdminResult> {
+    const callable = httpsCallable<CreateUserFromAdminInput, CreateUserFromAdminResult>(
+        firebaseFunctions,
+        'createUserFromAdmin'
+    );
+
+    const result = await callable(input);
+    return result.data;
+}
+
+export async function updateUserFromAdmin(input: UpdateUserFromAdminInput): Promise<{ success: boolean; uid: string }> {
+    const callable = httpsCallable<UpdateUserFromAdminInput, { success: boolean; uid: string }>(
+        firebaseFunctions,
+        'updateUserFromAdmin'
+    );
+
+    const result = await callable(input);
+    return result.data;
+}
+
+export async function deleteUserFromAdmin(targetUid: string): Promise<{ success: boolean; uid: string }> {
+    const callable = httpsCallable<{ targetUid: string }, { success: boolean; uid: string }>(
+        firebaseFunctions,
+        'deleteUserFromAdmin'
+    );
+
+    const result = await callable({ targetUid });
+    return result.data;
+}
+
 function getFileExtension(file: File): string {
     const fromName = file.name.split('.').pop()?.toLowerCase();
     if (fromName && /^[a-z0-9]+$/.test(fromName)) return fromName;

@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase-admin/app";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { getAuth } from "firebase-admin/auth";
 import { DocumentReference, FieldValue, getFirestore } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
@@ -70,7 +71,40 @@ interface UserProfile {
   email: string;
   name: string;
   phone?: string;
+  role?: AdminUserRole;
+  isTrainer?: boolean;
   pushNotificationsEnabled?: boolean;
+}
+
+type AdminUserRole = "admin" | "trainer" | "user";
+type AdminUserAccessMethod = "password" | "email-reset";
+
+interface CreateUserFromAdminRequest {
+  name?: unknown;
+  email?: unknown;
+  phone?: unknown;
+  role?: unknown;
+  accessMethod?: unknown;
+  password?: unknown;
+}
+
+interface UpdateUserFromAdminRequest {
+  targetUid?: unknown;
+  name?: unknown;
+  phone?: unknown;
+  role?: unknown;
+}
+
+interface DeleteUserFromAdminRequest {
+  targetUid?: unknown;
+}
+
+interface ParsedAdminUserData {
+  name: string;
+  email: string;
+  phone: string;
+  role: AdminUserRole;
+  isTrainer: boolean;
 }
 
 interface AppointmentDoc {
@@ -647,6 +681,360 @@ async function upsertGoogleCalendarEvent(
   }
   return createdEventId;
 }
+
+function parseAdminUserRole(value: unknown): AdminUserRole {
+  if (value === "admin" || value === "trainer" || value === "user") {
+    return value;
+  }
+  throw toHttpsError("invalid-argument", "El rol seleccionado no es valido.");
+}
+
+function getIsTrainerForRole(role: AdminUserRole): boolean {
+  return role === "trainer";
+}
+
+function parseCreateUserFromAdminData(data: unknown): ParsedAdminUserData & {
+  accessMethod: AdminUserAccessMethod;
+  password?: string;
+} {
+  if (!isRecord(data)) {
+    throw toHttpsError("invalid-argument", "Los datos del cliente no son validos.");
+  }
+
+  const name = normalizeTextField(data.name, "nombre", 120);
+  const email = normalizeTextField(data.email, "email", 254).toLowerCase();
+  const phone = normalizeTextField(data.phone, "telefono", 40, false);
+  const role = parseAdminUserRole(data.role);
+  const accessMethod = data.accessMethod;
+
+  if (!isValidEmail(email)) {
+    throw toHttpsError("invalid-argument", "El email no tiene un formato valido.");
+  }
+  if (accessMethod !== "password" && accessMethod !== "email-reset") {
+    throw toHttpsError("invalid-argument", "El metodo de acceso no es valido.");
+  }
+
+  if (accessMethod === "password") {
+    const password = normalizeTextField(data.password, "contrasena temporal", 128);
+    if (password.length < 8) {
+      throw toHttpsError("invalid-argument", "La contrasena temporal debe tener al menos 8 caracteres.");
+    }
+    return {
+      name,
+      email,
+      phone,
+      role,
+      isTrainer: getIsTrainerForRole(role),
+      accessMethod,
+      password,
+    };
+  }
+
+  return {
+    name,
+    email,
+    phone,
+    role,
+    isTrainer: getIsTrainerForRole(role),
+    accessMethod,
+  };
+}
+
+function parseUpdateUserFromAdminData(data: unknown): ParsedAdminUserData & { targetUid: string } {
+  if (!isRecord(data)) {
+    throw toHttpsError("invalid-argument", "Los datos del cliente no son validos.");
+  }
+
+  const targetUid = normalizeTextField(data.targetUid, "usuario", 128);
+  const name = normalizeTextField(data.name, "nombre", 120);
+  const phone = normalizeTextField(data.phone, "telefono", 40, false);
+  const role = parseAdminUserRole(data.role);
+
+  return {
+    targetUid,
+    name,
+    email: "",
+    phone,
+    role,
+    isTrainer: getIsTrainerForRole(role),
+  };
+}
+
+function parseDeleteUserFromAdminData(data: unknown): { targetUid: string } {
+  if (!isRecord(data)) {
+    throw toHttpsError("invalid-argument", "Los datos del cliente no son validos.");
+  }
+
+  return {
+    targetUid: normalizeTextField(data.targetUid, "usuario", 128),
+  };
+}
+
+function generateTemporaryPassword(): string {
+  return `${randomBytes(24).toString("base64url")}Aa1!`;
+}
+
+async function requireAdmin(requestUid: string): Promise<UserProfile> {
+  const adminSnap = await db.collection("users").doc(requestUid).get();
+  const adminProfile = adminSnap.exists ? adminSnap.data() as UserProfile : undefined;
+  if (!adminProfile || adminProfile.role !== "admin") {
+    throw toHttpsError("permission-denied", "Permisos insuficientes.");
+  }
+  return adminProfile;
+}
+
+async function getTrainerDocsByUid(uid: string) {
+  return db.collection("trainers").where("uid", "==", uid).get();
+}
+
+async function syncTrainerProfile(uid: string, name: string, role: AdminUserRole): Promise<void> {
+  const trainerSnap = await getTrainerDocsByUid(uid);
+
+  if (role === "trainer") {
+    if (trainerSnap.empty) {
+      await db.collection("trainers").add({
+        uid,
+        name,
+        active: true,
+        createdAt: new Date().toISOString(),
+      });
+      return;
+    }
+
+    const batch = db.batch();
+    trainerSnap.docs.forEach((docSnap) => {
+      batch.set(docSnap.ref, { name, active: true }, { merge: true });
+    });
+    await batch.commit();
+    return;
+  }
+
+  if (!trainerSnap.empty) {
+    const batch = db.batch();
+    trainerSnap.docs.forEach((docSnap) => batch.delete(docSnap.ref));
+    await batch.commit();
+  }
+}
+
+async function deleteTrainerProfile(uid: string): Promise<void> {
+  const [trainerDocSnap, trainerQuerySnap] = await Promise.all([
+    db.collection("trainers").doc(uid).get(),
+    getTrainerDocsByUid(uid),
+  ]);
+
+  const refs = new Map<string, DocumentReference>();
+  if (trainerDocSnap.exists) {
+    refs.set(trainerDocSnap.ref.path, trainerDocSnap.ref);
+  }
+  trainerQuerySnap.docs.forEach((docSnap) => {
+    refs.set(docSnap.ref.path, docSnap.ref);
+  });
+
+  if (refs.size === 0) return;
+
+  const batch = db.batch();
+  refs.forEach((ref) => batch.delete(ref));
+  await batch.commit();
+}
+
+async function addAdminUserActivityLog(data: Record<string, unknown>): Promise<void> {
+  try {
+    await db.collection("activity_logs").add({
+      ...data,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("[AdminUsers] Failed to write activity log", error);
+  }
+}
+
+export const createUserFromAdmin = onCall<CreateUserFromAdminRequest>(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw toHttpsError("permission-denied", "Debes iniciar sesion como admin.");
+    }
+
+    await requireAdmin(request.auth.uid);
+    const input = parseCreateUserFromAdminData(request.data);
+    const auth = getAuth();
+
+    try {
+      await auth.getUserByEmail(input.email);
+      throw new HttpsError("already-exists", "Ya existe un usuario con este email.");
+    } catch (error) {
+      const code = isRecord(error) && typeof error.code === "string" ? error.code : "";
+      if (code !== "auth/user-not-found") {
+        throw error;
+      }
+    }
+
+    const password = input.accessMethod === "password" ? input.password : generateTemporaryPassword();
+    const createdUser = await auth.createUser({
+      email: input.email,
+      displayName: input.name,
+      password,
+      emailVerified: false,
+    });
+
+    const now = new Date().toISOString();
+    try {
+      await db.collection("users").doc(createdUser.uid).set({
+        uid: createdUser.uid,
+        name: input.name,
+        email: input.email,
+        phone: input.phone,
+        role: input.role,
+        isTrainer: input.isTrainer,
+        createdAt: now,
+        pushNotificationsEnabled: false,
+      });
+
+      await syncTrainerProfile(createdUser.uid, input.name, input.role);
+    } catch (error) {
+      await auth.deleteUser(createdUser.uid).catch((deleteError) => {
+        console.error("[AdminUsers] Failed to delete auth user after Firestore error", deleteError);
+      });
+      throw error;
+    }
+
+    await addAdminUserActivityLog({
+      action: "user_created_by_admin",
+      adminUid: request.auth.uid,
+      adminEmail: request.auth.token.email ?? "",
+      targetUid: createdUser.uid,
+      email: input.email,
+      role: input.role,
+    });
+
+    return {
+      success: true,
+      uid: createdUser.uid,
+      email: input.email,
+    };
+  },
+);
+
+export const updateUserFromAdmin = onCall<UpdateUserFromAdminRequest>(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw toHttpsError("permission-denied", "Debes iniciar sesion como admin.");
+    }
+
+    await requireAdmin(request.auth.uid);
+    const input = parseUpdateUserFromAdminData(request.data);
+
+    if (input.targetUid === request.auth.uid && input.role !== "admin") {
+      throw toHttpsError("permission-denied", "No puedes quitarte tu propio rol admin.");
+    }
+
+    const targetRef = db.collection("users").doc(input.targetUid);
+    const targetSnap = await targetRef.get();
+    if (!targetSnap.exists) {
+      throw toHttpsError("failed-precondition", "No se ha encontrado el usuario indicado.");
+    }
+
+    await getAuth().updateUser(input.targetUid, {
+      displayName: input.name,
+    });
+
+    await targetRef.set({
+      name: input.name,
+      phone: input.phone,
+      role: input.role,
+      isTrainer: input.isTrainer,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+
+    await syncTrainerProfile(input.targetUid, input.name, input.role);
+
+    const target = targetSnap.data() as UserProfile | undefined;
+    await addAdminUserActivityLog({
+      action: "user_updated_by_admin",
+      adminUid: request.auth.uid,
+      adminEmail: request.auth.token.email ?? "",
+      targetUid: input.targetUid,
+      email: target?.email ?? "",
+      role: input.role,
+    });
+
+    return {
+      success: true,
+      uid: input.targetUid,
+    };
+  },
+);
+
+export const deleteUserFromAdmin = onCall<DeleteUserFromAdminRequest>(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw toHttpsError("permission-denied", "Debes iniciar sesion como admin.");
+    }
+
+    await requireAdmin(request.auth.uid);
+    const input = parseDeleteUserFromAdminData(request.data);
+
+    if (input.targetUid === request.auth.uid) {
+      throw toHttpsError("failed-precondition", "No puedes eliminar tu propio usuario admin.");
+    }
+
+    const targetRef = db.collection("users").doc(input.targetUid);
+    const targetSnap = await targetRef.get();
+    if (!targetSnap.exists) {
+      throw toHttpsError("failed-precondition", "No se ha encontrado el usuario indicado.");
+    }
+
+    const target = targetSnap.data() as UserProfile | undefined;
+    const targetEmail = target?.email ?? "";
+    const targetName = target?.name ?? "";
+    const targetRole = target?.role ?? "";
+    const auth = getAuth();
+
+    try {
+      await auth.deleteUser(input.targetUid);
+    } catch (error) {
+      const code = isRecord(error) && typeof error.code === "string" ? error.code : "";
+      if (code !== "auth/user-not-found") {
+        console.error("[AdminUsers] Failed to delete auth user", input.targetUid, error);
+        throw toHttpsError("internal", "No se ha podido eliminar el acceso del usuario.");
+      }
+    }
+
+    try {
+      await Promise.all([
+        targetRef.delete(),
+        deleteTrainerProfile(input.targetUid),
+      ]);
+    } catch (error) {
+      console.error("[AdminUsers] Failed to delete Firestore user data", input.targetUid, error);
+      throw toHttpsError("internal", "No se han podido eliminar los datos basicos del usuario.");
+    }
+
+    await addAdminUserActivityLog({
+      action: "user_deleted_by_admin",
+      adminUid: request.auth.uid,
+      adminEmail: request.auth.token.email ?? "",
+      targetUid: input.targetUid,
+      targetEmail,
+      targetName,
+      targetRole,
+      createdAt: new Date().toISOString(),
+    });
+
+    return {
+      success: true,
+      uid: input.targetUid,
+    };
+  },
+);
 
 export const sendContactMessage = onCall<ContactMessageRequest>(
   {
