@@ -93,4 +93,21 @@ assert.equal(indexSource.includes('"rejected" | "confirmed" | "deleted"'), false
 assert.equal(indexSource.includes('action: "pending"'), false);
 assert.equal(indexSource.includes('action: "rejected"'), false);
 
+assert.match(indexSource, /MAKE_WELCOME_WEBHOOK_URL\s*=\s*defineSecret\("MAKE_WELCOME_WEBHOOK_URL"\)/);
+assert.match(indexSource, /interface WelcomeWebhookPayload/);
+assert.match(indexSource, /function getWelcomeCustomerName/);
+assert.match(indexSource, /async function sendWelcomeWebhook/);
+assert.match(indexSource, /function shortErrorMessage/);
+assert.match(indexSource, /export const onUserProfileCreatedWelcomeEmail\s*=\s*onDocumentCreated/);
+assert.match(indexSource, /document:\s*"users\/\{uid\}"/);
+assert.match(indexSource, /secrets:\s*\[MAKE_WELCOME_WEBHOOK_URL\]/);
+assert.match(indexSource, /event:\s*"user_welcome"/);
+assert.match(indexSource, /recipientType:\s*"customer"/);
+assert.match(indexSource, /appName:\s*"Focus Club"/);
+assert.match(indexSource, /welcomeEmailSentAt/);
+assert.match(indexSource, /welcomeEmailStatus:\s*"sent"/);
+assert.match(indexSource, /welcomeEmailStatus:\s*"failed"/);
+assert.match(indexSource, /welcomeEmailLastAttemptAt/);
+assert.match(indexSource, /welcomeEmailLastError/);
+
 console.log("googleCalendarSync helper tests passed");

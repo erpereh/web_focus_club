@@ -19,6 +19,7 @@ initializeApp();
 
 const db = getFirestore();
 const MAKE_WEBHOOK_URL = defineSecret("MAKE_WEBHOOK_URL");
+const MAKE_WELCOME_WEBHOOK_URL = defineSecret("MAKE_WELCOME_WEBHOOK_URL");
 const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
 const GOOGLE_CALENDAR_ID = defineSecret("GOOGLE_CALENDAR_ID");
 const REGION = "europe-west1";
@@ -215,6 +216,14 @@ interface MakePayload {
   appointmentId?: string;
   duration?: AppointmentDuration;
   serviceType?: string;
+}
+
+interface WelcomeWebhookPayload {
+  event: "user_welcome";
+  recipientType: "customer";
+  customerName: string;
+  customerEmail: string;
+  appName: "Focus Club";
 }
 
 interface FcmTokenDoc {
@@ -565,6 +574,42 @@ async function sendMakeWebhook(payload: MakePayload): Promise<void> {
   if (!response.ok) {
     throw new Error(`Make webhook failed with status ${response.status}`);
   }
+}
+
+async function sendWelcomeWebhook(payload: WelcomeWebhookPayload): Promise<void> {
+  const webhookUrl = MAKE_WELCOME_WEBHOOK_URL.value();
+  if (!webhookUrl) {
+    throw new Error("Welcome webhook secret is not configured.");
+  }
+
+  const response = await fetch(webhookUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Make welcome webhook failed with status ${response.status}`);
+  }
+}
+
+function getWelcomeCustomerName(data: Record<string, unknown>, email: string): string {
+  const name = typeof data.name === "string" ? data.name.trim() : "";
+  if (name) return name;
+
+  const displayName = typeof data.displayName === "string" ? data.displayName.trim() : "";
+  if (displayName) return displayName;
+
+  return email.split("@")[0] || email;
+}
+
+function shortErrorMessage(error: unknown): string {
+  const rawMessage = error instanceof Error ? error.message : "Unknown welcome webhook error.";
+  return rawMessage
+    .replace(/https?:\/\/\S+/g, "[redacted-url]")
+    .slice(0, 180);
 }
 
 function buildMakePayload(
@@ -1821,6 +1866,76 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
     });
 
     return { appointmentId };
+  },
+);
+
+export const onUserProfileCreatedWelcomeEmail = onDocumentCreated(
+  {
+    document: "users/{uid}",
+    region: REGION,
+    secrets: [MAKE_WELCOME_WEBHOOK_URL],
+  },
+  async (event) => {
+    const userSnap = event.data;
+    const uid = String(event.params.uid);
+
+    if (!userSnap) return;
+
+    const data = userSnap.data();
+    if (!data) return;
+
+    if (data.welcomeEmailSentAt) {
+      console.log("[WelcomeEmail] Welcome email already sent. Skipping webhook.", { uid });
+      return;
+    }
+
+    const email = typeof data.email === "string" ? data.email.trim() : "";
+    if (!isValidEmail(email)) {
+      console.warn("[WelcomeEmail] User profile has no valid email. Skipping webhook.", { uid });
+      return;
+    }
+
+    const payload: WelcomeWebhookPayload = {
+      event: "user_welcome",
+      recipientType: "customer",
+      customerName: getWelcomeCustomerName(data, email),
+      customerEmail: email,
+      appName: "Focus Club",
+    };
+
+    try {
+      await sendWelcomeWebhook(payload);
+
+      const now = new Date().toISOString();
+      await userSnap.ref.set({
+        welcomeEmailSentAt: now,
+        welcomeEmailStatus: "sent",
+        welcomeEmailLastAttemptAt: now,
+      }, { merge: true });
+
+      console.log("[WelcomeEmail] Welcome webhook sent.", { uid });
+    } catch (error) {
+      const now = new Date().toISOString();
+      const errorMessage = shortErrorMessage(error);
+
+      console.error("[WelcomeEmail] Failed to send welcome webhook.", {
+        uid,
+        error: errorMessage,
+      });
+
+      try {
+        await userSnap.ref.set({
+          welcomeEmailStatus: "failed",
+          welcomeEmailLastAttemptAt: now,
+          welcomeEmailLastError: errorMessage,
+        }, { merge: true });
+      } catch (writeError) {
+        console.error("[WelcomeEmail] Failed to store welcome email failure status.", {
+          uid,
+          error: shortErrorMessage(writeError),
+        });
+      }
+    }
   },
 );
 
