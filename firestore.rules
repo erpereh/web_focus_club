@@ -111,12 +111,36 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // SUPPORT CHAT
+    match /support_conversations/{conversationId} {
+      allow read: if isSupportConversationOwner(resource) || isSupportAdmin();
+      allow write: if false;
+
+      match /messages/{messageId} {
+        allow read: if isSupportConversationOwner(
+          get(/databases/$(database)/documents/support_conversations/$(conversationId))
+        ) || isSupportAdmin();
+        allow write: if false;
+      }
+    }
+
     function isSignedIn() {
       return request.auth != null;
     }
 
     function isVerified() {
       return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isSupportAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isSupportConversationOwner(conversation) {
+      return isSignedIn()
+        && conversation.data.userId == request.auth.uid;
     }
 
     function isAdmin() {

@@ -14,6 +14,7 @@ import {
   normalizeAppointmentStatus,
   onlyGoogleCalendarSyncFieldsChanged,
 } from "./googleCalendarSync";
+import { createSupportChatHandlers } from "./supportChat";
 
 initializeApp();
 
@@ -37,6 +38,7 @@ const DEFAULT_SITE_CONFIG = {
   bonoExpirationMonths: 1,
   maintenanceMode: false,
 } as const;
+const supportChat = createSupportChatHandlers(db);
 
 type AppointmentDuration = "30" | "45" | "60";
 
@@ -1186,6 +1188,36 @@ function applyApprovedAppointmentWrites(
   transaction.set(bonoDoc.ref, update, { merge: true });
   return {};
 }
+
+export const createSupportConversation = onCall(
+  { region: REGION },
+  supportChat.createSupportConversation,
+);
+
+export const sendSupportMessage = onCall(
+  { region: REGION },
+  supportChat.sendSupportMessage,
+);
+
+export const markSupportConversationRead = onCall(
+  { region: REGION },
+  supportChat.markSupportConversationRead,
+);
+
+export const adminSendSupportMessage = onCall(
+  { region: REGION },
+  supportChat.adminSendSupportMessage,
+);
+
+export const closeSupportConversation = onCall(
+  { region: REGION },
+  supportChat.closeSupportConversation,
+);
+
+export const reopenSupportConversation = onCall(
+  { region: REGION },
+  supportChat.reopenSupportConversation,
+);
 
 export const createUserFromAdmin = onCall<CreateUserFromAdminRequest>(
   {
