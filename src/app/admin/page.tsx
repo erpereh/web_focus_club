@@ -1281,7 +1281,7 @@ export default function AdminPage() {
     }
 
     return subscribeSupportConversations(
-      {},
+      { excludeAdminHidden: true },
       (conversations) => {
         setUnreadSupportMessages(conversations.reduce(
           (total, conversation) => total + Math.max(0, conversation.unreadAdminCount || 0),

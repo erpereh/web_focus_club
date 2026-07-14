@@ -36,6 +36,9 @@ export interface SupportConversation {
     unreadCustomerCount: number;
     createdAt: Timestamp | null;
     updatedAt: Timestamp | null;
+    adminHidden?: boolean;
+    adminHiddenAt?: Timestamp | null;
+    adminHiddenBy?: string | null;
 }
 
 export interface SupportMessage {

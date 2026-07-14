@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
     ArrowLeft,
-    CheckCheck,
     CircleAlert,
     Loader2,
     Lock,
@@ -13,12 +12,13 @@ import {
     MessageCircle,
     Search,
     Send,
+    Trash2,
     X,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { auth } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
 import {
+    adminHideSupportConversation,
     adminSendSupportMessage,
     closeSupportConversation,
     markSupportConversationRead,
@@ -29,20 +29,6 @@ import {
 import type { SupportConversation, SupportConversationStatus, SupportMessage } from '@/types';
 
 type ConversationFilter = 'all' | SupportConversationStatus;
-
-function debugSupportPermissions(event: string, details: Record<string, unknown>): void {
-    if (process.env.NODE_ENV !== 'production') {
-        console.debug(`[SupportChat] ${event}`, details);
-    }
-}
-
-function getFirestoreErrorDetails(error: unknown): { code: string | null; message: string } {
-    const firebaseError = error as { code?: unknown; message?: unknown };
-    return {
-        code: typeof firebaseError?.code === 'string' ? firebaseError.code : null,
-        message: typeof firebaseError?.message === 'string' ? firebaseError.message : 'Error desconocido de Firestore.',
-    };
-}
 
 function initials(name: string): string {
     const value = name.trim();
@@ -107,6 +93,8 @@ export default function MessagesPage() {
     const [actionError, setActionError] = useState('');
     const [sending, setSending] = useState(false);
     const [changingStatus, setChangingStatus] = useState(false);
+    const [hideConfirmationOpen, setHideConfirmationOpen] = useState(false);
+    const [hidingConversation, setHidingConversation] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     const hasAdminAccess = userProfile?.role === 'admin';
@@ -117,69 +105,30 @@ export default function MessagesPage() {
     );
 
     useEffect(() => {
-        debugSupportPermissions('Estado de autorización resuelto', {
-            authLoading,
-            authResolved: !authLoading,
-            authCurrentUserUid: auth.currentUser?.uid ?? null,
-            authCurrentUserEmail: auth.currentUser?.email ?? null,
-            userProfileResolved: userProfile !== null,
-            userProfileRole: userProfile?.role ?? null,
-            profilePending,
-            hasAdminAccess,
-        });
-    }, [authLoading, hasAdminAccess, profilePending, userProfile]);
-
-    useEffect(() => {
         if (!authLoading && userProfile && userProfile.role !== 'admin') {
-            debugSupportPermissions('Suscripción de conversaciones bloqueada', {
-                reason: 'El perfil no tiene rol admin.',
-                authCurrentUserUid: auth.currentUser?.uid ?? null,
-                authCurrentUserEmail: auth.currentUser?.email ?? null,
-                userProfileRole: userProfile.role,
-            });
             router.replace('/admin');
         }
     }, [authLoading, router, userProfile]);
 
     useEffect(() => {
         const statusFilter = filter === 'all' ? undefined : filter;
-        if (!hasAdminAccess) {
-            debugSupportPermissions('Suscripción de conversaciones bloqueada', {
-                reason: authLoading ? 'Auth todavía está cargando.' : 'No hay un perfil admin confirmado.',
-                authLoading,
-                userProfileResolved: userProfile !== null,
-                userProfileRole: userProfile?.role ?? null,
-            });
-            return;
-        }
-
-        debugSupportPermissions('Iniciando suscripción de conversaciones', {
-            authCurrentUserUid: auth.currentUser?.uid ?? null,
-            authCurrentUserEmail: auth.currentUser?.email ?? null,
-            userProfileRole: userProfile?.role ?? null,
-            query: {
-                collection: 'support_conversations',
-                orderBy: 'lastMessageAt desc',
-                statusFilter: statusFilter ?? null,
-                clientSearchActive: Boolean(search.trim()),
-            },
-        });
+        if (!hasAdminAccess) return;
 
         setLoadingConversations(true);
         setConversationsError('');
         return subscribeSupportConversations(
-            { statusFilter, search },
+            { statusFilter, search, excludeAdminHidden: true },
             (nextConversations) => {
                 setConversations(nextConversations);
                 setLoadingConversations(false);
             },
             (error) => {
-                debugSupportPermissions('Error de suscripción de conversaciones', getFirestoreErrorDetails(error));
+                console.error('No se han podido cargar las conversaciones de soporte.', error);
                 setConversationsError('No se han podido cargar las conversaciones. Inténtalo de nuevo más tarde.');
                 setLoadingConversations(false);
             },
         );
-    }, [authLoading, filter, hasAdminAccess, search, userProfile]);
+    }, [filter, hasAdminAccess, search]);
 
     useEffect(() => {
         if (selectedConversationId && !conversations.some((conversation) => conversation.id === selectedConversationId)) {
@@ -260,6 +209,24 @@ export default function MessagesPage() {
             setActionError(friendlyError(error, 'No se ha podido actualizar la conversación. Inténtalo de nuevo.'));
         } finally {
             setChangingStatus(false);
+        }
+    };
+
+    const hideConversation = async () => {
+        if (!selectedConversation || hidingConversation) return;
+
+        setHidingConversation(true);
+        setActionError('');
+        try {
+            await adminHideSupportConversation(selectedConversation.id);
+            setHideConfirmationOpen(false);
+            setSelectedConversationId(null);
+            setMessages([]);
+        } catch (error) {
+            console.error('No se ha podido ocultar la conversación del panel.', error);
+            setActionError(friendlyError(error, 'No se ha podido ocultar la conversación. Inténtalo de nuevo.'));
+        } finally {
+            setHidingConversation(false);
         }
     };
 
@@ -419,23 +386,25 @@ export default function MessagesPage() {
                                                     <p className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{conversation.userName || 'Cliente'}</p>
                                                     <p className="truncate text-xs text-[var(--color-text-secondary)]">{conversation.userEmail || 'Sin email'}</p>
                                                 </div>
-                                                <span className="shrink-0 text-[11px] text-[var(--color-text-secondary)]">{formatTimestamp(conversation.lastMessageAt)}</span>
+                                                <div className="flex shrink-0 flex-col items-end gap-1">
+                                                    <span className="text-[11px] text-[var(--color-text-secondary)]">{formatTimestamp(conversation.lastMessageAt)}</span>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className={cn(
+                                                            'inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+                                                            isOpen ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-bright)]' : 'bg-white/5 text-[var(--color-text-secondary)]',
+                                                        )}>
+                                                            {isOpen ? 'Abierta' : 'Cerrada'}
+                                                        </span>
+                                                        {conversation.unreadAdminCount > 0 && (
+                                                            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--color-accent-val)] px-1.5 text-[10px] font-bold text-[#08110c]">
+                                                                {conversation.unreadAdminCount > 99 ? '99+' : conversation.unreadAdminCount}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
                                             </div>
                                             <p className="mt-1 truncate text-xs font-medium text-[var(--color-accent-bright)]">{conversation.subject || 'Consulta general'}</p>
-                                            <div className="mt-1.5 flex items-center gap-2">
-                                                <p className="min-w-0 flex-1 truncate text-xs text-[var(--color-text-secondary)]">{conversation.lastMessage || 'Sin mensajes'}</p>
-                                                {conversation.unreadAdminCount > 0 && (
-                                                    <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-val)] px-1.5 text-[10px] font-bold text-[#08110c]">
-                                                        {conversation.unreadAdminCount > 99 ? '99+' : conversation.unreadAdminCount}
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <span className={cn(
-                                                'mt-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
-                                                isOpen ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-bright)]' : 'bg-white/5 text-[var(--color-text-secondary)]',
-                                            )}>
-                                                {isOpen ? 'Abierta' : 'Cerrada'}
-                                            </span>
+                                            <p className="mt-1 truncate text-xs text-[var(--color-text-secondary)]">{conversation.lastMessage || 'Sin mensajes'}</p>
                                         </div>
                                     </button>
                                 );
@@ -490,6 +459,19 @@ export default function MessagesPage() {
                                     >
                                         {changingStatus && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                         {selectedConversation.status === 'open' ? 'Cerrar' : 'Reabrir'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={hidingConversation}
+                                        onClick={() => {
+                                            setActionError('');
+                                            setHideConfirmationOpen(true);
+                                        }}
+                                        title="Ocultar esta conversación del panel"
+                                        aria-label="Ocultar esta conversación del panel"
+                                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-500/25 text-red-300 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        <Trash2 className="h-4 w-4" />
                                     </button>
                                 </div>
 
@@ -586,6 +568,49 @@ export default function MessagesPage() {
                     </section>
                 </div>
             </main>
+            {hideConfirmationOpen && selectedConversation && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="hide-conversation-title"
+                        className="w-full max-w-md rounded-2xl border border-border bg-[var(--color-bg-surface)] p-6 shadow-2xl"
+                    >
+                        <div className="flex items-start gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-500/10 text-red-300">
+                                <Trash2 className="h-5 w-5" />
+                            </div>
+                            <div>
+                                <h2 id="hide-conversation-title" className="text-lg font-semibold text-[var(--color-text-primary)]">
+                                    ¿Ocultar esta conversación del panel?
+                                </h2>
+                                <p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">
+                                    El cliente seguirá viendo la conversación. Solo se ocultará para el admin.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="mt-6 flex justify-end gap-3">
+                            <button
+                                type="button"
+                                disabled={hidingConversation}
+                                onClick={() => setHideConfirmationOpen(false)}
+                                className="rounded-lg px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-white/5 hover:text-[var(--color-text-primary)] disabled:opacity-60"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                disabled={hidingConversation}
+                                onClick={() => void hideConversation()}
+                                className="inline-flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-200 transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {hidingConversation && <Loader2 className="h-4 w-4 animate-spin" />}
+                                Ocultar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

@@ -18,6 +18,7 @@ import type {
 export interface SupportConversationSubscriptionOptions {
     statusFilter?: SupportConversationStatus;
     search?: string;
+    excludeAdminHidden?: boolean;
 }
 
 type SupportConversationActionResult = {
@@ -34,7 +35,7 @@ function matchesConversationSearch(conversation: SupportConversation, search: st
 }
 
 export function subscribeSupportConversations(
-    { statusFilter, search }: SupportConversationSubscriptionOptions = {},
+    { statusFilter, search, excludeAdminHidden = false }: SupportConversationSubscriptionOptions = {},
     callback: (conversations: SupportConversation[]) => void,
     onError?: (error: Error) => void,
 ): Unsubscribe {
@@ -48,6 +49,7 @@ export function subscribeSupportConversations(
         (snapshot) => {
             const conversations = snapshot.docs
                 .map((document) => ({ id: document.id, ...document.data() }) as SupportConversation)
+                .filter((conversation) => !excludeAdminHidden || conversation.adminHidden !== true)
                 .filter((conversation) => matchesConversationSearch(conversation, search ?? ''));
             callback(conversations);
         },
@@ -92,6 +94,11 @@ const reopenConversationCallable = httpsCallable<
     SupportConversationActionResult
 >(functions, 'reopenSupportConversation');
 
+const hideConversationCallable = httpsCallable<
+    { conversationId: string },
+    SupportConversationActionResult
+>(functions, 'adminHideSupportConversation');
+
 export async function adminSendSupportMessage(conversationId: string, text: string): Promise<void> {
     await sendSupportMessageCallable({ conversationId, text });
 }
@@ -106,4 +113,8 @@ export async function closeSupportConversation(conversationId: string): Promise<
 
 export async function reopenSupportConversation(conversationId: string): Promise<void> {
     await reopenConversationCallable({ conversationId });
+}
+
+export async function adminHideSupportConversation(conversationId: string): Promise<void> {
+    await hideConversationCallable({ conversationId });
 }

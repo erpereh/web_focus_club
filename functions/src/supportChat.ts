@@ -17,6 +17,9 @@ export interface SupportConversation {
   unreadCustomerCount: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  adminHidden?: boolean;
+  adminHiddenAt?: Timestamp;
+  adminHiddenBy?: string;
 }
 
 export interface SupportMessage {
@@ -270,6 +273,26 @@ export function createSupportChatHandlers(
         const conversationSnap = await transaction.get(conversationRef);
         requireSupportConversation(conversationSnap.exists ? conversationSnap.data() : undefined);
         transaction.update(conversationRef, { status: "open" satisfies SupportConversationStatus, updatedAt: now });
+      });
+
+      return { success: true, conversationId };
+    },
+
+    adminHideSupportConversation: async (request: CallableRequest<unknown>) => {
+      const admin = await requireSupportAdmin(db, request);
+      const conversationId = parseSupportConversationIdPayload(request.data).conversationId;
+      const now = Timestamp.now();
+      const conversationRef = getConversationRef(db, conversationId);
+
+      await db.runTransaction(async (transaction) => {
+        const conversationSnap = await transaction.get(conversationRef);
+        requireSupportConversation(conversationSnap.exists ? conversationSnap.data() : undefined);
+        transaction.update(conversationRef, {
+          adminHidden: true,
+          adminHiddenAt: now,
+          adminHiddenBy: admin.uid,
+          updatedAt: now,
+        });
       });
 
       return { success: true, conversationId };

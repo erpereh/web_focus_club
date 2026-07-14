@@ -1252,6 +1252,11 @@ export const reopenSupportConversation = onCall(
   supportChat.reopenSupportConversation,
 );
 
+export const adminHideSupportConversation = onCall(
+  { region: REGION },
+  supportChat.adminHideSupportConversation,
+);
+
 export const createUserFromAdmin = onCall<CreateUserFromAdminRequest>(
   {
     region: REGION,
