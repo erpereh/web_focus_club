@@ -14,7 +14,7 @@ import {
   normalizeAppointmentStatus,
   onlyGoogleCalendarSyncFieldsChanged,
 } from "./googleCalendarSync";
-import { createSupportChatHandlers } from "./supportChat";
+import { createSupportChatHandlers, type SupportChatNotificationInput } from "./supportChat";
 
 initializeApp();
 
@@ -38,7 +38,9 @@ const DEFAULT_SITE_CONFIG = {
   bonoExpirationMonths: 1,
   maintenanceMode: false,
 } as const;
-const supportChat = createSupportChatHandlers(db);
+const supportChat = createSupportChatHandlers(db, {
+  notifySupportCustomer: sendSupportMessagePushNotificationSafely,
+});
 
 type AppointmentDuration = "30" | "45" | "60";
 
@@ -728,12 +730,12 @@ function isInvalidFcmTokenError(code?: string): boolean {
     || code === "messaging/invalid-registration-token";
 }
 
-async function sendAppointmentStatusPushNotification(
-  appointmentId: string,
-  appointment: AppointmentDoc,
-  status: "approved" | "rejected",
+async function sendUserPushNotification(
+  userId: string,
+  notification: { title: string; body: string },
+  data: Record<string, string>,
 ): Promise<void> {
-  const userSnap = await db.collection("users").doc(appointment.userId).get();
+  const userSnap = await db.collection("users").doc(userId).get();
   const user = userSnap.data() as UserProfile | undefined;
   if (!user || user.pushNotificationsEnabled !== true) return;
 
@@ -748,7 +750,6 @@ async function sendAppointmentStatusPushNotification(
 
   if (tokenRefs.length === 0) return;
 
-  const notification = appointmentStatusNotification(status, appointment);
   const messaging = getMessaging();
 
   for (let index = 0; index < tokenRefs.length; index += 500) {
@@ -756,11 +757,7 @@ async function sendAppointmentStatusPushNotification(
     const response = await messaging.sendEachForMulticast({
       tokens: batch.map((entry) => entry.token),
       notification,
-      data: {
-        type: "appointment_status",
-        appointmentId,
-        status,
-      },
+      data,
     });
 
     await Promise.all(
@@ -772,6 +769,42 @@ async function sendAppointmentStatusPushNotification(
         return Promise.resolve();
       }),
     );
+  }
+}
+
+async function sendAppointmentStatusPushNotification(
+  appointmentId: string,
+  appointment: AppointmentDoc,
+  status: "approved" | "rejected",
+): Promise<void> {
+  await sendUserPushNotification(
+    appointment.userId,
+    appointmentStatusNotification(status, appointment),
+    {
+      type: "appointment_status",
+      appointmentId,
+      status,
+    },
+  );
+}
+
+async function sendSupportMessagePushNotificationSafely(
+  input: SupportChatNotificationInput,
+): Promise<void> {
+  try {
+    await sendUserPushNotification(
+      input.userId,
+      {
+        title: "Nuevo mensaje de Focus Club",
+        body: "Tienes una nueva respuesta en el chat.",
+      },
+      {
+        type: "support_message",
+        conversationId: input.conversationId,
+      },
+    );
+  } catch (_) {
+    console.error("Support message push notification failed.");
   }
 }
 

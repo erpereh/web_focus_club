@@ -229,7 +229,7 @@ export default function MessagesPage() {
 
     const sendMessage = async () => {
         const text = draft.trim();
-        if (!selectedConversation || !text || sending) return;
+        if (!selectedConversation || selectedConversation.status !== 'open' || !text || sending) return;
 
         setSending(true);
         setActionError('');
@@ -535,7 +535,7 @@ export default function MessagesPage() {
                                 </div>
 
                                 <div className="border-t border-border bg-[var(--color-bg-surface)] p-3 sm:p-4">
-                                    {actionError && (
+      {actionError && (
                                         <div className="mb-3 flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-200">
                                             <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
                                             <span className="flex-1">{actionError}</span>
@@ -543,8 +543,13 @@ export default function MessagesPage() {
                                                 <X className="h-4 w-4" />
                                             </button>
                                         </div>
-                                    )}
-                                    <form
+      )}
+      {selectedConversation.status === 'closed' && (
+          <p className="mb-3 rounded-lg border border-[var(--color-accent-border)] bg-[var(--color-accent-dim)] px-3 py-2 text-xs text-[var(--color-accent-bright)]">
+              Esta conversación está cerrada. Pulsa Reabrir antes de responder.
+          </p>
+      )}
+      <form
                                         onSubmit={(event) => {
                                             event.preventDefault();
                                             void sendMessage();
@@ -560,13 +565,14 @@ export default function MessagesPage() {
                                                     void sendMessage();
                                                 }
                                             }}
-                                            rows={1}
-                                            placeholder="Escribe tu respuesta..."
+              rows={1}
+              disabled={selectedConversation.status !== 'open'}
+              placeholder={selectedConversation.status === 'open' ? 'Escribe tu respuesta...' : 'Reabre la conversación para responder.'}
                                             className="max-h-32 min-h-11 flex-1 resize-y rounded-xl border border-border bg-input px-3 py-2.5 text-sm leading-5 text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)]"
                                         />
                                         <button
                                             type="submit"
-                                            disabled={!draft.trim() || sending}
+              disabled={selectedConversation.status !== 'open' || !draft.trim() || sending}
                                             className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--color-accent-val)] text-[#08110c] transition-colors hover:bg-[var(--color-accent-bright)] disabled:cursor-not-allowed disabled:opacity-40"
                                             aria-label="Enviar mensaje"
                                         >

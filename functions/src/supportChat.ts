@@ -65,6 +65,15 @@ interface SupportConversationIdPayload {
   conversationId: string;
 }
 
+export interface SupportChatNotificationInput {
+  userId: string;
+  conversationId: string;
+}
+
+export interface SupportChatHandlerOptions {
+  notifySupportCustomer?: (input: SupportChatNotificationInput) => Promise<void>;
+}
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CUSTOMER_ROLES = new Set(["user", "customer"]);
 
@@ -97,7 +106,10 @@ export function getSupportCustomerIdentity(input: SupportCustomerIdentityInput):
   };
 }
 
-export function createSupportChatHandlers(db: Firestore) {
+export function createSupportChatHandlers(
+  db: Firestore,
+  { notifySupportCustomer = async () => {} }: SupportChatHandlerOptions = {},
+) {
   return {
     createSupportConversation: async (request: CallableRequest<unknown>) => {
       const customer = await requireSupportCustomer(db, request);
@@ -146,6 +158,7 @@ export function createSupportChatHandlers(db: Firestore) {
         const conversationSnap = await transaction.get(conversationRef);
         const conversation = requireSupportConversation(conversationSnap.exists ? conversationSnap.data() : undefined);
         assertConversationOwner(conversation, customer.uid);
+        assertSupportConversationOpen(conversation);
 
         transaction.create(messageRef, {
           senderId: customer.uid,
@@ -154,7 +167,6 @@ export function createSupportChatHandlers(db: Firestore) {
           createdAt: now,
         } satisfies SupportMessage);
         transaction.update(conversationRef, {
-          status: "open" satisfies SupportConversationStatus,
           lastMessage: payload.text,
           lastMessageAt: now,
           lastMessageBy: "customer" satisfies SupportSenderRole,
@@ -200,9 +212,10 @@ export function createSupportChatHandlers(db: Firestore) {
       const conversationRef = getConversationRef(db, payload.conversationId);
       const messageRef = conversationRef.collection("messages").doc();
 
-      await db.runTransaction(async (transaction) => {
+      const notification = await db.runTransaction(async (transaction) => {
         const conversationSnap = await transaction.get(conversationRef);
         const conversation = requireSupportConversation(conversationSnap.exists ? conversationSnap.data() : undefined);
+        assertSupportConversationOpen(conversation);
 
         transaction.create(messageRef, {
           senderId: admin.uid,
@@ -211,14 +224,23 @@ export function createSupportChatHandlers(db: Firestore) {
           createdAt: now,
         } satisfies SupportMessage);
         transaction.update(conversationRef, {
-          status: "open" satisfies SupportConversationStatus,
           lastMessage: payload.text,
           lastMessageAt: now,
           lastMessageBy: "admin" satisfies SupportSenderRole,
           unreadCustomerCount: getUnreadCount(conversation.unreadCustomerCount) + 1,
           updatedAt: now,
         });
+        return {
+          userId: conversation.userId,
+          conversationId: conversationRef.id,
+        } satisfies SupportChatNotificationInput;
       });
+
+      try {
+        await notifySupportCustomer(notification);
+      } catch (_) {
+        console.error("Support message push notification failed.");
+      }
 
       return { success: true, conversationId: conversationRef.id };
     },
@@ -358,6 +380,17 @@ function requireSupportConversation(data: FirebaseFirestore.DocumentData | undef
 function assertConversationOwner(conversation: SupportConversation, uid: string): void {
   if (conversation.userId !== uid) {
     throw new HttpsError("permission-denied", "No tienes acceso a esta conversacion.");
+  }
+}
+
+export function assertSupportConversationOpen(
+  conversation: Pick<SupportConversation, "status">,
+): void {
+  if (conversation.status === "closed") {
+    throw new HttpsError(
+      "failed-precondition",
+      "Esta conversacion esta cerrada. Un administrador debe reabrirla antes de enviar mensajes.",
+    );
   }
 }
 

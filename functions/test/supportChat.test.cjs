@@ -4,6 +4,7 @@ const {
   getSupportCustomerIdentity,
   normalizeSupportMessageText,
   normalizeSupportSubject,
+  assertSupportConversationOpen,
 } = require("../lib/supportChat.js");
 
 assert.equal(normalizeSupportSubject("  Consulta sobre mi bono  "), "Consulta sobre mi bono");
@@ -71,6 +72,12 @@ assert.throws(
     profile: undefined,
   }),
   /email/i,
+);
+
+assert.doesNotThrow(() => assertSupportConversationOpen({ status: "open" }));
+assert.throws(
+  () => assertSupportConversationOpen({ status: "closed" }),
+  (error) => error && error.code === "failed-precondition" && /cerrada/i.test(error.message),
 );
 
 console.log("support chat contract tests passed");
