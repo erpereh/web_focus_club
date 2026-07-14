@@ -59,6 +59,7 @@ import {
   Eye,
   EyeOff,
   Play,
+  MessageCircle,
 } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
@@ -156,6 +157,7 @@ import {
 } from '@/lib/firestore';
 import type { AdminUserAccessMethod, AdminUserRole } from '@/lib/firestore';
 import { auth } from '@/lib/firebase';
+import { subscribeSupportConversations } from '@/lib/support-chat';
 import { cn } from '@/lib/utils';
 import type { UserProfile } from '@/types';
 
@@ -992,6 +994,7 @@ export default function AdminPage() {
   const appointmentIdsRef = useRef<Set<string>>(new Set());
   const appointmentsSnapshotReadyRef = useRef(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [unreadSupportMessages, setUnreadSupportMessages] = useState(0);
   const switchTab = (tab: TabType) => { setActiveTab(tab); setSidebarOpen(false); };
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<string | null>(null);
@@ -1269,6 +1272,27 @@ export default function AdminPage() {
       unsubscribeBranding();
       unsubscribeBonos();
     };
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setUnreadSupportMessages(0);
+      return;
+    }
+
+    return subscribeSupportConversations(
+      {},
+      (conversations) => {
+        setUnreadSupportMessages(conversations.reduce(
+          (total, conversation) => total + Math.max(0, conversation.unreadAdminCount || 0),
+          0,
+        ));
+      },
+      (error) => {
+        console.error('No se ha podido cargar el contador de mensajes de soporte.', error);
+        setUnreadSupportMessages(0);
+      },
+    );
   }, [isAdmin]);
 
   useEffect(() => {
@@ -2681,6 +2705,25 @@ export default function AdminPage() {
                 </span>
               )}
             </button>
+
+            <Link
+              href="/admin/mensajes"
+              onClick={() => setSidebarOpen(false)}
+              className={cn(
+                'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
+                pathname?.startsWith('/admin/mensajes')
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
+              )}
+            >
+              <MessageCircle className="w-5 h-5" />
+              <span className="font-medium">Mensajes</span>
+              {unreadSupportMessages > 0 && (
+                <span className="ml-auto bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] text-xs px-2 py-0.5 rounded-full">
+                  {unreadSupportMessages > 99 ? '99+' : unreadSupportMessages}
+                </span>
+              )}
+            </Link>
 
             <button
               onClick={() => switchTab('availability')}

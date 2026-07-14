@@ -1,3 +1,5 @@
+import type { Timestamp } from 'firebase/firestore';
+
 // ============================================
 // TIPOS COMPARTIDOS — Focus Club Vallecas
 // ============================================
@@ -11,6 +13,37 @@ export interface UserProfile {
     isTrainer?: boolean;
     photoURL?: string;
     createdAt: string;
+}
+
+// ============================================
+// CHAT DE SOPORTE
+// ============================================
+
+export type SupportConversationStatus = 'open' | 'closed';
+export type SupportSenderRole = 'customer' | 'admin';
+
+export interface SupportConversation {
+    id: string;
+    userId: string;
+    userName: string;
+    userEmail: string;
+    status: SupportConversationStatus;
+    subject: string;
+    lastMessage: string;
+    lastMessageAt: Timestamp | null;
+    lastMessageBy: SupportSenderRole;
+    unreadAdminCount: number;
+    unreadCustomerCount: number;
+    createdAt: Timestamp | null;
+    updatedAt: Timestamp | null;
+}
+
+export interface SupportMessage {
+    id: string;
+    senderId: string;
+    senderRole: SupportSenderRole;
+    text: string;
+    createdAt: Timestamp | null;
 }
 
 export interface Service {
