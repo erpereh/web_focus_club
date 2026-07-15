@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase-admin/app";
 import { createHash, randomBytes } from "node:crypto";
 import { getAuth } from "firebase-admin/auth";
-import { DocumentReference, FieldValue, getFirestore, QueryDocumentSnapshot, Transaction } from "firebase-admin/firestore";
+import { DocumentReference, DocumentSnapshot, FieldValue, getFirestore, QueryDocumentSnapshot, Transaction } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
@@ -14,6 +14,14 @@ import {
   normalizeAppointmentStatus,
   onlyGoogleCalendarSyncFieldsChanged,
 } from "./googleCalendarSync";
+import {
+  isRescheduleCapacityAvailable,
+  reconcileAppointmentMinutes,
+  reconcileOwnAppointmentReschedule,
+  selectExactlyOneActiveBono,
+  shouldReconcileAppointmentTransition,
+  validateOwnFutureAppointment,
+} from "./appointmentLifecycle.js";
 import { createSupportChatHandlers, type SupportChatNotificationInput } from "./supportChat";
 
 initializeApp();
@@ -53,6 +61,15 @@ interface CreateAppointmentRequest {
   duration: AppointmentDuration;
   preferredSlot: TimeSlot;
   reason?: string;
+}
+
+interface CancelOwnAppointmentRequest {
+  appointmentId?: unknown;
+}
+
+interface UpdateOwnAppointmentSlotRequest {
+  appointmentId?: unknown;
+  preferredSlot?: unknown;
 }
 
 interface ContactMessageRequest {
@@ -144,13 +161,17 @@ interface AppointmentDoc {
   duration: AppointmentDuration;
   preferredSlots: TimeSlot[];
   reason: string;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "cancelled";
   date?: string;
   time?: string;
   approvedSlot?: TimeSlot;
   assignedTrainer?: string;
   sessionType?: string;
   trainerNotes?: string;
+  approvedAt?: string;
+  approvedBy?: string;
+  approvedByAdmin?: string;
+  approvalNotes?: string;
   googleCalendarEventId?: string;
   googleCalendarSyncedAt?: string;
   googleCalendarSyncStatus?: "synced" | "error" | "deleted";
@@ -158,6 +179,22 @@ interface AppointmentDoc {
   googleCalendarSyncHash?: string;
   createdByAdmin?: boolean;
   createdByAdminUid?: string;
+  bonoId?: string;
+  minutesDeducted?: boolean;
+  minutesDeductedAmount?: number;
+  minutesDeductedAt?: string;
+  minutesDeductionSkippedAt?: string;
+  minutesDeductionSkippedReason?: string;
+  minutesRefunded?: boolean;
+  minutesRefundedAmount?: number;
+  minutesRefundedAt?: string | null;
+  minutesRefundReason?: string | null;
+  cancelledBy?: string;
+  cancelledAt?: string;
+  cancellationReason?: string;
+  modifiedBy?: string;
+  modifiedAt?: string;
+  previousPreferredSlot?: TimeSlot;
   createdAt: string;
   updatedAt?: string;
 }
@@ -329,6 +366,130 @@ function appointmentSlotKeys(appointment: AppointmentDoc): Set<string> {
   const slot = appointment.approvedSlot ?? appointment.preferredSlots?.[0];
   if (!slot) return new Set<string>();
   return getOverlappingSlotKeys(slot, Number.parseInt(appointment.duration, 10));
+}
+
+function appointmentDurationMinutes(appointment: AppointmentDoc): number {
+  const duration = Number.parseInt(appointment.duration, 10);
+  return [30, 45, 60].includes(duration) ? duration : 0;
+}
+
+function isBonoExpired(bono: BonoDoc, now = getNowDate()): boolean {
+  return Boolean(bono.fechaExpiracion && new Date(bono.fechaExpiracion) < now);
+}
+
+interface AppointmentMinutesAudit {
+  bonoId: string;
+  minutesDeducted: true;
+  minutesDeductedAmount: number;
+  minutesDeductedAt: string;
+}
+
+/** Writes the bono debit once and returns the appointment audit fields to persist. */
+async function deductAppointmentMinutesInTransaction(
+  transaction: Transaction,
+  appointmentRef: DocumentReference,
+  appointment: AppointmentDoc,
+  bonoDoc: DocumentSnapshot,
+  now: string,
+  persistAppointmentAudit = true,
+): Promise<Record<string, unknown> | undefined> {
+  if (!bonoDoc.exists) return undefined;
+
+  const minutes = appointmentDurationMinutes(appointment);
+  const bono = { ...bonoDoc.data(), id: bonoDoc.id } as BonoDoc & { id: string };
+  let bonoUpdate: { minutosRestantes: number; estado: BonoDoc["estado"] } | undefined;
+  let audit: Record<string, unknown> | undefined;
+  const reconciliation = reconcileAppointmentMinutes({
+    action: "deduct",
+    appointment,
+    bono,
+    amount: minutes,
+    now,
+    transaction: {
+      setBono: (_bonoId, patch) => { bonoUpdate = patch; },
+      setAppointment: (patch) => { audit = patch; },
+    },
+  });
+  if (!reconciliation.ok || !bonoUpdate || !audit) return undefined;
+
+  transaction.set(bonoDoc.ref, {
+    ...bonoUpdate,
+    historial: FieldValue.arrayUnion({
+      fecha: now,
+      tipo: appointment.serviceType,
+      duracion: appointment.duration,
+      appointmentId: appointmentRef.id,
+      accion: "descuento_cita",
+    }),
+  }, { merge: true });
+
+  if (persistAppointmentAudit) transaction.set(appointmentRef, audit, { merge: true });
+  return audit;
+}
+
+/** Restores a previous debit to its original bono at most once. */
+async function refundAppointmentMinutesInTransaction(
+  transaction: Transaction,
+  appointmentRef: DocumentReference,
+  appointment: AppointmentDoc,
+  bonoSnap: DocumentSnapshot | undefined,
+  now: string,
+): Promise<boolean> {
+  if (!appointment.bonoId) {
+    return false;
+  }
+
+  if (!bonoSnap?.exists) {
+    transaction.set(appointmentRef, {
+      minutesRefundReason: "No se ha encontrado el bono original para devolver los minutos.",
+    }, { merge: true });
+    return false;
+  }
+
+  const bono = { ...bonoSnap.data(), id: bonoSnap.id } as BonoDoc & { id: string };
+  let bonoUpdate: { minutosRestantes: number; estado: BonoDoc["estado"] } | undefined;
+  let appointmentUpdate: Record<string, unknown> | undefined;
+  const reconciliation = reconcileAppointmentMinutes({
+    action: "refund",
+    appointment,
+    bono,
+    now,
+    transaction: {
+      setBono: (_bonoId, patch) => { bonoUpdate = patch; },
+      setAppointment: (patch) => { appointmentUpdate = patch; },
+    },
+  });
+  if (!reconciliation.ok || !bonoUpdate || !appointmentUpdate) return false;
+  const update: Record<string, unknown> = {
+    ...bonoUpdate,
+    historial: FieldValue.arrayUnion({
+      fecha: now,
+      tipo: appointment.serviceType,
+      duracion: appointment.duration,
+      appointmentId: appointmentRef.id,
+      accion: "devolucion_cita",
+    }),
+  };
+
+  transaction.set(bonoSnap.ref, update, { merge: true });
+  transaction.set(appointmentRef, appointmentUpdate, { merge: true });
+  return true;
+}
+
+/** Releases approved-slot occupancy from already-read documents without underflowing counts. */
+async function releaseApprovedAppointmentOccupancyInTransaction(
+  transaction: Transaction,
+  appointment: AppointmentDoc,
+  occupancySnaps: DocumentSnapshot[],
+): Promise<void> {
+  if (appointment.status !== "approved") return;
+  const expectedKeys = appointmentSlotKeys(appointment);
+  occupancySnaps.forEach((snap) => {
+    if (!snap.exists || !expectedKeys.has(snap.id)) return;
+    const occupancy = snap.data() as SlotOccupancy;
+    const currentCount = typeof occupancy.count === "number" ? occupancy.count : 0;
+    transaction.set(snap.ref, { count: Math.max(0, currentCount - 1) }, { merge: true });
+  });
 }
 
 function getBonoMinutosTotales(bono: BonoDoc): number {
@@ -710,12 +871,19 @@ function notificationSlot(appointment: AppointmentDoc): TimeSlot | undefined {
     ?? (appointment.date && appointment.time ? { date: appointment.date, time: appointment.time } : undefined);
 }
 
-function appointmentStatusNotification(status: "approved" | "rejected", appointment: AppointmentDoc): { title: string; body: string } {
+function appointmentStatusNotification(status: "approved" | "rejected" | "cancelled", appointment: AppointmentDoc): { title: string; body: string } {
   if (status === "approved") {
     const slot = notificationSlot(appointment);
     return {
       title: "Cita aprobada",
       body: `Tu sesion del ${slot?.date ?? ""} a las ${slot?.time ?? ""} ha sido aprobada.`,
+    };
+  }
+
+  if (status === "cancelled") {
+    return {
+      title: "Cita cancelada",
+      body: "Tu cita ha sido cancelada y los minutos se han devuelto a tu bono.",
     };
   }
 
@@ -775,7 +943,7 @@ async function sendUserPushNotification(
 async function sendAppointmentStatusPushNotification(
   appointmentId: string,
   appointment: AppointmentDoc,
-  status: "approved" | "rejected",
+  status: "approved" | "rejected" | "cancelled",
 ): Promise<void> {
   await sendUserPushNotification(
     appointment.userId,
@@ -1177,7 +1345,7 @@ function applyApprovedAppointmentWrites(
   appointmentRef: DocumentReference,
   bonoDoc: QueryDocumentSnapshot | undefined,
   now: string,
-): { bonoWarning?: string } {
+): { bonoWarning?: string; minutesAudit?: AppointmentMinutesAudit } {
   const slotBlocks = getSlotBlocks(input.slot.time, input.durationMinutes);
   slotBlocks.forEach((time) => {
     transaction.set(
@@ -1219,7 +1387,14 @@ function applyApprovedAppointmentWrites(
   }
 
   transaction.set(bonoDoc.ref, update, { merge: true });
-  return {};
+  return {
+    minutesAudit: {
+      bonoId: bonoDoc.id,
+      minutesDeducted: true,
+      minutesDeductedAmount: input.durationMinutes,
+      minutesDeductedAt: now,
+    },
+  };
 }
 
 export const createSupportConversation = onCall(
@@ -1561,6 +1736,8 @@ export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminReque
         assignedTrainer: input.assignedTrainer,
         createdByAdmin: true,
         createdByAdminUid: adminUid,
+        minutesRefundedAt: null,
+        minutesRefundReason: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -1576,6 +1753,7 @@ export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminReque
           now,
         );
         bonoWarning = writeResult.bonoWarning;
+        if (writeResult.minutesAudit) Object.assign(appointment, writeResult.minutesAudit);
       }
 
       transaction.create(appointmentRef, appointment);
@@ -1723,7 +1901,7 @@ export const syncAppointmentWithGoogleCalendar = onDocumentWritten(
       const calendar = getGoogleCalendarService();
       const calendarId = getGoogleCalendarId();
 
-      if (status === "rejected") {
+      if (status === "rejected" || status === "cancelled") {
         await deleteGoogleCalendarEventIfExists(calendar, calendarId, previousEventId);
         await appointmentRef.set({
           googleCalendarEventId: FieldValue.delete(),
@@ -1824,8 +2002,7 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
 
     const bonosQuery = db.collection("bonos")
       .where("userId", "==", userId)
-      .where("estado", "==", "activo")
-      .limit(1);
+      .where("estado", "==", "activo");
 
     const appointmentId = await db.runTransaction(async (transaction) => {
       const [
@@ -1853,13 +2030,21 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
         throw toHttpsError("failed-precondition", "Tu perfil no está completo para poder reservar.");
       }
 
-      if (bonosSnap.empty) {
-        throw toHttpsError("failed-precondition", "No tienes un bono activo. Consulta en el gimnasio para adquirir uno.");
+      const selectedBono = selectExactlyOneActiveBono(
+        bonosSnap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as BonoDoc)),
+      );
+      if (!selectedBono) {
+        throw toHttpsError(
+          "failed-precondition",
+          bonosSnap.empty
+            ? "No tienes un bono activo. Consulta en el gimnasio para adquirir uno."
+            : "Tienes más de un bono activo. Contacta con el gimnasio para regularizar tus bonos.",
+        );
       }
 
       const bonoDoc = bonosSnap.docs[0];
       const bono = { id: bonoDoc.id, ...bonoDoc.data() } as BonoDoc;
-      if (bono.fechaExpiracion && new Date(bono.fechaExpiracion) < getNowDate()) {
+      if (isBonoExpired(bono)) {
         throw toHttpsError("failed-precondition", "Tu bono activo está expirado. Consulta en el gimnasio para renovarlo.");
       }
 
@@ -1918,6 +2103,7 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
         throw toHttpsError("failed-precondition", "Ya tienes una sesión reservada en esta franja.");
       }
 
+      const createdAt = new Date().toISOString();
       const appointment: AppointmentDoc = {
         userId,
         name: userProfile.name,
@@ -1928,14 +2114,238 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
         preferredSlots: [preferredSlot],
         reason,
         status: "pending",
-        createdAt: new Date().toISOString(),
+        minutesRefundedAt: null,
+        minutesRefundReason: null,
+        createdAt,
+        updatedAt: createdAt,
       };
 
-      transaction.create(appointmentRef, appointment);
+      const deduction = await deductAppointmentMinutesInTransaction(
+        transaction,
+        appointmentRef,
+        appointment,
+        bonoDoc,
+        createdAt,
+        false,
+      );
+      if (!deduction) {
+        throw toHttpsError("failed-precondition", "No se han podido reservar los minutos del bono seleccionado.");
+      }
+
+      transaction.create(appointmentRef, { ...appointment, ...deduction });
       return appointmentRef.id;
     });
 
     return { appointmentId };
+  },
+);
+
+export const cancelOwnAppointment = onCall<CancelOwnAppointmentRequest>(
+  { region: REGION },
+  async (request) => {
+    if (!request.auth) {
+      throw toHttpsError("permission-denied", "Debes iniciar sesión para cancelar una cita.");
+    }
+    if (!isRecord(request.data)) {
+      throw toHttpsError("invalid-argument", "Los datos de la cancelación no son válidos.");
+    }
+
+    const requestUid = request.auth.uid;
+    const appointmentId = normalizeTextField(request.data.appointmentId, "cita", 256);
+    const appointmentRef = db.collection("appointments").doc(appointmentId);
+
+    await db.runTransaction(async (transaction) => {
+      const appointmentSnap = await transaction.get(appointmentRef);
+      if (!appointmentSnap.exists) {
+        throw toHttpsError("failed-precondition", "No se ha encontrado la cita indicada.");
+      }
+
+      const appointment = appointmentSnap.data() as AppointmentDoc;
+      const slot = notificationSlot(appointment);
+      const validation = validateOwnFutureAppointment({
+        userId: appointment.userId,
+        status: appointment.status,
+        date: slot?.date,
+        time: slot?.time,
+      }, requestUid, getNowDate().getTime());
+      if (validation === "not-owner") {
+        throw toHttpsError("permission-denied", "No puedes cancelar la cita de otro usuario.");
+      }
+      if (validation === "invalid-status") {
+        throw toHttpsError("failed-precondition", "Esta cita ya no se puede cancelar.");
+      }
+      if (validation === "not-future") {
+        throw toHttpsError("failed-precondition", "Solo puedes cancelar citas futuras.");
+      }
+
+      const occupancyRefs = appointment.status === "approved"
+        ? Array.from(appointmentSlotKeys(appointment)).map((key) => db.collection("slot_occupancy").doc(key))
+        : [];
+      const [bonoSnap, ...occupancySnaps] = await Promise.all([
+        appointment.bonoId ? transaction.get(db.collection("bonos").doc(appointment.bonoId)) : Promise.resolve(undefined),
+        ...occupancyRefs.map((ref) => transaction.get(ref)),
+      ]);
+      const now = new Date().toISOString();
+
+      await releaseApprovedAppointmentOccupancyInTransaction(transaction, appointment, occupancySnaps);
+      await refundAppointmentMinutesInTransaction(transaction, appointmentRef, appointment, bonoSnap, now);
+      transaction.set(appointmentRef, {
+        status: "cancelled",
+        cancelledBy: "customer",
+        cancelledAt: now,
+        cancellationReason: "cancelled_by_customer",
+        updatedAt: now,
+      }, { merge: true });
+    });
+
+    return { success: true, appointmentId };
+  },
+);
+
+export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
+  { region: REGION },
+  async (request) => {
+    if (!request.auth) {
+      throw toHttpsError("permission-denied", "Debes iniciar sesión para modificar una cita.");
+    }
+    if (!isRecord(request.data)) {
+      throw toHttpsError("invalid-argument", "Los datos de la modificación no son válidos.");
+    }
+
+    const requestUid = request.auth.uid;
+    const appointmentId = normalizeTextField(request.data.appointmentId, "cita", 256);
+    if (!isTimeSlot(request.data.preferredSlot)) {
+      throw toHttpsError("invalid-argument", "La nueva franja no es válida.");
+    }
+    const preferredSlot = request.data.preferredSlot;
+    const appointmentRef = db.collection("appointments").doc(appointmentId);
+
+    await db.runTransaction(async (transaction) => {
+      const appointmentSnap = await transaction.get(appointmentRef);
+      if (!appointmentSnap.exists) {
+        throw toHttpsError("failed-precondition", "No se ha encontrado la cita indicada.");
+      }
+
+      const appointment = appointmentSnap.data() as AppointmentDoc;
+      if (appointment.userId !== requestUid) {
+        throw toHttpsError("permission-denied", "No puedes modificar la cita de otro usuario.");
+      }
+      if (appointment.status !== "pending" && appointment.status !== "approved") {
+        throw toHttpsError("failed-precondition", "Esta cita ya no se puede modificar.");
+      }
+
+      const durationMinutes = appointmentDurationMinutes(appointment);
+      const currentSlot = notificationSlot(appointment);
+      const newSlotDate = slotDateTime(preferredSlot);
+      if (!durationMinutes || Number.isNaN(newSlotDate.getTime()) || newSlotDate <= getNowDate()) {
+        throw toHttpsError("failed-precondition", "La franja seleccionada ya no está disponible.");
+      }
+
+      const oldOccupancyRefs = appointment.status === "approved"
+        ? Array.from(appointmentSlotKeys(appointment)).map((key) => db.collection("slot_occupancy").doc(key))
+        : [];
+      const siteConfigRef = db.collection("site_config").doc("main");
+      const blockedSlotsQuery = db.collection("blocked_slots").where("date", "==", preferredSlot.date);
+      const occupancyQuery = db.collection("slot_occupancy").where("date", "==", preferredSlot.date);
+      const userAppointmentsQuery = db.collection("appointments")
+        .where("userId", "==", requestUid)
+        .where("status", "in", ["pending", "approved"]);
+      const [siteConfigSnap, blockedSlotsSnap, occupancySnap, userAppointmentsSnap, ...oldOccupancySnaps] = await Promise.all([
+        transaction.get(siteConfigRef),
+        transaction.get(blockedSlotsQuery),
+        transaction.get(occupancyQuery),
+        transaction.get(userAppointmentsQuery),
+        ...oldOccupancyRefs.map((ref) => transaction.get(ref)),
+      ]);
+
+      const config = siteConfigSnap.exists
+        ? normalizeSiteConfig(siteConfigSnap.data() as Partial<SiteConfig>)
+        : normalizeSiteConfig();
+      const slotBlocks = getSlotBlocks(preferredSlot.time, durationMinutes);
+      if (!new Set(generateTimeSlots(config)).has(preferredSlot.time)
+        || !doesSessionFitWithinSchedule(config, preferredSlot.time, durationMinutes)) {
+        throw toHttpsError("failed-precondition", "La franja seleccionada no es válida para el horario configurado.");
+      }
+
+      const blockedTimes = new Set(
+        blockedSlotsSnap.docs
+          .map((docSnap) => (docSnap.data() as TimeSlot).time)
+          .filter((time): time is string => typeof time === "string"),
+      );
+      if (slotBlocks.some((time) => blockedTimes.has(time))) {
+        throw toHttpsError("failed-precondition", "La franja seleccionada está bloqueada.");
+      }
+
+      const occupancyByTime = new Map<string, number>();
+      occupancySnap.docs.forEach((docSnap) => {
+        const occupancy = docSnap.data() as SlotOccupancy;
+        occupancyByTime.set(occupancy.time, typeof occupancy.count === "number" ? occupancy.count : 0);
+      });
+      const ownApprovedKeys = appointment.status === "approved" ? appointmentSlotKeys(appointment) : new Set<string>();
+      if (slotBlocks.some((time) => {
+        const key = `${preferredSlot.date}_${time}`;
+        const current = occupancyByTime.get(time) ?? 0;
+        return !isRescheduleCapacityAvailable(current, ownApprovedKeys.has(key), MAX_CAPACITY);
+      })) {
+        throw toHttpsError("failed-precondition", "La franja seleccionada está llena.");
+      }
+
+      const targetSlotKeys = getOverlappingSlotKeys(preferredSlot, durationMinutes);
+      const hasConflict = userAppointmentsSnap.docs.some((docSnap) => {
+        if (docSnap.id === appointmentRef.id) return false;
+        for (const key of appointmentSlotKeys(docSnap.data() as AppointmentDoc)) {
+          if (targetSlotKeys.has(key)) return true;
+        }
+        return false;
+      });
+      if (hasConflict) {
+        throw toHttpsError("failed-precondition", "Ya tienes una sesión reservada en esta franja.");
+      }
+
+      const now = new Date().toISOString();
+      let shouldReleaseApprovedOccupancy = false;
+      let approvalFieldsToDelete: readonly string[] = [];
+      let appointmentPatch: Record<string, unknown> | undefined;
+      const reschedule = reconcileOwnAppointmentReschedule({
+        appointment: {
+          userId: appointment.userId,
+          status: appointment.status,
+          date: currentSlot?.date,
+          time: currentSlot?.time,
+        },
+        uid: requestUid,
+        preferredSlot,
+        nowMillis: getNowDate().getTime(),
+        now,
+        transaction: {
+          releaseApprovedOccupancy: () => { shouldReleaseApprovedOccupancy = true; },
+          clearApprovalMetadata: (fields) => { approvalFieldsToDelete = fields; },
+          setAppointment: (patch) => { appointmentPatch = patch; },
+        },
+      });
+      if (!reschedule.ok) {
+        if (reschedule.reason === "not-owner") {
+          throw toHttpsError("permission-denied", "No puedes modificar la cita de otro usuario.");
+        }
+        if (reschedule.reason === "not-future") {
+          throw toHttpsError("failed-precondition", "Solo puedes modificar citas futuras.");
+        }
+        throw toHttpsError("failed-precondition", "Esta cita ya no se puede modificar.");
+      }
+      if (shouldReleaseApprovedOccupancy) {
+        await releaseApprovedAppointmentOccupancyInTransaction(transaction, appointment, oldOccupancySnaps);
+      }
+      const approvalMetadataDeletes = Object.fromEntries(
+        approvalFieldsToDelete.map((field) => [field, FieldValue.delete()]),
+      );
+      transaction.set(appointmentRef, {
+        ...appointmentPatch,
+        ...approvalMetadataDeletes,
+        previousPreferredSlot: notificationSlot(appointment) ?? null,
+      }, { merge: true });
+    });
+
+    return { success: true, appointmentId };
   },
 );
 
@@ -2046,7 +2456,77 @@ export const onAppointmentApproved = onDocumentUpdated(
 
     const changedToApproved = before.status !== "approved" && after.status === "approved";
     const changedToRejected = before.status !== "rejected" && after.status === "rejected";
-    if (!changedToApproved && !changedToRejected) return;
+    const changedToCancelled = before.status !== "cancelled" && after.status === "cancelled";
+    if (!changedToApproved && !changedToRejected && !changedToCancelled) return;
+
+    if (changedToApproved || changedToRejected || changedToCancelled) {
+      await db.runTransaction(async (transaction) => {
+        const appointmentRef = db.collection("appointments").doc(appointmentId);
+        const appointmentSnap = await transaction.get(appointmentRef);
+        if (!appointmentSnap.exists) return;
+
+        const appointment = appointmentSnap.data() as AppointmentDoc;
+        const now = new Date().toISOString();
+        if (changedToApproved) {
+          if (!shouldReconcileAppointmentTransition("approved", appointment.status)) return;
+          if ((appointment.minutesDeductedAt || appointment.minutesDeducted === true)
+            && !appointment.minutesRefundedAt) return;
+
+          let originalBonoSnap: DocumentSnapshot | undefined;
+          if (appointment.bonoId) {
+            const candidate = await transaction.get(db.collection("bonos").doc(appointment.bonoId));
+            if (candidate.exists) {
+              const originalBono = candidate.data() as BonoDoc;
+              if (originalBono.userId !== appointment.userId) {
+                transaction.set(appointmentRef, {
+                  minutesDeductionSkippedAt: now,
+                  minutesDeductionSkippedReason: "El bono original no pertenece al usuario de esta cita.",
+                }, { merge: true });
+                return;
+              }
+              originalBonoSnap = candidate;
+            }
+          }
+
+          const activeBonosSnap = await transaction.get(
+            db.collection("bonos")
+              .where("userId", "==", appointment.userId)
+              .where("estado", "==", "activo"),
+          );
+          if (!originalBonoSnap && activeBonosSnap.docs.length !== 1) {
+            transaction.set(appointmentRef, {
+              minutesDeductionSkippedAt: now,
+              minutesDeductionSkippedReason: activeBonosSnap.empty
+                ? "No hay un bono activo para descontar los minutos de esta cita antigua."
+                : "Hay más de un bono activo y no se puede elegir uno automáticamente.",
+            }, { merge: true });
+            return;
+          }
+
+          const deduction = await deductAppointmentMinutesInTransaction(
+            transaction,
+            appointmentRef,
+            appointment,
+            originalBonoSnap ?? activeBonosSnap.docs[0],
+            now,
+          );
+          if (!deduction) {
+            transaction.set(appointmentRef, {
+              minutesDeductionSkippedAt: now,
+              minutesDeductionSkippedReason: "El bono activo está expirado o no tiene minutos suficientes.",
+            }, { merge: true });
+          }
+          return;
+        }
+
+        const expectedStatus = changedToRejected ? "rejected" : "cancelled";
+        if (!shouldReconcileAppointmentTransition(expectedStatus, appointment.status)) return;
+        const bonoSnap = appointment.bonoId
+          ? await transaction.get(db.collection("bonos").doc(appointment.bonoId))
+          : undefined;
+        await refundAppointmentMinutesInTransaction(transaction, appointmentRef, appointment, bonoSnap, now);
+      });
+    }
 
     const action = changedToApproved ? "confirmed" : "deleted";
     await Promise.all([
@@ -2102,9 +2582,10 @@ export const onAppointmentStatusPushNotification = onDocumentUpdated(
 
     const changedToApproved = before.status !== "approved" && after.status === "approved";
     const changedToRejected = before.status !== "rejected" && after.status === "rejected";
-    if (!changedToApproved && !changedToRejected) return;
+    const changedToCancelled = before.status !== "cancelled" && after.status === "cancelled";
+    if (!changedToApproved && !changedToRejected && !changedToCancelled) return;
 
-    const status = after.status as "approved" | "rejected";
+    const status = after.status as "approved" | "rejected" | "cancelled";
     await sendAppointmentStatusPushNotification(appointmentId, after, status);
   },
 );

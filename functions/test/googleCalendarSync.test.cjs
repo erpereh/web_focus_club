@@ -4,6 +4,7 @@ const path = require("node:path");
 
 const {
   buildCalendarSyncHash,
+  buildCalendarEventPayload,
   normalizeAppointmentStatus,
   normalizeDurationMinutes,
   resolveAppointmentSlot,
@@ -13,6 +14,17 @@ assert.equal(normalizeAppointmentStatus("pending"), "pending");
 assert.equal(normalizeAppointmentStatus("pendiente"), "pending");
 assert.equal(normalizeAppointmentStatus("aprobada"), "approved");
 assert.equal(normalizeAppointmentStatus("rechazada"), "rejected");
+assert.equal(normalizeAppointmentStatus("cancelada"), "cancelled");
+assert.equal(buildCalendarEventPayload({
+  appointmentId: "appointment-cancelled",
+  appointment: {
+    status: "cancelled",
+    duration: "30",
+    preferredSlots: [{ date: "2026-06-11", time: "11:00" }],
+  },
+  client: { name: "Ana", email: "ana@example.com", phone: "600000000" },
+  trainerName: "Sandra",
+}), undefined);
 
 assert.equal(normalizeDurationMinutes("45"), 45);
 assert.equal(normalizeDurationMinutes("90"), 30);

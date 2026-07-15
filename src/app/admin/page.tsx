@@ -133,8 +133,6 @@ import {
   deactivateBono,
   deleteBono,
   addBonoMinutes,
-  deductBonoMinutes,
-  returnBonoMinutes,
   manualDeductBonoMinutes,
   normalizeActiveBonoLimits,
   recalculateAllBonoExpirations,
@@ -169,7 +167,7 @@ const DEFAULT_HERO_STATS: HeroStat[] = [
 ];
 
 type TabType = 'Inicio' | 'appointments' | 'availability' | 'clients' | 'team' | 'testimonials' | 'Hero' | 'Sandra' | 'Centro' | 'Servicios' | 'Galeria' | 'Contacto' | 'Footer' | 'config';
-type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
+type StatusFilter = 'all' | Appointment['status'];
 
 interface CreateClientFormState {
   name: string;
@@ -249,6 +247,11 @@ const statusConfig = {
   rejected: {
     label: 'Rechazada',
     color: 'bg-red-500/20 text-red-400 border-red-500/30',
+    icon: XCircle,
+  },
+  cancelled: {
+    label: 'Cancelada',
+    color: 'bg-muted/30 text-[var(--color-text-secondary)] border-muted/40',
     icon: XCircle,
   },
 };
@@ -1711,7 +1714,7 @@ export default function AdminPage() {
 
   const handleStatusUpdate = async (
     id: string,
-    status: 'pending' | 'approved' | 'rejected',
+    status: Appointment['status'],
     extraFields?: { assignedTrainer?: string; sessionType?: string; approvedSlot?: TimeSlot }
   ) => {
     // Encontrar la cita actual para saber su estado previo
@@ -1728,19 +1731,6 @@ export default function AdminPage() {
         const durationMinutes = parseInt(currentAppt.duration, 10);
         await incrementSlotOccupancy(slot.date, slot.time, durationMinutes);
       }
-      // Descontar minutos del bono activo del usuario
-      if (currentAppt) {
-        const activeBono = await getActiveBonoByUser(currentAppt.userId);
-        const durationMinutes = parseInt(currentAppt.duration, 10);
-        if (activeBono && getBonoMinutosRestantes(activeBono) >= durationMinutes) {
-          await deductBonoMinutes(activeBono.id, durationMinutes, {
-            fecha: new Date().toISOString(),
-            tipo: currentAppt.serviceType,
-            duracion: currentAppt.duration,
-            appointmentId: id,
-          });
-        }
-      }
     }
     // Si ESTABA aprobada y ahora cambia a otro estado, decrementar
     if (prevStatus === 'approved' && status !== 'approved') {
@@ -1748,14 +1738,6 @@ export default function AdminPage() {
       if (slot && currentAppt) {
         const durationMinutes = parseInt(currentAppt.duration, 10);
         await decrementSlotOccupancy(slot.date, slot.time, durationMinutes);
-      }
-      // Devolver minutos al bono si tenía una entrada para esta cita
-      if (currentAppt) {
-        const userBonos = await getBonosByUser(currentAppt.userId);
-        const bonoWithEntry = userBonos.find(b => b.historial.some(h => h.appointmentId === id));
-        if (bonoWithEntry) {
-          await returnBonoMinutes(bonoWithEntry.id, id);
-        }
       }
     }
 
@@ -3027,7 +3009,7 @@ export default function AdminPage() {
                       >
                         Crear cita
                       </PremiumButton>
-                      {(['all', 'pending', 'approved', 'rejected'] as StatusFilter[]).map(
+                      {(['all', 'pending', 'approved', 'rejected', 'cancelled'] as StatusFilter[]).map(
                         (filter) => (
                           <button
                             key={filter}

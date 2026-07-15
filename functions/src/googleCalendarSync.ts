@@ -8,7 +8,7 @@ export const GOOGLE_CALENDAR_SYNC_FIELDS = [
   "googleCalendarSyncHash",
 ] as const;
 
-export type CalendarAppointmentStatus = "pending" | "approved" | "rejected";
+export type CalendarAppointmentStatus = "pending" | "approved" | "rejected" | "cancelled";
 
 export interface TimeSlot {
   date: string;
@@ -67,6 +67,7 @@ const STATUS_LABELS: Record<CalendarAppointmentStatus, string> = {
   pending: "Pendiente",
   approved: "Aprobada",
   rejected: "Rechazada",
+  cancelled: "Cancelada",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -133,6 +134,7 @@ export function normalizeAppointmentStatus(value: unknown): CalendarAppointmentS
   if (status === "pending" || status === "pendiente") return "pending";
   if (status === "approved" || status === "aprobada") return "approved";
   if (status === "rejected" || status === "rechazada") return "rejected";
+  if (status === "cancelled" || status === "cancelada") return "cancelled";
   return undefined;
 }
 
@@ -177,7 +179,7 @@ export function buildCalendarSyncHash(input: CalendarEventBuildInput): string {
 export function buildCalendarEventPayload(input: CalendarEventBuildInput): CalendarEventPayload | undefined {
   const status = normalizeAppointmentStatus(input.appointment.status);
   const slot = resolveAppointmentSlot(input.appointment);
-  if (!status || status === "rejected" || !slot) return undefined;
+  if (!status || status === "rejected" || status === "cancelled" || !slot) return undefined;
 
   const durationMinutes = normalizeDurationMinutes(input.appointment.duration);
   const clientName = input.client.name || asString(input.appointment.name) || FALLBACK_CLIENT_NAME;

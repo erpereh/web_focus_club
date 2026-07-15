@@ -48,6 +48,8 @@ import type { TimeSlot, Appointment, Bono, Trainer } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import {
   createAppointmentSecure,
+  cancelOwnAppointment,
+  updateOwnAppointmentSlot,
   getAppointmentsByUser,
   getActiveBonoByUser,
   updateUserProfile,
@@ -97,6 +99,12 @@ const statusConfig = {
     color: 'bg-red-500/20 text-red-400 border-red-500/30',
     icon: XCircle,
     description: 'La solicitud no pudo ser atendida',
+  },
+  cancelled: {
+    label: 'Cancelada',
+    color: 'bg-muted/30 text-[var(--color-text-secondary)] border-muted/40',
+    icon: XCircle,
+    description: 'Esta cita ha sido cancelada',
   },
 };
 
@@ -171,6 +179,10 @@ export default function PortalPage() {
 
   // Estado de drawers/modales del dashboard
   const [showReservaDrawer, setShowReservaDrawer] = useState(false);
+  const [showRescheduleDrawer, setShowRescheduleDrawer] = useState(false);
+  const [rescheduleSlot, setRescheduleSlot] = useState<TimeSlot | null>(null);
+  const [appointmentActionBusy, setAppointmentActionBusy] = useState(false);
+  const [appointmentActionError, setAppointmentActionError] = useState('');
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [activeHistoryTab, setActiveHistoryTab] = useState<'citas' | 'bonos'>('citas');
 
@@ -316,6 +328,29 @@ export default function PortalPage() {
       });
     return keys;
   }, [userAppointments]);
+
+  // Al modificar una cita, su franja actual no debe bloquearse contra sí misma.
+  const rescheduleBookedSlotKeys = useMemo(() => {
+    const keys = new Set<string>();
+    userAppointments
+      .filter(a => a.id !== selectedAppointment && (a.status === 'pending' || a.status === 'approved'))
+      .forEach(a => {
+        const slot = a.approvedSlot || a.preferredSlots?.[0];
+        if (!slot) return;
+        const duration = parseInt(a.duration || '60', 10);
+        const [hours, minutes] = slot.time.split(':').map(Number);
+        const start = hours * 60 + minutes;
+        for (let index = 0; index < Math.ceil(duration / 15); index++) {
+          const total = start + index * 15;
+          const legacyTotal = Math.floor(total / 30) * 30;
+          [total, legacyTotal].forEach((blockTotal) => {
+            const blockTime = `${String(Math.floor(blockTotal / 60)).padStart(2, '0')}:${String(blockTotal % 60).padStart(2, '0')}`;
+            keys.add(`${slot.date}_${blockTime}`);
+          });
+        }
+      });
+    return keys;
+  }, [selectedAppointment, userAppointments]);
 
   // ============================================
   // MANEJADORES DE AUTENTICACIÓN
@@ -520,6 +555,55 @@ export default function PortalPage() {
         ? error.message
         : 'No se pudo enviar la solicitud. Inténtalo de nuevo en unos minutos.';
       setSubmitError(message);
+    }
+  };
+
+  const refreshUserAppointments = async () => {
+    if (!user) return;
+    setUserAppointments(await getAppointmentsByUser(user.uid));
+  };
+
+  const openRescheduleDrawer = (appointment: Appointment) => {
+    setAppointmentActionError('');
+    setRescheduleSlot(appointment.approvedSlot || appointment.preferredSlots[0] || null);
+    setShowRescheduleDrawer(true);
+  };
+
+  const handleCancelAppointment = async (appointmentId: string) => {
+    if (!window.confirm('¿Seguro que quieres cancelar esta cita? Esta acción devolverá los minutos reservados.')) return;
+    setAppointmentActionBusy(true);
+    setAppointmentActionError('');
+    try {
+      await cancelOwnAppointment(appointmentId);
+      await refreshUserAppointments();
+      setPortalView('dashboard');
+      setSelectedAppointment(null);
+    } catch (error) {
+      console.error('Error al cancelar cita:', error);
+      setAppointmentActionError(error instanceof Error && error.message
+        ? error.message
+        : 'No se pudo cancelar la cita. Inténtalo de nuevo.');
+    } finally {
+      setAppointmentActionBusy(false);
+    }
+  };
+
+  const handleRescheduleAppointment = async () => {
+    if (!selectedAppointment || !rescheduleSlot) return;
+    setAppointmentActionBusy(true);
+    setAppointmentActionError('');
+    try {
+      await updateOwnAppointmentSlot({ appointmentId: selectedAppointment, preferredSlot: rescheduleSlot });
+      await refreshUserAppointments();
+      setShowRescheduleDrawer(false);
+      setRescheduleSlot(null);
+    } catch (error) {
+      console.error('Error al modificar cita:', error);
+      setAppointmentActionError(error instanceof Error && error.message
+        ? error.message
+        : 'No se pudo modificar la cita. Inténtalo de nuevo.');
+    } finally {
+      setAppointmentActionBusy(false);
     }
   };
 
@@ -1288,9 +1372,9 @@ export default function PortalPage() {
 
                   {activeHistoryTab === 'citas' && (
                     <div className="space-y-2">
-                      {userAppointments.filter(a => a.status === 'rejected').length === 0 ? (
+                      {userAppointments.filter(a => a.status === 'rejected' || a.status === 'cancelled').length === 0 ? (
                         <p className="text-sm text-[var(--color-text-secondary)] text-center py-6">Sin historial de citas</p>
-                      ) : userAppointments.filter(a => a.status === 'rejected').map((appt) => {
+                      ) : userAppointments.filter(a => a.status === 'rejected' || a.status === 'cancelled').map((appt) => {
                         const status = statusConfig[appt.status];
                         const StatusIcon = status.icon;
                         return (
@@ -1371,6 +1455,11 @@ export default function PortalPage() {
 
                 const status = statusConfig[appointment.status];
                 const StatusIcon = status.icon;
+                const appointmentSlot = appointment.approvedSlot || appointment.preferredSlots[0];
+                const canManageAppointment = appointment.userId === user?.uid
+                  && (appointment.status === 'pending' || appointment.status === 'approved')
+                  && !!appointmentSlot
+                  && new Date(`${appointmentSlot.date}T${appointmentSlot.time}:00`) > new Date();
 
                 return (
                   <>
@@ -1475,6 +1564,33 @@ export default function PortalPage() {
                               )}
                             </div>
                           </div>
+                        )}
+
+                        {canManageAppointment && (
+                          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                            <PremiumButton
+                              variant="outline"
+                              onClick={() => openRescheduleDrawer(appointment)}
+                              disabled={appointmentActionBusy}
+                              icon={<CalendarPlus className="w-4 h-4" />}
+                              className="flex-1"
+                            >
+                              Modificar cita
+                            </PremiumButton>
+                            <PremiumButton
+                              variant="ghost"
+                              onClick={() => handleCancelAppointment(appointment.id)}
+                              disabled={appointmentActionBusy}
+                              icon={<XCircle className="w-4 h-4" />}
+                              className="flex-1 text-destructive hover:bg-destructive/10"
+                            >
+                              {appointmentActionBusy ? 'Procesando...' : 'Cancelar cita'}
+                            </PremiumButton>
+                          </div>
+                        )}
+
+                        {appointmentActionError && (
+                          <p className="text-sm text-red-400">{appointmentActionError}</p>
                         )}
 
                         {appointment.reason && (
@@ -1645,6 +1761,85 @@ export default function PortalPage() {
             </motion.div>
           </>
         )}
+      </AnimatePresence>
+
+      {/* ============================================
+          MODIFICAR CITA DRAWER
+          ============================================ */}
+      <AnimatePresence>
+        {showRescheduleDrawer && (() => {
+          const appointment = userAppointments.find(item => item.id === selectedAppointment);
+          if (!appointment) return null;
+          return (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+                onClick={() => !appointmentActionBusy && setShowRescheduleDrawer(false)}
+              />
+              <motion.div
+                initial={{ opacity: 0, x: '100%' }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-lg bg-background border-l border-border overflow-y-auto"
+              >
+                <div className="flex items-center justify-between p-6 border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm z-10">
+                  <div>
+                    <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Modificar cita</h2>
+                    <p className="text-sm text-[var(--color-text-secondary)]">Elige una nueva franja para tu sesión.</p>
+                  </div>
+                  <button
+                    onClick={() => !appointmentActionBusy && setShowRescheduleDrawer(false)}
+                    disabled={appointmentActionBusy}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted/30 transition-colors disabled:opacity-50"
+                    aria-label="Cerrar modificación de cita"
+                  >
+                    <X className="w-4 h-4 text-[var(--color-text-secondary)]" />
+                  </button>
+                </div>
+
+                <div className="p-6 space-y-6">
+                  <GlassCard className="p-5">
+                    <InteractiveCalendar
+                      selectedSlot={rescheduleSlot}
+                      onSelectSlot={setRescheduleSlot}
+                      onClearSlot={() => setRescheduleSlot(null)}
+                      selectedDuration={parseInt(appointment.duration, 10) as 30 | 45 | 60}
+                      userBookedSlotKeys={rescheduleBookedSlotKeys}
+                    />
+                  </GlassCard>
+
+                  {appointmentActionError && (
+                    <p className="text-sm text-red-400">{appointmentActionError}</p>
+                  )}
+
+                  <div className="flex gap-3">
+                    <PremiumButton
+                      variant="ghost"
+                      onClick={() => setShowRescheduleDrawer(false)}
+                      disabled={appointmentActionBusy}
+                      className="flex-1"
+                    >
+                      Cancelar
+                    </PremiumButton>
+                    <PremiumButton
+                      variant="cta"
+                      onClick={handleRescheduleAppointment}
+                      disabled={!rescheduleSlot || appointmentActionBusy}
+                      icon={<CheckCircle className="w-4 h-4" />}
+                      className="flex-1"
+                    >
+                      {appointmentActionBusy ? 'Guardando...' : 'Guardar cambio'}
+                    </PremiumButton>
+                  </div>
+                </div>
+              </motion.div>
+            </>
+          );
+        })()}
       </AnimatePresence>
 
       {/* ============================================

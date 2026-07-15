@@ -79,11 +79,28 @@ export interface Appointment {
     duration: '30' | '45' | '60';
     preferredSlots: TimeSlot[];
     reason: string;
-    status: 'pending' | 'approved' | 'rejected';
+    status: 'pending' | 'approved' | 'rejected' | 'cancelled';
     approvedSlot?: TimeSlot;
     assignedTrainer?: string;
     sessionType?: string;
     trainerNotes?: string;
+    /** Bono del que se descontaron los minutos de esta cita. */
+    bonoId?: string;
+    minutesDeducted?: boolean;
+    minutesDeductedAmount?: number;
+    minutesDeductedAt?: string;
+    minutesDeductionSkippedAt?: string;
+    minutesDeductionSkippedReason?: string;
+    minutesRefunded?: boolean;
+    minutesRefundedAmount?: number;
+    minutesRefundedAt?: string | null;
+    minutesRefundReason?: string | null;
+    cancelledBy?: string;
+    cancelledAt?: string;
+    cancellationReason?: string;
+    modifiedBy?: string;
+    modifiedAt?: string;
+    previousPreferredSlot?: TimeSlot | null;
     createdAt: string;
     updatedAt?: string;
 }

@@ -692,6 +692,25 @@ export async function createAppointmentSecure(input: {
     return result.data.appointmentId;
 }
 
+export async function cancelOwnAppointment(appointmentId: string): Promise<void> {
+    const callable = httpsCallable<{ appointmentId: string }, { success: boolean; appointmentId: string }>(
+        firebaseFunctions,
+        'cancelOwnAppointment'
+    );
+    await callable({ appointmentId });
+}
+
+export async function updateOwnAppointmentSlot(input: {
+    appointmentId: string;
+    preferredSlot: TimeSlot;
+}): Promise<void> {
+    const callable = httpsCallable<
+        { appointmentId: string; preferredSlot: TimeSlot },
+        { success: boolean; appointmentId: string }
+    >(firebaseFunctions, 'updateOwnAppointmentSlot');
+    await callable(input);
+}
+
 export async function createAppointmentFromAdmin(
     input: CreateAppointmentFromAdminInput
 ): Promise<{ success: boolean; appointmentId: string; bonoWarning?: string }> {
