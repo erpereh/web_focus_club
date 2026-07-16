@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-    Archive,
     ArrowLeft,
     Check,
     CircleAlert,
@@ -10,13 +9,14 @@ import {
     Loader2,
     RotateCcw,
     Search,
+    Trash2,
     X,
 } from 'lucide-react';
 import { useCustomerSuggestions } from '@/hooks/useCustomerSuggestions';
 import {
-    adminArchiveSuggestion,
+    adminDeleteSuggestion,
+    adminMarkSuggestionNew,
     adminMarkSuggestionReviewed,
-    adminRestoreSuggestion,
 } from '@/lib/customer-suggestions';
 import { cn } from '@/lib/utils';
 import type { CustomerSuggestion, CustomerSuggestionStatus } from '@/types';
@@ -26,7 +26,6 @@ type SuggestionFilter = 'all' | CustomerSuggestionStatus;
 const STATUS_LABELS: Record<CustomerSuggestionStatus, string> = {
     new: 'Nueva',
     reviewed: 'Revisada',
-    archived: 'Archivada',
 };
 
 function formatSuggestionTimestamp(timestamp: CustomerSuggestion['createdAt'], includeTime = false): string {
@@ -44,7 +43,6 @@ function formatSuggestionTimestamp(timestamp: CustomerSuggestion['createdAt'], i
 
 function statusClass(status: CustomerSuggestionStatus): string {
     if (status === 'new') return 'bg-[var(--color-accent-dim)] text-[var(--color-accent-bright)]';
-    if (status === 'archived') return 'bg-white/5 text-[var(--color-text-secondary)]';
     return 'bg-blue-500/10 text-blue-300';
 }
 
@@ -67,6 +65,9 @@ export default function CustomerSuggestionsPanel() {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [pendingAction, setPendingAction] = useState<CustomerSuggestionStatus | null>(null);
     const [actionError, setActionError] = useState('');
+    const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+    const [deletingSuggestion, setDeletingSuggestion] = useState(false);
+    const [deleteError, setDeleteError] = useState('');
     const { suggestions, newCount, loading, error } = useCustomerSuggestions({
         search,
         statusFilter: filter === 'all' ? undefined : filter,
@@ -87,12 +88,10 @@ export default function CustomerSuggestionsPanel() {
         setPendingAction(action);
         setActionError('');
         try {
-            if (action === 'reviewed' && selectedSuggestion.status === 'new') {
+            if (action === 'reviewed') {
                 await adminMarkSuggestionReviewed(selectedSuggestion.id);
-            } else if (action === 'archived') {
-                await adminArchiveSuggestion(selectedSuggestion.id);
-            } else if (action === 'reviewed' && selectedSuggestion.status === 'archived') {
-                await adminRestoreSuggestion(selectedSuggestion.id);
+            } else if (action === 'new') {
+                await adminMarkSuggestionNew(selectedSuggestion.id);
             }
         } catch (actionFailure) {
             setActionError(actionFailure instanceof Error && actionFailure.message
@@ -100,6 +99,23 @@ export default function CustomerSuggestionsPanel() {
                 : 'No se ha podido actualizar la sugerencia. Inténtalo de nuevo.');
         } finally {
             setPendingAction(null);
+        }
+    };
+
+    const deleteSuggestion = async () => {
+        if (!selectedSuggestion || deletingSuggestion) return;
+        setDeletingSuggestion(true);
+        setDeleteError('');
+        try {
+            await adminDeleteSuggestion(selectedSuggestion.id);
+            setDeleteConfirmationOpen(false);
+            setSelectedId(null);
+        } catch (deleteFailure) {
+            setDeleteError(deleteFailure instanceof Error && deleteFailure.message
+                ? deleteFailure.message
+                : 'No se ha podido eliminar la sugerencia. Inténtalo de nuevo.');
+        } finally {
+            setDeletingSuggestion(false);
         }
     };
 
@@ -131,7 +147,6 @@ export default function CustomerSuggestionsPanel() {
                             ['all', 'Todas'],
                             ['new', 'Nuevas'],
                             ['reviewed', 'Revisadas'],
-                            ['archived', 'Archivadas'],
                         ] as const).map(([value, label]) => (
                             <button
                                 key={value}
@@ -240,27 +255,29 @@ export default function CustomerSuggestionsPanel() {
                                     Marcar como revisada
                                 </button>
                             )}
-                            {selectedSuggestion.status !== 'archived' ? (
+                            {selectedSuggestion.status === 'reviewed' && (
                                 <button
                                     type="button"
                                     disabled={pendingAction !== null}
-                                    onClick={() => void runAction('archived')}
-                                    className="inline-flex items-center gap-2 rounded-lg border border-red-500/25 px-3 py-2 text-xs font-semibold text-red-300 hover:bg-red-500/10 disabled:opacity-60"
-                                >
-                                    {pendingAction === 'archived' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
-                                    Archivar
-                                </button>
-                            ) : (
-                                <button
-                                    type="button"
-                                    disabled={pendingAction !== null}
-                                    onClick={() => void runAction('reviewed')}
+                                    onClick={() => void runAction('new')}
                                     className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-accent-border)] px-3 py-2 text-xs font-semibold text-[var(--color-accent-val)] hover:bg-[var(--color-accent-dim)] disabled:opacity-60"
                                 >
-                                    {pendingAction === 'reviewed' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-                                    Restaurar
+                                    {pendingAction === 'new' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                                    Marcar como nueva
                                 </button>
                             )}
+                            <button
+                                type="button"
+                                disabled={pendingAction !== null || deletingSuggestion}
+                                onClick={() => {
+                                    setDeleteError('');
+                                    setDeleteConfirmationOpen(true);
+                                }}
+                                className="inline-flex items-center gap-2 rounded-lg border border-red-500/25 px-3 py-2 text-xs font-semibold text-red-300 hover:bg-red-500/10 disabled:opacity-60"
+                            >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Eliminar
+                            </button>
                         </div>
                         <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-7">
                             {actionError && (
@@ -283,6 +300,55 @@ export default function CustomerSuggestionsPanel() {
                     </>
                 )}
             </section>
+            {deleteConfirmationOpen && selectedSuggestion && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="delete-suggestion-title"
+                        className="w-full max-w-md rounded-2xl border border-border bg-[var(--color-bg-surface)] p-6 shadow-2xl"
+                    >
+                        <div className="flex items-start gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-500/10 text-red-300">
+                                <Trash2 className="h-5 w-5" />
+                            </div>
+                            <div>
+                                <h2 id="delete-suggestion-title" className="text-lg font-semibold text-[var(--color-text-primary)]">
+                                    Eliminar sugerencia
+                                </h2>
+                                <p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">
+                                    Esta acción eliminará definitivamente la sugerencia y no se podrá deshacer.
+                                </p>
+                            </div>
+                        </div>
+                        {deleteError && (
+                            <div className="mt-4 flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-200">
+                                <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                                <span>{deleteError}</span>
+                            </div>
+                        )}
+                        <div className="mt-6 flex justify-end gap-3">
+                            <button
+                                type="button"
+                                disabled={deletingSuggestion}
+                                onClick={() => setDeleteConfirmationOpen(false)}
+                                className="rounded-lg px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] hover:bg-white/5 hover:text-[var(--color-text-primary)] disabled:opacity-60"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                disabled={deletingSuggestion}
+                                onClick={() => void deleteSuggestion()}
+                                className="inline-flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-60"
+                            >
+                                {deletingSuggestion && <Loader2 className="h-4 w-4 animate-spin" />}
+                                Eliminar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

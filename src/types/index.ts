@@ -53,7 +53,7 @@ export interface SupportMessage {
 // SUGERENCIAS DE CLIENTES
 // ============================================
 
-export type CustomerSuggestionStatus = 'new' | 'reviewed' | 'archived';
+export type CustomerSuggestionStatus = 'new' | 'reviewed';
 
 export interface CustomerSuggestion {
     id: string;
@@ -68,9 +68,6 @@ export interface CustomerSuggestion {
     reviewedAt: Timestamp | null;
     reviewedBy: string | null;
     reviewedByEmail: string | null;
-    archivedAt: Timestamp | null;
-    archivedBy: string | null;
-    archivedByEmail: string | null;
 }
 
 export interface Service {

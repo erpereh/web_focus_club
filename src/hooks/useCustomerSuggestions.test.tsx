@@ -25,9 +25,6 @@ const suggestions: CustomerSuggestion[] = [
         reviewedAt: null,
         reviewedBy: null,
         reviewedByEmail: null,
-        archivedAt: null,
-        archivedBy: null,
-        archivedByEmail: null,
     },
     {
         id: 'suggestion-1',
@@ -42,9 +39,6 @@ const suggestions: CustomerSuggestion[] = [
         reviewedAt: null,
         reviewedBy: null,
         reviewedByEmail: null,
-        archivedAt: null,
-        archivedBy: null,
-        archivedByEmail: null,
     },
 ];
 

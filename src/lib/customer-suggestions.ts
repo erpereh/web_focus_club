@@ -26,7 +26,9 @@ export function subscribeCustomerSuggestions(
     onError?: (error: Error) => void,
 ): Unsubscribe {
     const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
-    if (statusFilter) constraints.unshift(where('status', '==', statusFilter));
+    constraints.unshift(statusFilter
+        ? where('status', '==', statusFilter)
+        : where('status', 'in', ['new', 'reviewed']));
 
     return onSnapshot(
         query(collection(db, 'customer_suggestions'), ...constraints),
@@ -53,24 +55,24 @@ const markReviewedCallable = httpsCallable<
     CustomerSuggestionActionResult
 >(functions, 'adminMarkSuggestionReviewed');
 
-const archiveCallable = httpsCallable<
+const markNewCallable = httpsCallable<
     { suggestionId: string },
     CustomerSuggestionActionResult
->(functions, 'adminArchiveSuggestion');
+>(functions, 'adminMarkSuggestionNew');
 
-const restoreCallable = httpsCallable<
+const deleteCallable = httpsCallable<
     { suggestionId: string },
     CustomerSuggestionActionResult
->(functions, 'adminRestoreSuggestion');
+>(functions, 'adminDeleteSuggestion');
 
 export async function adminMarkSuggestionReviewed(suggestionId: string): Promise<void> {
     await markReviewedCallable({ suggestionId });
 }
 
-export async function adminArchiveSuggestion(suggestionId: string): Promise<void> {
-    await archiveCallable({ suggestionId });
+export async function adminMarkSuggestionNew(suggestionId: string): Promise<void> {
+    await markNewCallable({ suggestionId });
 }
 
-export async function adminRestoreSuggestion(suggestionId: string): Promise<void> {
-    await restoreCallable({ suggestionId });
+export async function adminDeleteSuggestion(suggestionId: string): Promise<void> {
+    await deleteCallable({ suggestionId });
 }

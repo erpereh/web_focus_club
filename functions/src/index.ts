@@ -1420,14 +1420,14 @@ export const adminMarkSuggestionReviewed = onCall(
   customerSuggestions.adminMarkSuggestionReviewed,
 );
 
-export const adminArchiveSuggestion = onCall(
+export const adminMarkSuggestionNew = onCall(
   { region: REGION },
-  customerSuggestions.adminArchiveSuggestion,
+  customerSuggestions.adminMarkSuggestionNew,
 );
 
-export const adminRestoreSuggestion = onCall(
+export const adminDeleteSuggestion = onCall(
   { region: REGION },
-  customerSuggestions.adminRestoreSuggestion,
+  customerSuggestions.adminDeleteSuggestion,
 );
 
 export const onCustomerSuggestionCreated = onDocumentCreated(

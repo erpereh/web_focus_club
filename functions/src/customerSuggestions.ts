@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { FieldValue, Firestore, Timestamp } from "firebase-admin/firestore";
 import { CallableRequest, HttpsError } from "firebase-functions/v2/https";
 
-export type CustomerSuggestionStatus = "new" | "reviewed" | "archived";
+export type CustomerSuggestionStatus = "new" | "reviewed";
 
 export interface CustomerSuggestion {
   userId: string;
@@ -16,9 +16,6 @@ export interface CustomerSuggestion {
   reviewedAt: Timestamp | null;
   reviewedBy: string | null;
   reviewedByEmail: string | null;
-  archivedAt: Timestamp | null;
-  archivedBy: string | null;
-  archivedByEmail: string | null;
 }
 
 export interface CustomerSuggestionMakeEvent {
@@ -119,9 +116,6 @@ export function createCustomerSuggestionHandlers(
           reviewedAt: null,
           reviewedBy: null,
           reviewedByEmail: null,
-          archivedAt: null,
-          archivedBy: null,
-          archivedByEmail: null,
         });
         transaction.set(rateLimitRef, {
           ...nextRateLimit,
@@ -141,9 +135,6 @@ export function createCustomerSuggestionHandlers(
         const snap = await transaction.get(suggestionRef);
         const suggestion = requireSuggestion(snap.exists ? snap.data() : undefined);
         if (suggestion.status === "reviewed") return;
-        if (suggestion.status === "archived") {
-          throw new HttpsError("failed-precondition", "Restaura la sugerencia antes de marcarla como revisada.");
-        }
         const timestamp = serverTimestamp();
         transaction.update(suggestionRef, {
           status: "reviewed" satisfies CustomerSuggestionStatus,
@@ -157,21 +148,21 @@ export function createCustomerSuggestionHandlers(
       return { success: true, suggestionId };
     },
 
-    adminArchiveSuggestion: async (request: CallableRequest<unknown>) => {
-      const admin = await requireAdmin(db, request);
+    adminMarkSuggestionNew: async (request: CallableRequest<unknown>) => {
+      await requireAdmin(db, request);
       const suggestionId = parseSuggestionId(request.data);
       const suggestionRef = db.collection("customer_suggestions").doc(suggestionId);
 
       await db.runTransaction(async (transaction) => {
         const snap = await transaction.get(suggestionRef);
         const suggestion = requireSuggestion(snap.exists ? snap.data() : undefined);
-        if (suggestion.status === "archived") return;
+        if (suggestion.status === "new") return;
         const timestamp = serverTimestamp();
         transaction.update(suggestionRef, {
-          status: "archived" satisfies CustomerSuggestionStatus,
-          archivedAt: timestamp,
-          archivedBy: admin.uid,
-          archivedByEmail: admin.email,
+          status: "new" satisfies CustomerSuggestionStatus,
+          reviewedAt: null,
+          reviewedBy: null,
+          reviewedByEmail: null,
           updatedAt: timestamp,
         });
       });
@@ -179,33 +170,16 @@ export function createCustomerSuggestionHandlers(
       return { success: true, suggestionId };
     },
 
-    adminRestoreSuggestion: async (request: CallableRequest<unknown>) => {
-      const admin = await requireAdmin(db, request);
+    adminDeleteSuggestion: async (request: CallableRequest<unknown>) => {
+      await requireAdmin(db, request);
       const suggestionId = parseSuggestionId(request.data);
       const suggestionRef = db.collection("customer_suggestions").doc(suggestionId);
 
       await db.runTransaction(async (transaction) => {
         const snap = await transaction.get(suggestionRef);
-        const suggestion = requireSuggestion(snap.exists ? snap.data() : undefined);
-        if (suggestion.status === "reviewed") return;
-        if (suggestion.status !== "archived") {
-          throw new HttpsError("failed-precondition", "Solo se pueden restaurar sugerencias archivadas.");
-        }
-
-        const timestamp = serverTimestamp();
-        const update: Record<string, unknown> = {
-          status: "reviewed" satisfies CustomerSuggestionStatus,
-          archivedAt: null,
-          archivedBy: null,
-          archivedByEmail: null,
-          updatedAt: timestamp,
-        };
-        if (!suggestion.reviewedAt || !suggestion.reviewedBy || !suggestion.reviewedByEmail) {
-          update.reviewedAt = timestamp;
-          update.reviewedBy = admin.uid;
-          update.reviewedByEmail = admin.email;
-        }
-        transaction.update(suggestionRef, update);
+        if (!snap.exists) return;
+        requireKnownSuggestionStatus(snap.data());
+        transaction.delete(suggestionRef);
       });
 
       return { success: true, suggestionId };
@@ -333,10 +307,17 @@ function requireSuggestion(data: FirebaseFirestore.DocumentData | undefined): Cu
   if (!data) {
     throw new HttpsError("not-found", "No se ha encontrado la sugerencia.");
   }
-  if (data.status !== "new" && data.status !== "reviewed" && data.status !== "archived") {
+  if (data.status !== "new" && data.status !== "reviewed") {
     throw new HttpsError("failed-precondition", "La sugerencia tiene un estado no valido.");
   }
   return data as CustomerSuggestion;
+}
+
+function requireKnownSuggestionStatus(data: FirebaseFirestore.DocumentData | undefined): void {
+  const status = data?.status;
+  if (status !== "new" && status !== "reviewed" && status !== "archived") {
+    throw new HttpsError("failed-precondition", "La sugerencia tiene un estado no valido.");
+  }
 }
 
 function hashSuggestionContent(payload: CustomerSuggestionPayload): string {
