@@ -7,6 +7,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "test": "npm run build && node test/supportChat.test.cjs && node --test test/customerSuggestions.test.cjs",
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
     "lint": "eslint --ext .js,.ts src"

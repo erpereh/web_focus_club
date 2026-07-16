@@ -124,6 +124,16 @@ service cloud.firestore {
       }
     }
 
+    // CUSTOMER SUGGESTIONS
+    match /customer_suggestions/{suggestionId} {
+      allow read: if isSupportAdmin();
+      allow write: if false;
+    }
+
+    match /customer_suggestion_rate_limits/{userId} {
+      allow read, write: if false;
+    }
+
     function isSignedIn() {
       return request.auth != null;
     }

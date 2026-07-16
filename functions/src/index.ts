@@ -23,6 +23,11 @@ import {
   validateOwnFutureAppointment,
 } from "./appointmentLifecycle.js";
 import { createSupportChatHandlers, type SupportChatNotificationInput } from "./supportChat";
+import {
+  createCustomerSuggestionHandlers,
+  notifyCustomerSuggestionCreatedSafely,
+  type CustomerSuggestionMakeEvent,
+} from "./customerSuggestions";
 
 initializeApp();
 
@@ -49,6 +54,7 @@ const DEFAULT_SITE_CONFIG = {
 const supportChat = createSupportChatHandlers(db, {
   notifySupportCustomer: sendSupportMessagePushNotificationSafely,
 });
+const customerSuggestions = createCustomerSuggestionHandlers(db);
 
 type AppointmentDuration = "30" | "45" | "60";
 
@@ -258,6 +264,8 @@ interface MakePayload {
   duration?: AppointmentDuration;
   serviceType?: string;
 }
+
+type MakeWebhookPayload = MakePayload | CustomerSuggestionMakeEvent;
 
 interface WelcomeWebhookPayload {
   event: "user_welcome";
@@ -721,7 +729,7 @@ async function resolveTrainerName(trainerId?: string): Promise<string> {
   return trainer.name ?? "";
 }
 
-async function sendMakeWebhook(payload: MakePayload): Promise<void> {
+async function sendMakeWebhook(payload: MakeWebhookPayload): Promise<void> {
   const webhookUrl = MAKE_WEBHOOK_URL.value();
   if (!webhookUrl) {
     console.warn("[Make] Secret MAKE_WEBHOOK_URL is not configured. Skipping webhook.");
@@ -1400,6 +1408,43 @@ function applyApprovedAppointmentWrites(
 export const createSupportConversation = onCall(
   { region: REGION },
   supportChat.createSupportConversation,
+);
+
+export const submitCustomerSuggestion = onCall(
+  { region: REGION },
+  customerSuggestions.submitCustomerSuggestion,
+);
+
+export const adminMarkSuggestionReviewed = onCall(
+  { region: REGION },
+  customerSuggestions.adminMarkSuggestionReviewed,
+);
+
+export const adminArchiveSuggestion = onCall(
+  { region: REGION },
+  customerSuggestions.adminArchiveSuggestion,
+);
+
+export const adminRestoreSuggestion = onCall(
+  { region: REGION },
+  customerSuggestions.adminRestoreSuggestion,
+);
+
+export const onCustomerSuggestionCreated = onDocumentCreated(
+  {
+    document: "customer_suggestions/{suggestionId}",
+    region: REGION,
+    secrets: [MAKE_WEBHOOK_URL],
+  },
+  async (event) => {
+    const data = event.data?.data();
+    if (!data) return;
+    await notifyCustomerSuggestionCreatedSafely(
+      String(event.params.suggestionId),
+      data,
+      sendMakeWebhook,
+    );
+  },
 );
 
 export const sendSupportMessage = onCall(

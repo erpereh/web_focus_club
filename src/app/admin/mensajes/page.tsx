@@ -27,6 +27,8 @@ import {
     subscribeSupportMessages,
 } from '@/lib/support-chat';
 import type { SupportConversation, SupportConversationStatus, SupportMessage } from '@/types';
+import CustomerSuggestionsPanel from '@/components/admin/CustomerSuggestionsPanel';
+import MessagesSectionTabs, { type MessagesSection } from '@/components/admin/MessagesSectionTabs';
 
 type ConversationFilter = 'all' | SupportConversationStatus;
 
@@ -80,6 +82,7 @@ function ConversationAvatar({ conversation, size = 'md' }: { conversation: Suppo
 export default function MessagesPage() {
     const { user, userProfile, loading: authLoading, logout } = useAuth();
     const router = useRouter();
+    const [activeSection, setActiveSection] = useState<MessagesSection>('conversations');
     const [filter, setFilter] = useState<ConversationFilter>('all');
     const [search, setSearch] = useState('');
     const [conversations, setConversations] = useState<SupportConversation[]>([]);
@@ -299,7 +302,9 @@ export default function MessagesPage() {
             </header>
 
             <main className="container mx-auto px-4 py-5 lg:py-7">
-                <div className="overflow-hidden rounded-2xl border border-border bg-[var(--color-bg-surface)] shadow-glow lg:h-[calc(100vh-8.5rem)] lg:min-h-[640px] lg:grid lg:grid-cols-[360px_minmax(0,1fr)]">
+                <MessagesSectionTabs value={activeSection} onChange={setActiveSection} />
+                {activeSection === 'conversations' ? (
+                <div className="overflow-hidden rounded-2xl border border-border bg-[var(--color-bg-surface)] shadow-glow lg:h-[calc(100vh-11.5rem)] lg:min-h-[600px] lg:grid lg:grid-cols-[360px_minmax(0,1fr)]">
                     <section className={cn('flex min-h-[calc(100vh-9.5rem)] flex-col border-r border-border lg:min-h-0', selectedConversation && 'hidden lg:flex')}>
                         <div className="border-b border-border p-4">
                             <div className="mb-4 flex items-center justify-between">
@@ -567,6 +572,9 @@ export default function MessagesPage() {
                         )}
                     </section>
                 </div>
+                ) : (
+                    <CustomerSuggestionsPanel />
+                )}
             </main>
             {hideConfirmationOpen && selectedConversation && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">

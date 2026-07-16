@@ -49,6 +49,30 @@ export interface SupportMessage {
     createdAt: Timestamp | null;
 }
 
+// ============================================
+// SUGERENCIAS DE CLIENTES
+// ============================================
+
+export type CustomerSuggestionStatus = 'new' | 'reviewed' | 'archived';
+
+export interface CustomerSuggestion {
+    id: string;
+    userId: string;
+    userName: string;
+    userEmail: string;
+    subject: string | null;
+    message: string;
+    status: CustomerSuggestionStatus;
+    createdAt: Timestamp | null;
+    updatedAt: Timestamp | null;
+    reviewedAt: Timestamp | null;
+    reviewedBy: string | null;
+    reviewedByEmail: string | null;
+    archivedAt: Timestamp | null;
+    archivedBy: string | null;
+    archivedByEmail: string | null;
+}
+
 export interface Service {
     id: string;
     title: string;
