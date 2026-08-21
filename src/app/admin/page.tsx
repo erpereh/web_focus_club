@@ -1078,6 +1078,7 @@ export default function AdminPage() {
 
   // Client search
   const [clientSearch, setClientSearch] = useState('');
+  const [appointmentSearch, setAppointmentSearch] = useState('');
   const [showCreateClientModal, setShowCreateClientModal] = useState(false);
   const [editingClient, setEditingClient] = useState<UserProfile | null>(null);
   const [createClientForm, setCreateClientForm] = useState<CreateClientFormState>(EMPTY_CREATE_CLIENT_FORM);
@@ -1327,9 +1328,14 @@ export default function AdminPage() {
   };
 
   // Filtrar citas
-  const filteredAppointments = statusFilter === 'all'
+  const filteredAppointments = (statusFilter === 'all'
     ? appointments
-    : appointments.filter((a) => a.status === statusFilter);
+    : appointments.filter((a) => a.status === statusFilter)
+  ).filter((a) => {
+    const q = appointmentSearch.trim().toLowerCase();
+    if (!q) return true;
+    return a.name.toLowerCase().includes(q) || a.email.toLowerCase().includes(q);
+  });
   const clientsByUid = useMemo(() => new Map(clients.map((client) => [client.uid, client])), [clients]);
   const clientsByEmail = useMemo(() => new Map(clients.map((client) => [client.email, client])), [clients]);
   const activeTrainers = useMemo(() => trainers.filter((trainer) => trainer.active !== false), [trainers]);
@@ -3074,6 +3080,17 @@ export default function AdminPage() {
                     </div>
                   </div>
 
+                  <div className="relative mb-6">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-secondary)]" />
+                    <input
+                      type="text"
+                      value={appointmentSearch}
+                      onChange={(e) => setAppointmentSearch(e.target.value)}
+                      placeholder="Buscar por nombre o email..."
+                      className="w-full pl-11 pr-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] placeholder:text-[var(--color-text-secondary)]"
+                    />
+                  </div>
+
                   {appointmentsView === 'calendar' ? (
                     <AppointmentsCalendar
                       appointments={filteredAppointments}
@@ -3318,7 +3335,9 @@ export default function AdminPage() {
                         <Calendar className="w-16 h-16 mx-auto mb-4 text-[var(--color-text-secondary)] opacity-50" />
                         <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">No hay citas</h3>
                         <p className="text-[var(--color-text-secondary)]">
-                          {statusFilter === 'all'
+                          {appointmentSearch.trim()
+                            ? 'No hay coincidencias para esa búsqueda'
+                            : statusFilter === 'all'
                             ? 'Aún no se han recibido solicitudes de cita'
                             : `No hay citas ${statusConfig[statusFilter as keyof typeof statusConfig]?.label.toLowerCase()}`}
                         </p>
