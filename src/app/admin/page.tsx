@@ -69,6 +69,7 @@ import { GalleryManager } from '@/components/admin/GalleryManager';
 import { MediaPicker } from '@/components/admin/MediaPicker';
 import { IconPicker } from '@/components/admin/IconPicker';
 import { AppointmentsCalendar } from '@/components/admin/appointments/AppointmentsCalendar';
+import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { VideoFramePreview } from '@/components/ui/VideoFramePreview';
 import { DynamicIcon } from '@/components/ui/DynamicIcon';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
@@ -3004,34 +3005,7 @@ export default function AdminPage() {
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                     <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Gestión de Citas</h1>
-                    <div className="flex flex-wrap gap-2">
-                      <PremiumButton
-                        variant="cta"
-                        size="sm"
-                        icon={<Plus className="w-4 h-4" />}
-                        onClick={() => openCreateAppointmentModal()}
-                      >
-                        Crear cita
-                      </PremiumButton>
-                      {(['all', 'pending', 'approved', 'rejected', 'cancelled'] as StatusFilter[]).map(
-                        (filter) => (
-                          <button
-                            key={filter}
-                            onClick={() => setStatusFilter(filter)}
-                            className={cn(
-                              'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                              statusFilter === filter
-                                ? 'bg-accent text-[var(--color-bg-base)]'
-                                : 'bg-muted text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                            )}
-                          >
-                            {filter === 'all' ? 'Todas' : statusConfig[filter].label}
-                            {filter === 'pending' && stats.pending > 0 && (
-                              <span className="ml-1">({stats.pending})</span>
-                            )}
-                          </button>
-                        )
-                      )}
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={() => setAppointmentsView((view) => (view === 'list' ? 'calendar' : 'list'))}
@@ -3048,6 +3022,55 @@ export default function AdminPage() {
                           <List className="w-4 h-4" />
                         )}
                       </button>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-muted text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                          >
+                            {statusFilter === 'all' ? 'Todas' : statusConfig[statusFilter].label}
+                            {statusFilter === 'pending' && stats.pending > 0 && (
+                              <span>({stats.pending})</span>
+                            )}
+                            <ChevronDown className="w-4 h-4" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          align="end"
+                          sideOffset={6}
+                          className="z-[200] w-44 p-1 bg-[#1a1a1a] border border-[var(--color-border-base)] rounded-xl shadow-2xl"
+                        >
+                          {(['all', 'pending', 'approved', 'rejected', 'cancelled'] as StatusFilter[]).map(
+                            (filter) => (
+                              <PopoverClose asChild key={filter}>
+                                <button
+                                  type="button"
+                                  onClick={() => setStatusFilter(filter)}
+                                  className={cn(
+                                    'w-full text-left px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                                    statusFilter === filter
+                                      ? 'bg-accent text-[var(--color-bg-base)]'
+                                      : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
+                                  )}
+                                >
+                                  {filter === 'all' ? 'Todas' : statusConfig[filter].label}
+                                  {filter === 'pending' && stats.pending > 0 && (
+                                    <span className="ml-1">({stats.pending})</span>
+                                  )}
+                                </button>
+                              </PopoverClose>
+                            )
+                          )}
+                        </PopoverContent>
+                      </Popover>
+                      <PremiumButton
+                        variant="cta"
+                        size="sm"
+                        icon={<Plus className="w-4 h-4" />}
+                        onClick={() => openCreateAppointmentModal()}
+                      >
+                        Crear cita
+                      </PremiumButton>
                     </div>
                   </div>
 
