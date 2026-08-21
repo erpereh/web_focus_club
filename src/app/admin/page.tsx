@@ -56,6 +56,7 @@ import {
   ChevronDown,
   ChevronUp,
   Layers,
+  List,
   Eye,
   EyeOff,
   Play,
@@ -67,6 +68,7 @@ import { ContextualImageManager } from '@/components/ui/ContextualImageManager';
 import { GalleryManager } from '@/components/admin/GalleryManager';
 import { MediaPicker } from '@/components/admin/MediaPicker';
 import { IconPicker } from '@/components/admin/IconPicker';
+import { AppointmentsCalendar } from '@/components/admin/appointments/AppointmentsCalendar';
 import { VideoFramePreview } from '@/components/ui/VideoFramePreview';
 import { DynamicIcon } from '@/components/ui/DynamicIcon';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
@@ -168,6 +170,7 @@ const DEFAULT_HERO_STATS: HeroStat[] = [
 
 type TabType = 'Inicio' | 'appointments' | 'availability' | 'clients' | 'team' | 'testimonials' | 'Hero' | 'Sandra' | 'Centro' | 'Servicios' | 'Galeria' | 'Contacto' | 'Footer' | 'config';
 type StatusFilter = 'all' | Appointment['status'];
+type AppointmentsView = 'list' | 'calendar';
 
 interface CreateClientFormState {
   name: string;
@@ -1000,6 +1003,7 @@ export default function AdminPage() {
   const [unreadSupportMessages, setUnreadSupportMessages] = useState(0);
   const switchTab = (tab: TabType) => { setActiveTab(tab); setSidebarOpen(false); };
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [appointmentsView, setAppointmentsView] = useState<AppointmentsView>('list');
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<string | null>(null);
 
   // Estado para aprobación con campos extra
@@ -3028,9 +3032,35 @@ export default function AdminPage() {
                           </button>
                         )
                       )}
+                      <button
+                        type="button"
+                        onClick={() => setAppointmentsView((view) => (view === 'list' ? 'calendar' : 'list'))}
+                        title={appointmentsView === 'list' ? 'Ver calendario' : 'Ver lista'}
+                        aria-label={appointmentsView === 'list' ? 'Ver calendario' : 'Ver lista'}
+                        className={cn(
+                          'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                          'bg-muted text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                        )}
+                      >
+                        {appointmentsView === 'list' ? (
+                          <Calendar className="w-4 h-4" />
+                        ) : (
+                          <List className="w-4 h-4" />
+                        )}
+                      </button>
                     </div>
                   </div>
 
+                  {appointmentsView === 'calendar' ? (
+                    <AppointmentsCalendar
+                      appointments={filteredAppointments}
+                      getClientForAppointment={getClientForAppointment}
+                      trainers={trainers}
+                      statusConfig={statusConfig}
+                      serviceLabels={serviceLabels}
+                      durationLabels={durationLabels}
+                    />
+                  ) : (
                   <div className="space-y-4">
                     {filteredAppointments.map((appointment) => {
                       const StatusIcon = statusConfig[appointment.status].icon;
@@ -3272,6 +3302,7 @@ export default function AdminPage() {
                       </GlassCard>
                     )}
                   </div>
+                  )}
                 </motion.div>
               )}
 
