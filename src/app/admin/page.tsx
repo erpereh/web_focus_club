@@ -3006,22 +3006,6 @@ export default function AdminPage() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                     <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Gestión de Citas</h1>
                     <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setAppointmentsView((view) => (view === 'list' ? 'calendar' : 'list'))}
-                        title={appointmentsView === 'list' ? 'Ver calendario' : 'Ver lista'}
-                        aria-label={appointmentsView === 'list' ? 'Ver calendario' : 'Ver lista'}
-                        className={cn(
-                          'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                          'bg-muted text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                        )}
-                      >
-                        {appointmentsView === 'list' ? (
-                          <Calendar className="w-4 h-4" />
-                        ) : (
-                          <List className="w-4 h-4" />
-                        )}
-                      </button>
                       <Popover>
                         <PopoverTrigger asChild>
                           <button
@@ -3063,6 +3047,22 @@ export default function AdminPage() {
                           )}
                         </PopoverContent>
                       </Popover>
+                      <button
+                        type="button"
+                        onClick={() => setAppointmentsView((view) => (view === 'list' ? 'calendar' : 'list'))}
+                        title={appointmentsView === 'list' ? 'Ver calendario' : 'Ver lista'}
+                        aria-label={appointmentsView === 'list' ? 'Ver calendario' : 'Ver lista'}
+                        className={cn(
+                          'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                          'bg-muted text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                        )}
+                      >
+                        {appointmentsView === 'list' ? (
+                          <Calendar className="w-4 h-4" />
+                        ) : (
+                          <List className="w-4 h-4" />
+                        )}
+                      </button>
                       <PremiumButton
                         variant="cta"
                         size="sm"
