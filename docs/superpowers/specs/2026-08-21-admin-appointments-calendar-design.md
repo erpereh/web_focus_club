@@ -155,9 +155,9 @@ Los colores representan estado, no entrenador.
 
 ### Días con muchas citas
 
-Para evitar que una celda crezca indefinidamente se mostrará un número limitado de eventos visibles y un indicador `+ N más` cuando haya más citas en ese día.
+Cada celda mostrará como máximo tres citas. Si hay más, aparecerá `+ N más`.
 
-Al accionar `+ N más`, las citas restantes del día deben poder verse sin modificar datos. La implementación concreta puede usar expansión temporal de la celda o un pequeño listado/overlay de solo lectura, siempre manteniendo el calendario estable y accesible.
+Al pulsar `+ N más` se abrirá un popover/listado de solo lectura anclado al día correspondiente con todas las citas de ese día, ordenadas por hora. Pulsar una cita desde ese listado abrirá el mismo modal de detalle. El popover no modifica datos y se cerrará al pulsar fuera o al seleccionar una cita.
 
 ## Modal de detalle
 
@@ -218,17 +218,19 @@ Responsabilidades:
 - Navegación mensual.
 - Agrupación de citas por día.
 - Ordenación por hora.
-- Selección de una cita para abrir detalle.
+- Gestión del popover `+ N más`.
+- Estado de la cita seleccionada.
+- Apertura/cierre del modal de detalle.
 - Presentación responsive.
 
-No realiza lecturas ni escrituras directas a Firestore.
+Recibe por props las citas filtradas y los datos ya cargados necesarios para resolver cliente/entrenador. No realiza lecturas ni escrituras directas a Firestore.
 
 ### `AppointmentReadOnlyModal.tsx`
 
 - Presentar la cita seleccionada.
 - Resolver formato de fecha/hora/duración.
 - Mostrar datos opcionales de forma segura.
-- Gestionar únicamente apertura/cierre.
+- Gestionar únicamente apertura/cierre y accesibilidad del diálogo.
 
 No importa funciones de mutación.
 
@@ -251,10 +253,10 @@ Cambios mínimos:
 
 - Estado `list | calendar`.
 - Botón de alternancia.
-- Render condicional de lista existente o nuevo calendario.
-- Estado/props necesarios para la cita seleccionada, salvo que se encapsule íntegramente dentro del componente calendario.
+- Render condicional de la lista existente o el nuevo calendario.
+- Paso de `filteredAppointments` y de los datos ya cargados necesarios al calendario.
 
-No se refactorizarán secciones no relacionadas del archivo admin.
+La selección de citas y el modal quedan encapsulados dentro de `AppointmentsCalendar.tsx`. No se refactorizarán secciones no relacionadas del archivo admin.
 
 ## Responsive
 
@@ -307,9 +309,17 @@ El calendario debe tolerar:
 - Citas sin comentario.
 - Citas sin teléfono u otros metadatos opcionales.
 - Duraciones inesperadas: mostrar la duración disponible si se puede parsear; no bloquear el render.
-- Citas sin una fecha/hora válida: no deben romper el calendario. Podrán omitirse de la cuadrícula y seguir visibles en la lista existente.
+- Citas sin una fecha/hora válida: no deben romper el calendario. Se omitirán de la cuadrícula y seguirán visibles en la lista existente.
 
 Nunca se corregirá o escribirá automáticamente un documento legacy desde la UI.
+
+## Accesibilidad e interacción
+
+- Las citas del calendario serán elementos interactivos accesibles por teclado.
+- El modal usará semántica de diálogo, moverá el foco a su contenido al abrirse y restaurará el foco al disparador al cerrarse cuando sea posible.
+- `Esc` cerrará el modal.
+- El botón Lista/Calendario tendrá etiqueta accesible además del icono.
+- Los estados no dependerán solo del color: el texto del estado seguirá disponible en el modal y en contextos donde haya espacio.
 
 ## Pruebas y validación
 
@@ -336,6 +346,7 @@ Validar:
 - Los filtros afectan al calendario.
 - Mes anterior/siguiente funciona.
 - `Hoy` vuelve al mes actual.
+- Un día con más de tres citas muestra `+ N más` y el popover correcto.
 - Pulsar una cita abre el modal correcto.
 - Cerrar por X, botón, overlay y Esc funciona.
 - El modal no contiene acciones de modificación.
@@ -373,6 +384,8 @@ La funcionalidad se considera completa cuando:
 - La lista permanece como vista por defecto.
 - El acceso al calendario se hace mediante un icono en la cabecera de Citas.
 - Los filtros existentes funcionan también en calendario.
+- Cada día muestra hasta tres citas antes de usar `+ N más`.
+- `+ N más` abre un popover de solo lectura del día.
 - Al pulsar una cita se abre un modal.
 - El modal es solo lectura.
 - No se implementan modificaciones de citas desde el calendario.
