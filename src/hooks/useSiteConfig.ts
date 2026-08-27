@@ -2,15 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { subscribeSiteConfig } from '@/lib/firestore';
+import { DEFAULT_SITE_CONFIG } from '@/lib/site-config';
 import type { SiteConfig } from '@/types';
-
-const DEFAULT_SITE_CONFIG: SiteConfig = {
-    startHour: 8,
-    endHour: 20,
-    slotInterval: 30,
-    bonoExpirationMonths: 1,
-    maintenanceMode: false,
-};
 
 export function useSiteConfig() {
     const [siteConfig, setSiteConfig] = useState<SiteConfig>(DEFAULT_SITE_CONFIG);

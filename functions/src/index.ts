@@ -16,6 +16,7 @@ import {
 } from "./googleCalendarSync";
 import {
   isRescheduleCapacityAvailable,
+  isSlotAtCapacity,
   reconcileAppointmentMinutes,
   reconcileOwnAppointmentReschedule,
   selectExactlyOneActiveBono,
@@ -28,6 +29,7 @@ import {
   notifyCustomerSuggestionCreatedSafely,
   type CustomerSuggestionMakeEvent,
 } from "./customerSuggestions";
+import { normalizeSiteConfig, type SiteConfig } from "./siteConfig.js";
 
 initializeApp();
 
@@ -37,20 +39,12 @@ const MAKE_WELCOME_WEBHOOK_URL = defineSecret("MAKE_WELCOME_WEBHOOK_URL");
 const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
 const GOOGLE_CALENDAR_ID = defineSecret("GOOGLE_CALENDAR_ID");
 const REGION = "europe-west1";
-const MAX_CAPACITY = 2;
 const APPOINTMENT_SERVICE_TYPE = "Bono Mensual de Entrenamiento";
 const ADMIN_NOTIFICATION_EMAIL = "infofocusclub2026@gmail.com";
 const CONTACT_EMAIL_FROM = "Focus Club <noreply@focusclub.es>";
 const CONTACT_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const CONTACT_RATE_LIMIT_MAX_REQUESTS = 5;
 const CONTACT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const DEFAULT_SITE_CONFIG = {
-  startHour: 8,
-  endHour: 20,
-  slotInterval: 30,
-  bonoExpirationMonths: 1,
-  maintenanceMode: false,
-} as const;
 const supportChat = createSupportChatHandlers(db, {
   notifySupportCustomer: sendSupportMessagePushNotificationSafely,
 });
@@ -219,15 +213,6 @@ interface BonoDoc {
   modalidad?: string;
 }
 
-interface SiteConfig {
-  startHour: number;
-  endHour: number;
-  slotInterval: number;
-  bonoExpirationMonths: number;
-  maintenanceMode?: boolean;
-  sessionDuration?: number;
-}
-
 interface SlotOccupancy {
   date: string;
   time: string;
@@ -290,38 +275,6 @@ function isTimeSlot(value: unknown): value is TimeSlot {
     && /^\d{4}-\d{2}-\d{2}$/.test(value.date)
     && typeof value.time === "string"
     && /^\d{2}:\d{2}$/.test(value.time);
-}
-
-function normalizeSlotInterval(value: unknown): number {
-  return value === 30 || value === 45 || value === 60 ? value : DEFAULT_SITE_CONFIG.slotInterval;
-}
-
-function normalizeHour(value: unknown, fallback: number): number {
-  const hour = Number(value);
-  if (!Number.isFinite(hour)) return fallback;
-  return Math.max(0, Math.min(23, Math.trunc(hour)));
-}
-
-function normalizeSiteConfig(config: Partial<SiteConfig> = {}): SiteConfig {
-  let startHour = normalizeHour(config.startHour, DEFAULT_SITE_CONFIG.startHour);
-  let endHour = normalizeHour(config.endHour, DEFAULT_SITE_CONFIG.endHour);
-
-  if (startHour >= endHour) {
-    startHour = DEFAULT_SITE_CONFIG.startHour;
-    endHour = DEFAULT_SITE_CONFIG.endHour;
-  }
-
-  const expirationMonths = Number(config.bonoExpirationMonths ?? DEFAULT_SITE_CONFIG.bonoExpirationMonths);
-
-  return {
-    ...DEFAULT_SITE_CONFIG,
-    ...config,
-    startHour,
-    endHour,
-    slotInterval: normalizeSlotInterval(config.slotInterval ?? config.sessionDuration),
-    bonoExpirationMonths: Number.isFinite(expirationMonths) ? Math.max(1, Math.trunc(expirationMonths)) : 1,
-    maintenanceMode: Boolean(config.maintenanceMode),
-  };
 }
 
 function generateTimeSlots(config: SiteConfig): string[] {
@@ -1330,7 +1283,7 @@ function validateAdminAppointmentSlot(
     throw toHttpsError("failed-precondition", "La franja seleccionada esta bloqueada.");
   }
 
-  if (slotBlocks.some((time) => (occupancyByTime.get(time) ?? 0) >= MAX_CAPACITY)) {
+  if (slotBlocks.some((time) => isSlotAtCapacity(occupancyByTime.get(time) ?? 0, config.maxCapacity))) {
     throw toHttpsError("failed-precondition", "La franja seleccionada esta llena.");
   }
 
@@ -2130,7 +2083,7 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
         const occupancy = docSnap.data() as SlotOccupancy;
         occupancyByTime.set(occupancy.time, occupancy.count ?? 0);
       });
-      if (slotBlocks.some((time) => (occupancyByTime.get(time) ?? 0) >= MAX_CAPACITY)) {
+      if (slotBlocks.some((time) => isSlotAtCapacity(occupancyByTime.get(time) ?? 0, config.maxCapacity))) {
         throw toHttpsError("failed-precondition", "La franja seleccionada ya no está disponible.");
       }
 
@@ -2330,7 +2283,7 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
       if (slotBlocks.some((time) => {
         const key = `${preferredSlot.date}_${time}`;
         const current = occupancyByTime.get(time) ?? 0;
-        return !isRescheduleCapacityAvailable(current, ownApprovedKeys.has(key), MAX_CAPACITY);
+        return !isRescheduleCapacityAvailable(current, ownApprovedKeys.has(key), config.maxCapacity);
       })) {
         throw toHttpsError("failed-precondition", "La franja seleccionada está llena.");
       }

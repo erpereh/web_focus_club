@@ -12,6 +12,7 @@ const {
   validateOwnReschedule,
   approvalOnlyAppointmentFields,
   isRescheduleCapacityAvailable,
+  isSlotAtCapacity,
   shouldReconcileAppointmentTransition,
 } = require("../lib/appointmentLifecycle.js");
 
@@ -144,6 +145,16 @@ assert.deepEqual(rejectedRescheduleCalls, { released: 0, patches: 0 });
 
 assert.equal(isRescheduleCapacityAvailable(2, true, 2), true, "approved booking excludes its current occupancy");
 assert.equal(isRescheduleCapacityAvailable(2, false, 2), false);
+assert.equal(isRescheduleCapacityAvailable(1, false, 2), true, "maxCapacity 2: count 1 is available");
+assert.equal(isRescheduleCapacityAvailable(2, false, 2), false, "maxCapacity 2: count 2 is full");
+assert.equal(isRescheduleCapacityAvailable(4, false, 5), true, "maxCapacity 5: count 4 is available");
+assert.equal(isRescheduleCapacityAvailable(5, false, 5), false, "maxCapacity 5: count 5 is full");
+assert.equal(isRescheduleCapacityAvailable(5, true, 5), true, "approved booking can stay on a full slot of 5");
+assert.equal(isSlotAtCapacity(1, 2), false);
+assert.equal(isSlotAtCapacity(2, 2), true);
+assert.equal(isSlotAtCapacity(4, 5), false);
+assert.equal(isSlotAtCapacity(5, 5), true);
+assert.equal(isSlotAtCapacity(5, 3), true, "existing occupancy above a lowered maxCapacity stays full");
 
 assert.equal(shouldReconcileAppointmentTransition("approved", "approved"), true);
 assert.equal(shouldReconcileAppointmentTransition("approved", "cancelled"), false);
@@ -162,6 +173,9 @@ assert.match(indexSource, /export const updateOwnAppointmentSlot\s*=\s*onCall/);
 assert.match(indexSource, /reconcileOwnAppointmentReschedule\(\{/);
 assert.match(indexSource, /releaseApprovedAppointmentOccupancyInTransaction/);
 assert.match(indexSource, /isRescheduleCapacityAvailable/);
+assert.match(indexSource, /isSlotAtCapacity/);
+assert.match(indexSource, /config\.maxCapacity/);
+assert.doesNotMatch(indexSource, /const MAX_CAPACITY\s*=\s*2/);
 assert.match(indexSource, /shouldReconcileAppointmentTransition\("approved", appointment\.status\)/);
 assert.match(indexSource, /const expectedStatus = changedToRejected \? "rejected" : "cancelled"/);
 assert.match(indexSource, /if \(status === "rejected" \|\| status === "cancelled"\)/);

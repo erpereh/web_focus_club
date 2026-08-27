@@ -52,6 +52,13 @@ import type {
     BrandingConfig,
     HeroStat,
 } from '@/types';
+import {
+    DEFAULT_SITE_CONFIG,
+    normalizeSiteConfig,
+    sanitizeSiteConfigUpdate,
+} from './site-config';
+
+export { normalizeSiteConfig };
 
 const DEFAULT_CENTRO_ZONAS: CentroZona[] = [
     {
@@ -1442,48 +1449,6 @@ export async function addActivityLog(log: Omit<ActivityLog, 'timestamp'>): Promi
 // CONFIGURACIÓN GLOBAL DEL SITIO
 // ============================================
 
-const DEFAULT_SITE_CONFIG: SiteConfig = {
-    startHour: 8,
-    endHour: 20,
-    slotInterval: 30,
-    bonoExpirationMonths: 1,
-    maintenanceMode: false,
-};
-
-const ALLOWED_SLOT_INTERVALS = [30, 45, 60] as const;
-
-function normalizeSlotInterval(value: unknown): number {
-    return ALLOWED_SLOT_INTERVALS.includes(value as 30 | 45 | 60) ? Number(value) : 30;
-}
-
-function normalizeHour(value: unknown, fallback: number): number {
-    const hour = Number(value);
-    if (!Number.isFinite(hour)) return fallback;
-    return Math.max(0, Math.min(23, Math.trunc(hour)));
-}
-
-export function normalizeSiteConfig(config: Partial<SiteConfig> = {}): SiteConfig {
-    let startHour = normalizeHour(config.startHour, DEFAULT_SITE_CONFIG.startHour);
-    let endHour = normalizeHour(config.endHour, DEFAULT_SITE_CONFIG.endHour);
-
-    if (startHour >= endHour) {
-        startHour = DEFAULT_SITE_CONFIG.startHour;
-        endHour = DEFAULT_SITE_CONFIG.endHour;
-    }
-
-    const expirationMonths = Number(config.bonoExpirationMonths ?? DEFAULT_SITE_CONFIG.bonoExpirationMonths);
-
-    return {
-        ...DEFAULT_SITE_CONFIG,
-        ...config,
-        startHour,
-        endHour,
-        slotInterval: normalizeSlotInterval(config.slotInterval ?? config.sessionDuration),
-        bonoExpirationMonths: Number.isFinite(expirationMonths) ? Math.max(1, Math.trunc(expirationMonths)) : 1,
-        maintenanceMode: Boolean(config.maintenanceMode),
-    };
-}
-
 /**
  * Genera un array de franjas horarias a partir de la configuración.
  * Ej: { startHour: 8, endHour: 20, slotInterval: 30 } → ['08:00', '08:30', '09:00', ..., '19:30']
@@ -1537,21 +1502,9 @@ export function subscribeSiteConfig(
 }
 
 export async function updateSiteConfig(data: Partial<SiteConfig>): Promise<void> {
-    const sanitized: Partial<SiteConfig> = { ...data };
+    const sanitized = sanitizeSiteConfigUpdate(data);
 
-    if ('slotInterval' in data || 'sessionDuration' in data) {
-        sanitized.slotInterval = normalizeSlotInterval(data.slotInterval ?? data.sessionDuration);
-    }
-
-    if ('startHour' in data) {
-        sanitized.startHour = normalizeHour(data.startHour, DEFAULT_SITE_CONFIG.startHour);
-    }
-
-    if ('endHour' in data) {
-        sanitized.endHour = normalizeHour(data.endHour, DEFAULT_SITE_CONFIG.endHour);
-    }
-
-    if ('startHour' in data || 'endHour' in data) {
+    if ('startHour' in sanitized || 'endHour' in sanitized) {
         const currentSnap = await getDoc(doc(db, 'site_config', 'main'));
         const currentConfig = currentSnap.exists()
             ? normalizeSiteConfig(currentSnap.data() as Partial<SiteConfig>)
@@ -1562,17 +1515,6 @@ export async function updateSiteConfig(data: Partial<SiteConfig>): Promise<void>
         if (nextStartHour >= nextEndHour) {
             throw new Error('La hora de inicio debe ser menor que la hora de fin.');
         }
-    }
-
-    if ('bonoExpirationMonths' in data) {
-        const expirationMonths = Number(data.bonoExpirationMonths ?? DEFAULT_SITE_CONFIG.bonoExpirationMonths);
-        sanitized.bonoExpirationMonths = Number.isFinite(expirationMonths)
-            ? Math.max(1, Math.trunc(expirationMonths))
-            : DEFAULT_SITE_CONFIG.bonoExpirationMonths;
-    }
-
-    if ('maintenanceMode' in data) {
-        sanitized.maintenanceMode = Boolean(data.maintenanceMode);
     }
 
     await setDoc(doc(db, 'site_config', 'main'), sanitized, { merge: true });

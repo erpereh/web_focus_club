@@ -234,8 +234,15 @@ export function reconcileOwnAppointmentReschedule(input: ReconcileOwnAppointment
   return { ok: true };
 }
 
+export function isSlotAtCapacity(currentCount: number, maxCapacity: number): boolean {
+  return currentCount >= maxCapacity;
+}
+
 export function isRescheduleCapacityAvailable(currentCount: number, includesOwnApprovedOccupancy: boolean, maxCapacity: number): boolean {
-  return Math.max(0, currentCount - (includesOwnApprovedOccupancy ? 1 : 0)) < maxCapacity;
+  return !isSlotAtCapacity(
+    Math.max(0, currentCount - (includesOwnApprovedOccupancy ? 1 : 0)),
+    maxCapacity,
+  );
 }
 
 export function shouldReconcileAppointmentTransition(expectedStatus: string, currentStatus: string): boolean {

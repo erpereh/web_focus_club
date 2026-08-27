@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Clock, Users, Lock, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { doesSessionFitWithinSchedule, generateTimeSlots, subscribeMonthAvailability, subscribeSiteConfig } from '@/lib/firestore';
+import { DEFAULT_SITE_CONFIG } from '@/lib/site-config';
 import type { BlockedSlot, TimeSlot, SiteConfig } from '@/types';
 
 // ============================================
@@ -12,7 +13,7 @@ import type { BlockedSlot, TimeSlot, SiteConfig } from '@/types';
 // ============================================
 
 interface SlotStatus {
-  occupancy: number;       // 0, 1, o 2
+  occupancy: number;
   isBlocked: boolean;
   isBlockedExact?: boolean;
   isBlockedByOverlap?: boolean;
@@ -42,15 +43,6 @@ const MONTH_NAMES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
-
-const MAX_CAPACITY = 2;
-const DEFAULT_SITE_CONFIG: SiteConfig = {
-  startHour: 8,
-  endHour: 20,
-  slotInterval: 30,
-  bonoExpirationMonths: 1,
-  maintenanceMode: false,
-};
 
 // ============================================
 // HELPERS
@@ -237,7 +229,7 @@ export function InteractiveCalendar({
     return timeSlots.some((time) => {
       if (isPastTime(currentYear, currentMonth, day, time)) return false;
       const status = getSlotStatus(day, time);
-      return !status.isBlocked && status.occupancy < MAX_CAPACITY;
+      return !status.isBlocked && status.occupancy < siteConfig.maxCapacity;
     });
   }
 
@@ -249,8 +241,8 @@ export function InteractiveCalendar({
     timeSlots.forEach((time) => {
       const key = `${dateKey}_${time}`;
       const count = occupancy[key] || 0;
-      if (count === 1) hasPartial = true;
-      if (count >= MAX_CAPACITY) hasFull = true;
+      if (count > 0 && count < siteConfig.maxCapacity) hasPartial = true;
+      if (count >= siteConfig.maxCapacity) hasFull = true;
     });
     return { hasPartial, hasFull };
   }
@@ -283,7 +275,7 @@ export function InteractiveCalendar({
     for (const blockTime of blocks) {
       const blockStatus = getSlotStatus(selectedDay, blockTime);
       if (blockStatus.isBlocked) return;
-      if (blockStatus.occupancy >= MAX_CAPACITY) {
+      if (blockStatus.occupancy >= siteConfig.maxCapacity) {
         setFullMessage('Esta franja no está disponible para la duración seleccionada');
         return;
       }
@@ -449,11 +441,12 @@ export function InteractiveCalendar({
                 const past = isPastTime(currentYear, currentMonth, selectedDay, time);
                 const status = getSlotStatus(selectedDay, time);
                 const selected = isSlotSelected(selectedDay, time);
-                const isFull = status.occupancy >= MAX_CAPACITY;
+                const remaining = Math.max(0, siteConfig.maxCapacity - status.occupancy);
+                const isFull = status.occupancy >= siteConfig.maxCapacity;
                 const dateStr = formatDateKey(currentYear, currentMonth, selectedDay);
                 const slotKey = `${dateStr}_${time}`;
                 const isUserBooked = !!userBookedSlotKeys?.has(slotKey);
-                const isPartial = !isUserBooked && status.occupancy === 1;
+                const isPartial = !isUserBooked && status.occupancy > 0 && status.occupancy < siteConfig.maxCapacity;
                 const disabled = past || status.isBlocked || isUserBooked;
 
                 return (
@@ -469,12 +462,12 @@ export function InteractiveCalendar({
                       !past && status.isBlocked && 'bg-muted/20 border-border/50 text-[var(--color-text-secondary)]/50 cursor-not-allowed',
                       // Cita propia del usuario (pending o approved)
                       !past && !status.isBlocked && isUserBooked && !selected && 'bg-blue-500/10 border-blue-500/30 text-blue-300 cursor-not-allowed',
-                      // Lleno (2/2) — clicable para mostrar mensaje, pero estilizado como lleno
+                      // Lleno — clicable para mostrar mensaje, pero estilizado como lleno
                       !past && !status.isBlocked && !isUserBooked && isFull && !selected && 'bg-red-500/10 border-red-500/30 text-red-400/70 cursor-pointer',
-                      // Parcial (1/2) — disponible
+                      // Parcial — disponible con plazas restantes
                       !past && !status.isBlocked && isPartial && !selected &&
                         'bg-amber-400/10 border-amber-400/30 text-amber-300 hover:bg-amber-400/20 hover:border-amber-400/50 hover:shadow-[0_0_10px_rgba(251,191,36,0.15)]',
-                      // Libre (0/2) — disponible
+                      // Libre — disponible
                       !past && !status.isBlocked && !isUserBooked && !isFull && !isPartial && !selected &&
                         'bg-[var(--color-accent-val)]/5 border-[var(--color-border-base)] text-[var(--color-text-primary)] hover:bg-[var(--color-accent-val)]/10 hover:border-[var(--color-accent-border)] hover:shadow-emerald-glow',
                       // Seleccionado por el usuario
@@ -496,7 +489,7 @@ export function InteractiveCalendar({
                     {!past && !status.isBlocked && isPartial && !selected && (
                       <span className="flex items-center justify-center gap-0.5 text-[10px] mt-0.5 text-amber-400/80">
                         <Users className="w-2.5 h-2.5" />
-                        1 plaza
+                        {remaining === 1 ? '1 plaza' : `${remaining} plazas`}
                       </span>
                     )}
                     {selected && (

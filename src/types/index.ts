@@ -252,6 +252,7 @@ export interface SiteConfig {
     endHour: number;           // ej: 20
     slotInterval: number;      // intervalo de slots en minutos (default: 30)
     bonoExpirationMonths: number; // meses de validez de los bonos (default: 1)
+    maxCapacity: number;       // clientes simultáneos por franja (fallback: 2, rango: 1–10)
     maintenanceMode?: boolean; // modo mantenimiento para web pública y portal cliente
     // Legacy (compatibilidad hacia atrás)
     sessionDuration?: number;

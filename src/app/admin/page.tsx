@@ -156,6 +156,7 @@ import {
   subscribeUsers,
 
 } from '@/lib/firestore';
+import { DEFAULT_SITE_CONFIG, MAX_MAX_CAPACITY, MIN_MAX_CAPACITY, normalizeMaxCapacity } from '@/lib/site-config';
 import type { AdminUserAccessMethod, AdminUserRole } from '@/lib/firestore';
 import { auth } from '@/lib/firebase';
 import { subscribeSupportConversations } from '@/lib/support-chat';
@@ -273,8 +274,6 @@ const durationLabels: Record<string, string> = {
   '60': '60 minutos',
   '90': '90 minutos', // legacy
 };
-
-const ADMIN_MAX_CAPACITY = 2;
 
 function formatDateInputLocal(date: Date): string {
   const year = date.getFullYear();
@@ -1100,8 +1099,8 @@ export default function AdminPage() {
   const [appointmentClientLocked, setAppointmentClientLocked] = useState(false);
 
   // Site config (dynamic time slots)
-  const [siteConfig, setSiteConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, slotInterval: 30, bonoExpirationMonths: 1, maintenanceMode: false });
-  const [editConfig, setEditConfig] = useState<SiteConfig>({ startHour: 8, endHour: 20, slotInterval: 30, bonoExpirationMonths: 1, maintenanceMode: false });
+  const [siteConfig, setSiteConfig] = useState<SiteConfig>(DEFAULT_SITE_CONFIG);
+  const [editConfig, setEditConfig] = useState<SiteConfig>(DEFAULT_SITE_CONFIG);
   const [savingConfig, setSavingConfig] = useState(false);
   const [maintenanceConfirmValue, setMaintenanceConfirmValue] = useState<boolean | null>(null);
   const [savingMaintenance, setSavingMaintenance] = useState(false);
@@ -1110,6 +1109,8 @@ export default function AdminPage() {
   // Bonos
   const [editBonoConfig, setEditBonoConfig] = useState(1);
   const [savingBonoConfig, setSavingBonoConfig] = useState(false);
+  const [editMaxCapacity, setEditMaxCapacity] = useState(DEFAULT_SITE_CONFIG.maxCapacity);
+  const [savingMaxCapacity, setSavingMaxCapacity] = useState(false);
   const [clientBonos, setClientBonos] = useState<Record<string, Bono | null>>({});
   const [showAssignBonoModal, setShowAssignBonoModal] = useState(false);
   const [assignBonoClient, setAssignBonoClient] = useState<UserProfile | null>(null);
@@ -1163,6 +1164,7 @@ export default function AdminPage() {
     setSiteConfig(config);
     setEditConfig(config);
     setEditBonoConfig(config.bonoExpirationMonths || 1);
+    setEditMaxCapacity(config.maxCapacity);
     setBrandingConfig(branding);
     if (cms) {
       const mergedCms = {
@@ -1258,6 +1260,7 @@ export default function AdminPage() {
       if (activeTabRef.current !== 'config') {
         setEditConfig(config);
         setEditBonoConfig(config.bonoExpirationMonths || 1);
+        setEditMaxCapacity(config.maxCapacity);
       }
     }, console.error);
     const unsubscribeBranding = subscribeBrandingConfig(setBrandingConfig, console.error);
@@ -1393,7 +1396,8 @@ export default function AdminPage() {
         });
       });
     const occupancy = Math.max(...blocks.map((blockTime) => occupancyByTime.get(blockTime) ?? 0), 0);
-    if (occupancy >= ADMIN_MAX_CAPACITY) {
+    const maxCapacity = siteConfig.maxCapacity;
+    if (occupancy >= maxCapacity) {
       return { disabled: true, label: 'Lleno', tone: 'full' as const, occupancy };
     }
 
@@ -1414,7 +1418,7 @@ export default function AdminPage() {
     }
 
     if (occupancy > 0) {
-      return { disabled: false, label: `${occupancy}/${ADMIN_MAX_CAPACITY}`, tone: 'partial' as const, occupancy };
+      return { disabled: false, label: `${occupancy}/${maxCapacity}`, tone: 'partial' as const, occupancy };
     }
 
     return { disabled: false, label: 'Libre', tone: 'free' as const, occupancy };
@@ -6143,7 +6147,7 @@ export default function AdminPage() {
                     </GlassCard>
 
                     {/* Configuración de Bonos */}
-                    <GlassCard className="p-6 lg:col-span-2">
+                    <GlassCard className="p-6">
                       <div className="flex items-center gap-3 mb-4">
                         <Ticket className="w-5 h-5 text-[var(--color-accent-val)]" />
                         <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Configuración de Bonos</h2>
@@ -6217,6 +6221,93 @@ export default function AdminPage() {
                         <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-2">Configuración Actual</h3>
                         <div className="text-sm text-[var(--color-text-secondary)]">
                           Expiración: <strong className="text-[var(--color-text-primary)]">{siteConfig.bonoExpirationMonths || 1} mes(es)</strong>
+                        </div>
+                      </div>
+                    </GlassCard>
+
+                    <GlassCard className="p-6">
+                      <div className="flex items-center gap-3 mb-4">
+                        <Users className="w-5 h-5 text-[var(--color-accent-val)]" />
+                        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Capacidad por franja</h2>
+                      </div>
+                      <p className="text-sm text-[var(--color-text-secondary)] mb-6">
+                        Define el número máximo de clientes que pueden reservar simultáneamente en una misma franja horaria.
+                      </p>
+
+                      <div>
+                        <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Máximo de personas</label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="number"
+                            min={MIN_MAX_CAPACITY}
+                            max={MAX_MAX_CAPACITY}
+                            value={editMaxCapacity}
+                            onChange={(e) => setEditMaxCapacity(normalizeMaxCapacity(e.target.value))}
+                            className="w-24 px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-[var(--color-text-primary)] focus:border-[var(--color-accent-val)] focus:outline-none"
+                          />
+                          <span className="text-sm text-[var(--color-text-secondary)]">personas</span>
+                        </div>
+                      </div>
+
+                      <div className="mt-6 flex items-center gap-4">
+                        <button
+                          disabled={savingMaxCapacity || editMaxCapacity === siteConfig.maxCapacity}
+                          onClick={async () => {
+                            const nextMaxCapacity = normalizeMaxCapacity(editMaxCapacity);
+                            if (nextMaxCapacity !== editMaxCapacity) {
+                              setEditMaxCapacity(nextMaxCapacity);
+                            }
+                            setSavingMaxCapacity(true);
+                            try {
+                              await updateSiteConfigFS({ maxCapacity: nextMaxCapacity });
+                              setSiteConfig((prev) => ({ ...prev, maxCapacity: nextMaxCapacity }));
+                              setEditMaxCapacity(nextMaxCapacity);
+                              await addActivityLog({
+                                action: 'max_capacity_updated',
+                                adminEmail: user?.email || 'unknown',
+                                details: `Capacidad por franja: ${nextMaxCapacity} persona(s)`,
+                              });
+                              const t = toast({
+                                title: 'Capacidad actualizada',
+                                description: `Máximo: ${nextMaxCapacity} persona(s) por franja.`,
+                              });
+                              setTimeout(() => t.dismiss(), 3500);
+                            } catch (err) {
+                              console.error('Error saving max capacity:', err);
+                              const t = toast({
+                                title: 'Error al guardar la capacidad',
+                                description: 'No se ha modificado la configuración. Inténtalo de nuevo.',
+                                variant: 'destructive',
+                              });
+                              setTimeout(() => t.dismiss(), 4500);
+                            } finally {
+                              setSavingMaxCapacity(false);
+                            }
+                          }}
+                          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[var(--color-accent-val)] to-emerald-bright text-[var(--color-bg-base)] font-semibold hover:shadow-lg hover:shadow-emerald/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                          {savingMaxCapacity ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Save className="w-4 h-4" />
+                          )}
+                          {savingMaxCapacity ? 'Guardando...' : 'Guardar capacidad'}
+                        </button>
+
+                        {editMaxCapacity !== siteConfig.maxCapacity && (
+                          <button
+                            onClick={() => setEditMaxCapacity(siteConfig.maxCapacity)}
+                            className="px-4 py-2.5 rounded-xl border border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-white/20 transition-colors text-sm"
+                          >
+                            Descartar cambios
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="mt-6 pt-4 border-t border-white/10">
+                        <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-2">Configuración Actual</h3>
+                        <div className="text-sm text-[var(--color-text-secondary)]">
+                          Máximo: <strong className="text-[var(--color-text-primary)]">{siteConfig.maxCapacity} persona(s)</strong>
                         </div>
                       </div>
                     </GlassCard>
