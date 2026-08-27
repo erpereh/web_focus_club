@@ -218,4 +218,15 @@ assert.match(indexSource, /selectExactlyOneActiveBono/);
 assert.match(indexSource, /config\.maxCapacity/);
 assert.doesNotMatch(indexSource, /const MAX_CAPACITY\s*=\s*2/);
 
+const maxCheckAt = recurringSource.indexOf("occurrenceDates.length > MAX_RECURRING_OCCURRENCES");
+const occupancyKeysAt = recurringSource.indexOf("collectRecurringOccupancyKeys");
+const occupancyRefsAt = recurringSource.indexOf("occupancyRefs");
+const blockedSlotsAt = recurringSource.indexOf("blocked_slots");
+const runTransactionAt = recurringSource.indexOf("db.runTransaction");
+assert.ok(maxCheckAt > 0, "callable must reject series longer than MAX_RECURRING_OCCURRENCES");
+assert.ok(maxCheckAt < occupancyKeysAt, "MAX 20 must be checked before occupancy keys");
+assert.ok(maxCheckAt < occupancyRefsAt, "MAX 20 must be checked before occupancyRefs");
+assert.ok(maxCheckAt < blockedSlotsAt, "MAX 20 must be checked before blocked_slots queries");
+assert.ok(maxCheckAt < runTransactionAt, "MAX 20 must be checked before runTransaction");
+
 console.log("recurring appointment tests passed");
