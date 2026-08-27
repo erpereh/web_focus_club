@@ -15,21 +15,30 @@ import {
   onlyGoogleCalendarSyncFieldsChanged,
 } from "./googleCalendarSync";
 import {
+  getSlotBlocks,
   isRescheduleCapacityAvailable,
   isSlotAtCapacity,
   reconcileAppointmentMinutes,
   reconcileOwnAppointmentReschedule,
   selectExactlyOneActiveBono,
   shouldReconcileAppointmentTransition,
+  slotOccupancyDocId,
   validateOwnFutureAppointment,
 } from "./appointmentLifecycle.js";
+import {
+  collectRecurringOccupancyKeys,
+  generateWeeklyOccurrenceDates,
+  MAX_RECURRING_OCCURRENCES,
+  parseRecurringAppointmentsData,
+  planRecurringAppointments,
+} from "./recurringAppointments.js";
 import { createSupportChatHandlers, type SupportChatNotificationInput } from "./supportChat";
 import {
   createCustomerSuggestionHandlers,
   notifyCustomerSuggestionCreatedSafely,
   type CustomerSuggestionMakeEvent,
 } from "./customerSuggestions";
-import { normalizeSiteConfig, type SiteConfig } from "./siteConfig.js";
+import { doesSessionFitWithinSchedule, generateTimeSlots, normalizeSiteConfig, type SiteConfig } from "./siteConfig.js";
 
 initializeApp();
 
@@ -133,6 +142,18 @@ interface CreateAppointmentFromAdminRequest {
   comment?: unknown;
 }
 
+interface CreateRecurringAppointmentsFromAdminRequest {
+  userId?: unknown;
+  date?: unknown;
+  time?: unknown;
+  durationMinutes?: unknown;
+  serviceType?: unknown;
+  assignedTrainer?: unknown;
+  comment?: unknown;
+  intervalWeeks?: unknown;
+  endDate?: unknown;
+}
+
 interface ParsedAdminUserData {
   name: string;
   email: string;
@@ -195,6 +216,8 @@ interface AppointmentDoc {
   modifiedBy?: string;
   modifiedAt?: string;
   previousPreferredSlot?: TimeSlot;
+  recurrenceSeriesId?: string;
+  recurrenceIndex?: number;
   createdAt: string;
   updatedAt?: string;
 }
@@ -275,48 +298,6 @@ function isTimeSlot(value: unknown): value is TimeSlot {
     && /^\d{4}-\d{2}-\d{2}$/.test(value.date)
     && typeof value.time === "string"
     && /^\d{2}:\d{2}$/.test(value.time);
-}
-
-function generateTimeSlots(config: SiteConfig): string[] {
-  const normalizedConfig = normalizeSiteConfig(config);
-  const slots: string[] = [];
-  const startMinutes = normalizedConfig.startHour * 60;
-  const endMinutes = normalizedConfig.endHour * 60;
-  for (let minute = startMinutes; minute < endMinutes; minute += normalizedConfig.slotInterval) {
-    const hour = Math.floor(minute / 60);
-    const min = minute % 60;
-    slots.push(`${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}`);
-  }
-  return slots;
-}
-
-function doesSessionFitWithinSchedule(config: SiteConfig, startTime: string, durationMinutes: number): boolean {
-  const normalizedConfig = normalizeSiteConfig(config);
-  const [hours, minutes] = startTime.split(":").map(Number);
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(durationMinutes)) return false;
-
-  const startMinutes = hours * 60 + minutes;
-  const scheduleStart = normalizedConfig.startHour * 60;
-  const scheduleEnd = normalizedConfig.endHour * 60;
-
-  return startMinutes >= scheduleStart && startMinutes + durationMinutes <= scheduleEnd;
-}
-
-function getSlotBlocks(startTime: string, durationMinutes: number): string[] {
-  const [hours, minutes] = startTime.split(":").map(Number);
-  const startTotal = hours * 60 + minutes;
-  const numBlocks = Math.ceil(durationMinutes / 15);
-  const blocks = new Set<string>();
-
-  for (let index = 0; index < numBlocks; index += 1) {
-    const total = startTotal + index * 15;
-    const legacyTotal = Math.floor(total / 30) * 30;
-    [total, legacyTotal].forEach((blockTotal) => {
-      blocks.add(`${String(Math.floor(blockTotal / 60)).padStart(2, "0")}:${String(blockTotal % 60).padStart(2, "0")}`);
-    });
-  }
-
-  return Array.from(blocks);
 }
 
 function getOverlappingSlotKeys(slot: TimeSlot, durationMinutes: number): Set<string> {
@@ -1255,10 +1236,6 @@ async function addAdminUserActivityLog(data: Record<string, unknown>): Promise<v
   }
 }
 
-function slotOccupancyDocId(date: string, time: string): string {
-  return `${date}_${time}`;
-}
-
 function validateAdminAppointmentSlot(
   input: ParsedAdminAppointmentData,
   config: SiteConfig,
@@ -1802,6 +1779,248 @@ export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminReque
       success: true,
       appointmentId: result.appointmentId,
       bonoWarning: result.bonoWarning,
+    };
+  },
+);
+
+export const createRecurringAppointmentsFromAdmin = onCall<CreateRecurringAppointmentsFromAdminRequest>(
+  { region: REGION },
+  async (request) => {
+    if (!request.auth) {
+      throw toHttpsError("permission-denied", "Debes iniciar sesion como admin.");
+    }
+
+    await requireAdmin(request.auth.uid);
+    const adminUid = request.auth.uid;
+    const adminEmail = request.auth.token.email ?? "";
+    const parsed = parseRecurringAppointmentsData(request.data);
+    if (!parsed.ok) {
+      throw toHttpsError("invalid-argument", parsed.message);
+    }
+    const input = parsed.value;
+    const occurrenceDates = generateWeeklyOccurrenceDates(input.startDate, input.intervalWeeks, input.endDate);
+    if (occurrenceDates.length === 0) {
+      throw toHttpsError("failed-precondition", "La serie debe incluir al menos una sesion.");
+    }
+    if (occurrenceDates.length > MAX_RECURRING_OCCURRENCES) {
+      throw toHttpsError("failed-precondition", `La serie no puede superar ${MAX_RECURRING_OCCURRENCES} sesiones.`);
+    }
+    const occupancyKeys = collectRecurringOccupancyKeys(occurrenceDates, input.startTime, input.durationMinutes);
+    const seriesRef = db.collection("appointment_recurrences").doc();
+    const appointmentRefs = occurrenceDates.map(() => db.collection("appointments").doc());
+    const occupancyRefs = occupancyKeys.map((key) => db.collection("slot_occupancy").doc(key));
+    const userRef = db.collection("users").doc(input.userId);
+    const trainerRef = db.collection("trainers").doc(input.assignedTrainer);
+    const serviceRef = input.serviceType.includes("/")
+      ? null
+      : db.collection("services").doc(input.serviceType);
+    const siteConfigRef = db.collection("site_config").doc("main");
+    const blockedSlotsQuery = db.collection("blocked_slots")
+      .where("date", ">=", input.startDate)
+      .where("date", "<=", input.endDate);
+    const userAppointmentsQuery = db.collection("appointments")
+      .where("userId", "==", input.userId)
+      .where("status", "in", ["pending", "approved"]);
+    const serviceTitleQuery = db.collection("services").where("title", "==", input.serviceType).limit(1);
+    const bonosQuery = db.collection("bonos")
+      .where("userId", "==", input.userId)
+      .where("estado", "==", "activo");
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [
+        userSnap,
+        trainerSnap,
+        serviceIdSnap,
+        siteConfigSnap,
+        blockedSlotsSnap,
+        userAppointmentsSnap,
+        serviceTitleSnap,
+        bonosSnap,
+        occupancySnaps,
+      ] = await Promise.all([
+        transaction.get(userRef),
+        transaction.get(trainerRef),
+        serviceRef ? transaction.get(serviceRef) : Promise.resolve(undefined),
+        transaction.get(siteConfigRef),
+        transaction.get(blockedSlotsQuery),
+        transaction.get(userAppointmentsQuery),
+        transaction.get(serviceTitleQuery),
+        transaction.get(bonosQuery),
+        Promise.all(occupancyRefs.map((ref) => transaction.get(ref))),
+      ]);
+
+      if (!userSnap.exists) {
+        throw toHttpsError("failed-precondition", "No se ha encontrado el cliente indicado.");
+      }
+
+      const userProfile = userSnap.data() as UserProfile;
+      if (!userProfile.email || !userProfile.name) {
+        throw toHttpsError("failed-precondition", "El perfil del cliente no esta completo.");
+      }
+
+      if (!trainerSnap.exists) {
+        throw toHttpsError("failed-precondition", "No se ha encontrado el entrenador indicado.");
+      }
+      const trainer = trainerSnap.data() as TrainerDoc;
+      if (trainer.active === false) {
+        throw toHttpsError("failed-precondition", "El entrenador seleccionado no esta activo.");
+      }
+
+      const service = serviceIdSnap?.exists
+        ? serviceIdSnap.data() as ServiceDoc
+        : serviceTitleSnap.docs[0]?.data() as ServiceDoc | undefined;
+      if (!service) {
+        throw toHttpsError("failed-precondition", "No se ha encontrado el servicio seleccionado.");
+      }
+      if (service.active === false) {
+        throw toHttpsError("failed-precondition", "El servicio seleccionado no esta activo.");
+      }
+
+      const config = siteConfigSnap.exists
+        ? normalizeSiteConfig(siteConfigSnap.data() as Partial<SiteConfig>)
+        : normalizeSiteConfig();
+      const blockedKeys = new Set<string>();
+      blockedSlotsSnap.docs.forEach((docSnap) => {
+        const blocked = docSnap.data() as TimeSlot;
+        if (typeof blocked.date === "string" && typeof blocked.time === "string") {
+          blockedKeys.add(slotOccupancyDocId(blocked.date, blocked.time));
+        }
+      });
+      const occupancyByKey = new Map<string, number>();
+      occupancySnaps.forEach((snap, index) => {
+        const key = occupancyKeys[index];
+        const occupancy = snap.exists ? snap.data() as SlotOccupancy : undefined;
+        occupancyByKey.set(key, occupancy?.count ?? 0);
+      });
+      const userSlotKeys = new Set<string>();
+      userAppointmentsSnap.docs.forEach((docSnap) => {
+        appointmentSlotKeys(docSnap.data() as AppointmentDoc).forEach((key) => userSlotKeys.add(key));
+      });
+      const activeBonos = bonosSnap.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data(),
+      } as BonoDoc & { id: string }));
+
+      const plan = planRecurringAppointments({
+        startDate: input.startDate,
+        startTime: input.startTime,
+        endDate: input.endDate,
+        intervalWeeks: input.intervalWeeks,
+        durationMinutes: input.durationMinutes,
+        now: getNowDate(),
+        siteConfig: config,
+        occupancyByKey,
+        blockedKeys,
+        userSlotKeys,
+        activeBonos,
+      });
+      if (!plan.ok) {
+        throw toHttpsError("failed-precondition", plan.message);
+      }
+
+      const now = new Date().toISOString();
+      const bonoRef = db.collection("bonos").doc(plan.writes.bono.bonoId);
+      const historialEntries = plan.writes.dates.map((date, index) => ({
+        fecha: now,
+        tipo: input.serviceType,
+        duracion: input.duration,
+        appointmentId: appointmentRefs[index].id,
+        accion: "descuento_cita",
+      }));
+
+      transaction.create(seriesRef, {
+        userId: input.userId,
+        serviceType: input.serviceType,
+        duration: input.duration,
+        assignedTrainer: input.assignedTrainer,
+        startDate: input.startDate,
+        startTime: input.startTime,
+        intervalWeeks: input.intervalWeeks,
+        endDate: input.endDate,
+        occurrenceCount: plan.writes.occurrenceCount,
+        totalMinutes: plan.writes.totalMinutes,
+        status: "active",
+        createdByAdminUid: adminUid,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      plan.writes.dates.forEach((date, index) => {
+        const slot = { date, time: input.startTime };
+        const appointment: AppointmentDoc = {
+          userId: input.userId,
+          name: userProfile.name,
+          email: userProfile.email,
+          phone: userProfile.phone || "",
+          serviceType: input.serviceType,
+          sessionType: service.title || input.serviceType,
+          duration: input.duration,
+          preferredSlots: [slot],
+          reason: input.comment,
+          status: "approved",
+          date: slot.date,
+          time: slot.time,
+          approvedSlot: slot,
+          assignedTrainer: input.assignedTrainer,
+          createdByAdmin: true,
+          createdByAdminUid: adminUid,
+          recurrenceSeriesId: seriesRef.id,
+          recurrenceIndex: index,
+          bonoId: plan.writes.bono.bonoId,
+          minutesDeducted: true,
+          minutesDeductedAmount: plan.writes.minutesDeductedAmount,
+          minutesDeductedAt: now,
+          minutesRefundedAt: null,
+          minutesRefundReason: null,
+          createdAt: now,
+          updatedAt: now,
+        };
+        transaction.create(appointmentRefs[index], appointment);
+      });
+
+      plan.writes.occupancyWrites.forEach((write) => {
+        transaction.set(
+          db.collection("slot_occupancy").doc(slotOccupancyDocId(write.date, write.time)),
+          { date: write.date, time: write.time, count: FieldValue.increment(1) },
+          { merge: true },
+        );
+      });
+
+      transaction.set(bonoRef, {
+        minutosRestantes: plan.writes.bono.minutosRestantes,
+        estado: plan.writes.bono.estado,
+        historial: FieldValue.arrayUnion(...historialEntries),
+      }, { merge: true });
+
+      transaction.create(db.collection("activity_logs").doc(), {
+        action: "recurring_appointments_created",
+        adminUid,
+        adminEmail,
+        seriesId: seriesRef.id,
+        targetUid: input.userId,
+        targetEmail: userProfile.email,
+        occurrenceCount: plan.writes.occurrenceCount,
+        totalMinutes: plan.writes.totalMinutes,
+        startDate: input.startDate,
+        endDate: input.endDate,
+        intervalWeeks: input.intervalWeeks,
+        startTime: input.startTime,
+        serviceType: input.serviceType,
+        createdAt: now,
+        timestamp: now,
+      });
+
+      return {
+        seriesId: seriesRef.id,
+        appointmentIds: appointmentRefs.map((ref) => ref.id),
+        occurrenceCount: plan.writes.occurrenceCount,
+        totalMinutes: plan.writes.totalMinutes,
+      };
+    });
+
+    return {
+      success: true,
+      ...result,
     };
   },
 );

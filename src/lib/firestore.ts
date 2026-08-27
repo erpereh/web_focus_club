@@ -537,6 +537,26 @@ export interface CreateAppointmentFromAdminInput {
     comment: string;
 }
 
+export interface CreateRecurringAppointmentsFromAdminInput {
+    userId: string;
+    date: string;
+    time: string;
+    durationMinutes: 30 | 45 | 60;
+    serviceType: string;
+    assignedTrainer: string;
+    comment: string;
+    intervalWeeks: number;
+    endDate: string;
+}
+
+export interface CreateRecurringAppointmentsFromAdminResult {
+    success: boolean;
+    seriesId: string;
+    appointmentIds: string[];
+    occurrenceCount: number;
+    totalMinutes: number;
+}
+
 export interface CreateUserFromAdminInput {
     name: string;
     email: string;
@@ -725,6 +745,18 @@ export async function createAppointmentFromAdmin(
         CreateAppointmentFromAdminInput,
         { success: boolean; appointmentId: string; bonoWarning?: string }
     >(firebaseFunctions, 'createAppointmentFromAdmin');
+
+    const result = await callable(input);
+    return result.data;
+}
+
+export async function createRecurringAppointmentsFromAdmin(
+    input: CreateRecurringAppointmentsFromAdminInput
+): Promise<CreateRecurringAppointmentsFromAdminResult> {
+    const callable = httpsCallable<
+        CreateRecurringAppointmentsFromAdminInput,
+        CreateRecurringAppointmentsFromAdminResult
+    >(firebaseFunctions, 'createRecurringAppointmentsFromAdmin');
 
     const result = await callable(input);
     return result.data;

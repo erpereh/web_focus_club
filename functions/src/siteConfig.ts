@@ -65,3 +65,32 @@ export function normalizeSiteConfig(config: Partial<SiteConfig> = {}): SiteConfi
     maxCapacity: normalizeMaxCapacity(config.maxCapacity),
   };
 }
+
+export function generateTimeSlots(config: Partial<SiteConfig> = {}): string[] {
+  const normalizedConfig = normalizeSiteConfig(config);
+  const slots: string[] = [];
+  const startMinutes = normalizedConfig.startHour * 60;
+  const endMinutes = normalizedConfig.endHour * 60;
+  for (let minute = startMinutes; minute < endMinutes; minute += normalizedConfig.slotInterval) {
+    const hour = Math.floor(minute / 60);
+    const min = minute % 60;
+    slots.push(`${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}`);
+  }
+  return slots;
+}
+
+export function doesSessionFitWithinSchedule(
+  config: Partial<SiteConfig> = {},
+  startTime: string,
+  durationMinutes: number,
+): boolean {
+  const normalizedConfig = normalizeSiteConfig(config);
+  const [hours, minutes] = startTime.split(":").map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(durationMinutes)) return false;
+
+  const startMinutes = hours * 60 + minutes;
+  const scheduleStart = normalizedConfig.startHour * 60;
+  const scheduleEnd = normalizedConfig.endHour * 60;
+
+  return startMinutes >= scheduleStart && startMinutes + durationMinutes <= scheduleEnd;
+}

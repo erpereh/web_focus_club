@@ -61,6 +61,7 @@ import {
   EyeOff,
   Play,
   MessageCircle,
+  Repeat,
 } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
@@ -81,6 +82,11 @@ import { defaultCMS } from '@/hooks/useFirestore';
 import { toast } from '@/hooks/use-toast';
 import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, ContactoConfig, ContactoCard, BlockedSlot, Trainer, SiteConfig, Bono, BrandingConfig, HeroStat, SandraAchievement, SandraValue, CentroConfig, GaleriaTrainingItem, GaleriaResultado, GaleriaStat } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
+import {
+  formatRecurringSeriesPreview,
+  generateWeeklyOccurrenceDates,
+  MAX_RECURRING_OCCURRENCES,
+} from '@/lib/recurring-appointments';
 import {
   getAppointments,
   getAppointmentsByUser,
@@ -105,6 +111,7 @@ import {
   getUsers,
   getUserProfile,
   createAppointmentFromAdmin as createAppointmentFromAdminFS,
+  createRecurringAppointmentsFromAdmin as createRecurringAppointmentsFromAdminFS,
   createUserFromAdmin as createUserFromAdminFS,
   updateUserFromAdmin as updateUserFromAdminFS,
   deleteUserFromAdmin as deleteUserFromAdminFS,
@@ -201,6 +208,9 @@ interface AdminAppointmentFormState {
   assignedTrainer: string;
   status: 'pending' | 'approved';
   comment: string;
+  bookingType: 'single' | 'recurring';
+  intervalWeeks: number;
+  endDate: string;
 }
 
 const EMPTY_CREATE_CLIENT_FORM: CreateClientFormState = {
@@ -230,6 +240,9 @@ const EMPTY_ADMIN_APPOINTMENT_FORM: AdminAppointmentFormState = {
   assignedTrainer: '',
   status: 'pending',
   comment: '',
+  bookingType: 'single',
+  intervalWeeks: 1,
+  endDate: '',
 };
 
 const CLIENT_ROLE_OPTIONS: { value: AdminUserRole; label: string }[] = [
@@ -1499,6 +1512,24 @@ export default function AdminPage() {
     if (!createAppointmentForm.time) return 'Selecciona una hora disponible.';
     if (!createAppointmentForm.serviceType) return 'Selecciona un servicio.';
     if (!createAppointmentForm.assignedTrainer) return 'Selecciona un entrenador.';
+    if (createAppointmentForm.bookingType === 'recurring') {
+      if (!Number.isInteger(createAppointmentForm.intervalWeeks) || createAppointmentForm.intervalWeeks < 1) {
+        return 'El intervalo debe ser un numero entero de semanas mayor o igual a 1.';
+      }
+      if (!createAppointmentForm.endDate) return 'Selecciona una fecha final.';
+      if (createAppointmentForm.endDate < createAppointmentForm.date) {
+        return 'La fecha final no puede ser anterior a la fecha inicial.';
+      }
+      const occurrenceDates = generateWeeklyOccurrenceDates(
+        createAppointmentForm.date,
+        createAppointmentForm.intervalWeeks,
+        createAppointmentForm.endDate,
+      );
+      if (occurrenceDates.length === 0) return 'La serie debe incluir al menos una sesion.';
+      if (occurrenceDates.length > MAX_RECURRING_OCCURRENCES) {
+        return `La serie no puede superar ${MAX_RECURRING_OCCURRENCES} sesiones.`;
+      }
+    }
     return '';
   };
 
@@ -1515,8 +1546,36 @@ export default function AdminPage() {
     setCreateAppointmentWarning('');
 
     try {
+      if (createAppointmentForm.bookingType === 'recurring') {
+        const result = await createRecurringAppointmentsFromAdminFS({
+          userId: createAppointmentForm.userId,
+          date: createAppointmentForm.date,
+          time: createAppointmentForm.time,
+          durationMinutes: createAppointmentForm.durationMinutes,
+          serviceType: createAppointmentForm.serviceType,
+          assignedTrainer: createAppointmentForm.assignedTrainer,
+          comment: createAppointmentForm.comment.trim(),
+          intervalWeeks: createAppointmentForm.intervalWeeks,
+          endDate: createAppointmentForm.endDate,
+        });
+        await refreshData();
+        closeCreateAppointmentModal();
+        const t = toast({
+          title: 'Entrenamiento recurrente creado',
+          description: `${result.occurrenceCount} sesiones · ${result.totalMinutes} min descontados del bono.`,
+        });
+        setTimeout(() => t.dismiss(), 4500);
+        return;
+      }
+
       const result = await createAppointmentFromAdminFS({
-        ...createAppointmentForm,
+        userId: createAppointmentForm.userId,
+        date: createAppointmentForm.date,
+        time: createAppointmentForm.time,
+        durationMinutes: createAppointmentForm.durationMinutes,
+        serviceType: createAppointmentForm.serviceType,
+        assignedTrainer: createAppointmentForm.assignedTrainer,
+        status: createAppointmentForm.status,
         comment: createAppointmentForm.comment.trim(),
       });
       await refreshData();
@@ -3133,7 +3192,12 @@ export default function AdminPage() {
                                     </div>
                                   )}
                                   <div>
-                                    <h3 className="font-semibold text-[var(--color-text-primary)] text-lg">{appointment.name}</h3>
+                                    <h3 className="font-semibold text-[var(--color-text-primary)] text-lg inline-flex items-center gap-2">
+                                      {appointment.name}
+                                      {appointment.recurrenceSeriesId && (
+                                        <Repeat className="w-4 h-4 text-[var(--color-accent-val)]" aria-label="Entrenamiento recurrente" />
+                                      )}
+                                    </h3>
                                     <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border', statusConfig[appointment.status].color)}>
                                       <StatusIcon className="w-3 h-3" />
                                       {statusConfig[appointment.status].label}
@@ -6624,6 +6688,30 @@ export default function AdminPage() {
                           )}
                         </div>
 
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Tipo de reserva</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {([
+                              { value: 'single' as const, label: 'Cita unica' },
+                              { value: 'recurring' as const, label: 'Entrenamiento recurrente' },
+                            ]).map((option) => (
+                              <button
+                                key={option.value}
+                                type="button"
+                                onClick={() => setCreateAppointmentForm(prev => ({ ...prev, bookingType: option.value }))}
+                                className={cn(
+                                  'px-4 py-3 rounded-xl border text-sm font-medium transition-colors',
+                                  createAppointmentForm.bookingType === option.value
+                                    ? 'bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)]'
+                                    : 'bg-muted/10 border-border text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                                )}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
                         <div className="grid sm:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Fecha *</label>
@@ -6674,6 +6762,7 @@ export default function AdminPage() {
                           </div>
                         </div>
 
+                        {createAppointmentForm.bookingType === 'single' && (
                         <div>
                           <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Estado inicial *</label>
                           <div className="grid grid-cols-2 gap-2">
@@ -6694,6 +6783,59 @@ export default function AdminPage() {
                             ))}
                           </div>
                         </div>
+                        )}
+
+                        {createAppointmentForm.bookingType === 'recurring' && (
+                          <div className="grid sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Repetir cada</label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  step={1}
+                                  value={createAppointmentForm.intervalWeeks}
+                                  onChange={(e) => setCreateAppointmentForm(prev => ({
+                                    ...prev,
+                                    intervalWeeks: Number.parseInt(e.target.value, 10) || 1,
+                                  }))}
+                                  className="w-24 px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                                />
+                                <span className="text-sm text-[var(--color-text-secondary)]">semana(s)</span>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Hasta *</label>
+                              <input
+                                type="date"
+                                value={createAppointmentForm.endDate}
+                                min={createAppointmentForm.date || formatDateInputLocal(new Date())}
+                                onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, endDate: e.target.value }))}
+                                className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {createAppointmentForm.bookingType === 'recurring' && createAppointmentForm.date && createAppointmentForm.endDate && (
+                          <div className="p-3 rounded-xl bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)] text-sm text-[var(--color-text-primary)]">
+                            {(() => {
+                              const dates = generateWeeklyOccurrenceDates(
+                                createAppointmentForm.date,
+                                createAppointmentForm.intervalWeeks,
+                                createAppointmentForm.endDate,
+                              );
+                              if (dates.length === 0) return 'La serie debe incluir al menos una sesion.';
+                              if (dates.length > MAX_RECURRING_OCCURRENCES) {
+                                return `La serie no puede superar ${MAX_RECURRING_OCCURRENCES} sesiones.`;
+                              }
+                              return formatRecurringSeriesPreview(dates.length, createAppointmentForm.durationMinutes);
+                            })()}
+                            <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+                              La disponibilidad de todas las fechas se valida al crear. Si una falla, no se crea ninguna.
+                            </p>
+                          </div>
+                        )}
 
                         <div>
                           <div className="flex items-center justify-between mb-2">
@@ -6743,18 +6885,40 @@ export default function AdminPage() {
                           />
                         </div>
 
-                        {selectedCreateAppointmentClient && !selectedCreateAppointmentBono && (
+                        {createAppointmentForm.bookingType === 'single' && selectedCreateAppointmentClient && !selectedCreateAppointmentBono && (
                           <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-sm flex gap-2">
                             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                             <span>Este cliente no tiene bono activo. Si creas una cita aprobada, se creara sin descuento y el backend devolvera aviso.</span>
                           </div>
                         )}
-                        {selectedCreateAppointmentBono && getBonoMinutosRestantes(selectedCreateAppointmentBono) < createAppointmentForm.durationMinutes && (
+                        {createAppointmentForm.bookingType === 'single' && selectedCreateAppointmentBono && getBonoMinutosRestantes(selectedCreateAppointmentBono) < createAppointmentForm.durationMinutes && (
                           <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-sm flex gap-2">
                             <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
                             <span>El bono activo tiene {formatMinutos(getBonoMinutosRestantes(selectedCreateAppointmentBono))}. Si la cita nace aprobada, se creara sin descuento.</span>
                           </div>
                         )}
+                        {createAppointmentForm.bookingType === 'recurring' && selectedCreateAppointmentClient && !selectedCreateAppointmentBono && (
+                          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/25 text-red-300 text-sm flex gap-2">
+                            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                            <span>Sin un unico bono activo la serie no se puede crear.</span>
+                          </div>
+                        )}
+                        {createAppointmentForm.bookingType === 'recurring' && selectedCreateAppointmentBono && (() => {
+                          const dates = generateWeeklyOccurrenceDates(
+                            createAppointmentForm.date,
+                            createAppointmentForm.intervalWeeks,
+                            createAppointmentForm.endDate,
+                          );
+                          const totalMinutes = dates.length * createAppointmentForm.durationMinutes;
+                          const remaining = getBonoMinutosRestantes(selectedCreateAppointmentBono);
+                          if (dates.length === 0 || remaining >= totalMinutes) return null;
+                          return (
+                            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/25 text-red-300 text-sm flex gap-2">
+                              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                              <span>No hay suficientes minutos en el bono. La serie requiere {totalMinutes} min y quedan {remaining} min.</span>
+                            </div>
+                          );
+                        })()}
                         {createAppointmentWarning && (
                           <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-sm">{createAppointmentWarning}</div>
                         )}
@@ -6772,7 +6936,11 @@ export default function AdminPage() {
                             disabled={creatingAppointment}
                             icon={creatingAppointment ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CalendarClock className="w-4 h-4" />}
                           >
-                            {creatingAppointment ? 'Creando...' : 'Crear cita'}
+                            {creatingAppointment
+                              ? 'Creando...'
+                              : createAppointmentForm.bookingType === 'recurring'
+                                ? 'Crear entrenamiento recurrente'
+                                : 'Crear cita'}
                           </PremiumButton>
                         </div>
                       </form>

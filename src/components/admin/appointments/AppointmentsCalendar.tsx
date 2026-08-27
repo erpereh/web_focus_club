@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Repeat } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { cn } from '@/lib/utils';
 import type { Appointment, Trainer, UserProfile } from '@/types';
@@ -160,6 +160,12 @@ export function AppointmentsCalendar({
                           >
                             <span className="block truncate text-[11px] font-semibold leading-tight">
                               {schedule?.time ?? '—'} {clientName}
+                              {appointment.recurrenceSeriesId ? (
+                                <>
+                                  {' '}
+                                  <Repeat className="ml-0.5 inline h-3 w-3 align-text-top opacity-80" aria-hidden />
+                                </>
+                              ) : null}
                             </span>
                             <span className="mt-0.5 hidden truncate text-[10px] leading-tight opacity-80 sm:block">
                               {durationMinutes ? `${durationMinutes} min` : '—'}

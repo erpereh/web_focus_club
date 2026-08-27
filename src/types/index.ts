@@ -122,6 +122,8 @@ export interface Appointment {
     modifiedBy?: string;
     modifiedAt?: string;
     previousPreferredSlot?: TimeSlot | null;
+    recurrenceSeriesId?: string;
+    recurrenceIndex?: number;
     createdAt: string;
     updatedAt?: string;
 }

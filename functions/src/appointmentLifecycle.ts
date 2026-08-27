@@ -234,6 +234,28 @@ export function reconcileOwnAppointmentReschedule(input: ReconcileOwnAppointment
   return { ok: true };
 }
 
+export function slotOccupancyDocId(date: string, time: string): string {
+  return `${date}_${time}`;
+}
+
+/** 15-minute blocks plus legacy 30-minute floors. Same helper used by occupancy writes. */
+export function getSlotBlocks(startTime: string, durationMinutes: number): string[] {
+  const [hours, minutes] = startTime.split(":").map(Number);
+  const startTotal = hours * 60 + minutes;
+  const numBlocks = Math.ceil(durationMinutes / 15);
+  const blocks = new Set<string>();
+
+  for (let index = 0; index < numBlocks; index += 1) {
+    const total = startTotal + index * 15;
+    const legacyTotal = Math.floor(total / 30) * 30;
+    [total, legacyTotal].forEach((blockTotal) => {
+      blocks.add(`${String(Math.floor(blockTotal / 60)).padStart(2, "0")}:${String(blockTotal % 60).padStart(2, "0")}`);
+    });
+  }
+
+  return Array.from(blocks);
+}
+
 export function isSlotAtCapacity(currentCount: number, maxCapacity: number): boolean {
   return currentCount >= maxCapacity;
 }

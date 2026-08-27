@@ -123,6 +123,12 @@ export function AppointmentReadOnlyModal({
             <DetailRow label="Teléfono" value={displayText(appointment.phone)} />
             <DetailRow label="Entrenador" value={displayText(trainerName)} />
             <DetailRow label="Tipo" value={displayText(appointment.sessionType || appointment.serviceType)} />
+            {appointment.recurrenceSeriesId && (
+              <>
+                <DetailRow label="Reserva" value="Entrenamiento recurrente" />
+                <DetailRow label="Serie" value={appointment.recurrenceSeriesId} />
+              </>
+            )}
           </dl>
 
           <div className="mt-5">
