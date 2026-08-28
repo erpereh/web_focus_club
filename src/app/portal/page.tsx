@@ -47,8 +47,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import type { TimeSlot, Appointment, Bono, Trainer } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import {
+  formatRecurringSeriesPreview,
+  getRecurringEndDateOptions,
+} from '@/lib/recurring-appointments';
+import {
   createAppointmentSecure,
+  createRecurringAppointments,
   cancelOwnAppointment,
+  cancelOwnRecurringAppointmentSeries,
   updateOwnAppointmentSlot,
   getAppointmentsByUser,
   getActiveBonoByUser,
@@ -75,6 +81,9 @@ interface FormData {
   duration: '30' | '45' | '60';
   preferredSlot: TimeSlot | null;
   reason: string;
+  bookingType: 'single' | 'recurring';
+  intervalDays: number;
+  endDate: string;
 }
 
 // ============================================
@@ -164,6 +173,9 @@ export default function PortalPage() {
     duration: '60',
     preferredSlot: null,
     reason: '',
+    bookingType: 'single',
+    intervalDays: 3,
+    endDate: '',
   });
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -526,12 +538,28 @@ export default function PortalPage() {
       return;
     }
 
+    if (formData.bookingType === 'recurring' && !formData.endDate) {
+      setSubmitError('Selecciona hasta que fecha quieres repetir el entrenamiento.');
+      return;
+    }
+
     try {
-      await createAppointmentSecure({
-        duration: formData.duration,
-        preferredSlot: formData.preferredSlot,
-        reason: formData.reason,
-      });
+      if (formData.bookingType === 'recurring' && formData.preferredSlot) {
+        await createRecurringAppointments({
+          date: formData.preferredSlot.date,
+          time: formData.preferredSlot.time,
+          durationMinutes: durationMinutes as 30 | 45 | 60,
+          intervalDays: formData.intervalDays,
+          endDate: formData.endDate,
+          comment: formData.reason,
+        });
+      } else {
+        await createAppointmentSecure({
+          duration: formData.duration,
+          preferredSlot: formData.preferredSlot,
+          reason: formData.reason,
+        });
+      }
 
       // Refrescar citas
       const updated = await getAppointmentsByUser(user.uid);
@@ -546,6 +574,9 @@ export default function PortalPage() {
           duration: '60',
           preferredSlot: null,
           reason: '',
+          bookingType: 'single',
+          intervalDays: 3,
+          endDate: '',
         });
         setShowReservaDrawer(false);
       }, 2000);
@@ -569,12 +600,16 @@ export default function PortalPage() {
     setShowRescheduleDrawer(true);
   };
 
-  const handleCancelAppointment = async (appointmentId: string) => {
+  const handleCancelAppointment = async (appointment: Appointment) => {
     if (!window.confirm('¿Seguro que quieres cancelar esta cita? Esta acción devolverá los minutos reservados.')) return;
     setAppointmentActionBusy(true);
     setAppointmentActionError('');
     try {
-      await cancelOwnAppointment(appointmentId);
+      if (appointment.recurrenceSeriesId && appointment.status === 'pending') {
+        await cancelOwnRecurringAppointmentSeries(appointment.recurrenceSeriesId);
+      } else {
+        await cancelOwnAppointment(appointment.id);
+      }
       await refreshUserAppointments();
       setPortalView('dashboard');
       setSelectedAppointment(null);
@@ -1568,6 +1603,7 @@ export default function PortalPage() {
 
                         {canManageAppointment && (
                           <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                            {!appointment.recurrenceSeriesId && (
                             <PremiumButton
                               variant="outline"
                               onClick={() => openRescheduleDrawer(appointment)}
@@ -1577,14 +1613,19 @@ export default function PortalPage() {
                             >
                               Modificar cita
                             </PremiumButton>
+                            )}
                             <PremiumButton
                               variant="ghost"
-                              onClick={() => handleCancelAppointment(appointment.id)}
+                              onClick={() => handleCancelAppointment(appointment)}
                               disabled={appointmentActionBusy}
                               icon={<XCircle className="w-4 h-4" />}
                               className="flex-1 text-destructive hover:bg-destructive/10"
                             >
-                              {appointmentActionBusy ? 'Procesando...' : 'Cancelar cita'}
+                              {appointmentActionBusy
+                                ? 'Procesando...'
+                                : appointment.recurrenceSeriesId && appointment.status === 'pending'
+                                  ? 'Cancelar solicitud recurrente'
+                                  : 'Cancelar cita'}
                             </PremiumButton>
                           </div>
                         )}
@@ -1706,13 +1747,82 @@ export default function PortalPage() {
                       )}
                     </GlassCard>
 
+
+                    <GlassCard className="p-5">
+                      <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-4">Tipo de reserva</h3>
+                      <div className="grid grid-cols-2 gap-2">
+                        {([
+                          { value: 'single', label: 'Sesion unica' },
+                          { value: 'recurring', label: 'Entrenamiento recurrente' },
+                        ] as const).map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, bookingType: option.value, endDate: '' }))}
+                            className={cn(
+                              'px-4 py-3 rounded-xl border text-sm font-medium transition-colors',
+                              formData.bookingType === option.value
+                                ? 'bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)]'
+                                : 'bg-muted/10 border-border text-[var(--color-text-secondary)]'
+                            )}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                      {formData.bookingType === 'recurring' && (
+                        <div className="mt-4 space-y-3">
+                          <div className="flex items-center gap-2">
+                            <label className="text-sm text-[var(--color-text-secondary)]">Cada</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={formData.intervalDays}
+                              onChange={(e) => setFormData(prev => ({
+                                ...prev,
+                                intervalDays: Number.parseInt(e.target.value, 10) || 1,
+                                endDate: '',
+                              }))}
+                              className="w-20 px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)]"
+                            />
+                            <span className="text-sm text-[var(--color-text-secondary)]">dias</span>
+                          </div>
+                          <div>
+                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Hasta</label>
+                            <select
+                              value={formData.endDate}
+                              onChange={(e) => setFormData(prev => ({ ...prev, endDate: e.target.value }))}
+                              disabled={!formData.preferredSlot || (formData.bookingType === 'recurring' && !formData.endDate)}
+                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)]"
+                            >
+                              <option value="">Selecciona la ultima sesion</option>
+                              {formData.preferredSlot && getRecurringEndDateOptions({
+                                startDate: formData.preferredSlot.date,
+                                intervalDays: formData.intervalDays,
+                                durationMinutes: parseInt(formData.duration, 10),
+                                remainingMinutes: activeBono ? getBonoMinutosRestantes(activeBono) : 0,
+                                bonoExpirationDate: activeBono?.fechaExpiracion,
+                              }).map((option) => (
+                                <option key={option.endDate} value={option.endDate}>
+                                  {option.endDate} ? {formatRecurringSeriesPreview(option.occurrenceCount, parseInt(formData.duration, 10))}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <p className="text-xs text-[var(--color-text-secondary)]">
+                            Las sesiones quedaran pendientes de aprobacion. Los minutos se reservan al enviar la solicitud.
+                          </p>
+                        </div>
+                      )}
+                    </GlassCard>
+
                     {/* Calendario */}
                     <GlassCard className="p-5">
                       <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1 flex items-center gap-2">
                         <span className="w-6 h-6 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs flex items-center justify-center">2</span>
                         Franja Horaria
                       </h3>
-                      <p className="text-xs text-[var(--color-text-secondary)] mb-4 ml-8">Elige la franja que prefieras.</p>
+                      <p className="text-xs text-[var(--color-text-secondary)] mb-4 ml-8">{formData.bookingType === 'recurring' ? 'Elige la primera franja. El resto se calcula automaticamente.' : 'Elige la franja que prefieras.'}</p>
                       <InteractiveCalendar
                         selectedSlot={formData.preferredSlot}
                         onSelectSlot={handleSelectSlot}
@@ -1748,7 +1858,7 @@ export default function PortalPage() {
                       <PremiumButton
                         variant="cta"
                         onClick={handleSubmitAppointment}
-                        disabled={!formData.preferredSlot}
+                        disabled={!formData.preferredSlot || (formData.bookingType === 'recurring' && !formData.endDate)}
                         icon={<CheckCircle className="w-4 h-4" />}
                         className="flex-1"
                       >

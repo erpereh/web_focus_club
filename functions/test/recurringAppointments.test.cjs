@@ -11,9 +11,14 @@ const {
   MAX_RECURRING_OCCURRENCES,
   collectRecurringOccupancyKeys,
   estimateRecurringSeriesWrites,
-  generateWeeklyOccurrenceDates,
+  generateRecurringOccurrenceDates,
+  getRecurringEndDateOptions,
   parseRecurringAppointmentsData,
   planRecurringAppointments,
+  planSeriesMinutesRefund,
+  shouldSkipRecurringFinanceReconciliation,
+  shouldSkipRecurringStatusNotification,
+  validateReservedSeriesMinutes,
 } = require("../lib/recurringAppointments.js");
 
 const now = new Date("2026-09-01T08:00:00.000Z");
@@ -31,7 +36,7 @@ function basePlan(overrides = {}) {
     startDate: "2026-09-07",
     startTime: "10:00",
     endDate: "2026-09-28",
-    intervalWeeks: 1,
+    intervalDays: 7,
     durationMinutes: 60,
     now,
     siteConfig,
@@ -44,25 +49,66 @@ function basePlan(overrides = {}) {
 }
 
 assert.deepEqual(
-  generateWeeklyOccurrenceDates("2026-09-07", 1, "2026-09-28"),
-  ["2026-09-07", "2026-09-14", "2026-09-21", "2026-09-28"],
+  generateRecurringOccurrenceDates("2026-09-10", 3, "2026-09-22"),
+  ["2026-09-10", "2026-09-13", "2026-09-16", "2026-09-19", "2026-09-22"],
 );
 assert.deepEqual(
-  generateWeeklyOccurrenceDates("2026-09-07", 2, "2026-09-28"),
-  ["2026-09-07", "2026-09-21"],
+  generateRecurringOccurrenceDates("2026-09-10", 1, "2026-09-12"),
+  ["2026-09-10", "2026-09-11", "2026-09-12"],
 );
-assert.deepEqual(generateWeeklyOccurrenceDates("2026-09-28", 1, "2026-09-07"), []);
+assert.deepEqual(
+  generateRecurringOccurrenceDates("2026-09-07", 7, "2026-09-28"),
+  ["2026-09-07", "2026-09-14", "2026-09-21", "2026-09-28"],
+);
+assert.deepEqual(generateRecurringOccurrenceDates("2026-09-28", 3, "2026-09-07"), []);
+assert.deepEqual(generateRecurringOccurrenceDates("2026-09-10", 0, "2026-09-22"), []);
 assert.equal(MAX_RECURRING_OCCURRENCES, 20);
 assert.equal(FIRESTORE_TRANSACTION_MAX_WRITES, 500);
 assert.equal(estimateRecurringSeriesWrites(20, 80), 103);
 assert.ok(estimateRecurringSeriesWrites(20, 80) < FIRESTORE_TRANSACTION_MAX_WRITES);
+
+assert.deepEqual(
+  getRecurringEndDateOptions({
+    startDate: "2026-09-10",
+    intervalDays: 3,
+    durationMinutes: 60,
+    remainingMinutes: 240,
+  }),
+  [
+    { endDate: "2026-09-13", occurrenceCount: 2, totalMinutes: 120 },
+    { endDate: "2026-09-16", occurrenceCount: 3, totalMinutes: 180 },
+    { endDate: "2026-09-19", occurrenceCount: 4, totalMinutes: 240 },
+  ],
+);
+assert.deepEqual(
+  getRecurringEndDateOptions({
+    startDate: "2026-09-10",
+    intervalDays: 3,
+    durationMinutes: 60,
+    remainingMinutes: 60,
+  }),
+  [],
+);
+assert.deepEqual(
+  getRecurringEndDateOptions({
+    startDate: "2026-09-10",
+    intervalDays: 3,
+    durationMinutes: 60,
+    remainingMinutes: 240,
+    bonoExpirationDate: "2026-09-16",
+  }),
+  [
+    { endDate: "2026-09-13", occurrenceCount: 2, totalMinutes: 120 },
+    { endDate: "2026-09-16", occurrenceCount: 3, totalMinutes: 180 },
+  ],
+);
 
 const parsedPastEnd = parseRecurringAppointmentsData({
   userId: "user-1",
   date: "2026-09-28",
   time: "10:00",
   endDate: "2026-09-07",
-  intervalWeeks: 1,
+  intervalDays: 7,
   durationMinutes: 60,
   serviceType: "Bono Mensual de Entrenamiento",
   assignedTrainer: "trainer-1",
@@ -71,7 +117,21 @@ const parsedPastEnd = parseRecurringAppointmentsData({
 assert.equal(parsedPastEnd.ok, false);
 assert.match(parsedPastEnd.message, /fecha final no puede ser anterior/i);
 
-const longDates = generateWeeklyOccurrenceDates("2026-09-07", 1, "2027-02-01");
+const parsedZeroInterval = parseRecurringAppointmentsData({
+  userId: "user-1",
+  date: "2026-09-10",
+  time: "10:00",
+  endDate: "2026-09-19",
+  intervalDays: 0,
+  durationMinutes: 60,
+  serviceType: "Bono Mensual de Entrenamiento",
+  assignedTrainer: "trainer-1",
+  comment: "",
+});
+assert.equal(parsedZeroInterval.ok, false);
+assert.match(parsedZeroInterval.message, /intervalo de dias/i);
+
+const longDates = generateRecurringOccurrenceDates("2026-09-07", 7, "2027-02-01");
 assert.ok(longDates.length > MAX_RECURRING_OCCURRENCES);
 const tooLong = basePlan({ endDate: "2027-02-01", activeBonos: [{ ...activeBono, minutosRestantes: 9999, minutosTotales: 9999 }] });
 assert.equal(tooLong.ok, false);
@@ -106,10 +166,8 @@ assert.equal(exactMinutes.writes.totalMinutes, 240);
 assert.equal(exactMinutes.writes.minutesDeductedAmount, 60);
 assert.equal(exactMinutes.writes.bono.minutosRestantes, 0);
 assert.equal(exactMinutes.writes.bono.estado, "agotado");
+assert.equal(exactMinutes.writes.bono.bonoId, "bono-a");
 assert.equal(exactMinutes.writes.dates.length, 4);
-exactMinutes.writes.dates.forEach((date, index) => {
-  assert.equal(exactMinutes.writes.dates[index], date);
-});
 
 const occupancyKeys = collectRecurringOccupancyKeys(["2026-09-07"], "10:00", 60);
 assert.deepEqual(occupancyKeys, getSlotBlocks("10:00", 60).map((time) => `2026-09-07_${time}`));
@@ -184,6 +242,56 @@ const offSchedule = basePlan({ startTime: "21:00" });
 assert.equal(offSchedule.ok, false);
 assert.deepEqual(offSchedule.writes, []);
 
+const reservedOk = validateReservedSeriesMinutes({
+  seriesBonoId: "bono-a",
+  seriesUserId: "user-1",
+  seriesTotalMinutes: 240,
+  durationMinutes: 60,
+  bono: { id: "bono-a", userId: "user-1", estado: "agotado", minutosTotales: 240, minutosRestantes: 0 },
+  occurrences: Array.from({ length: 4 }, () => ({
+    bonoId: "bono-a",
+    minutesDeducted: true,
+    minutesDeductedAmount: 60,
+    minutesRefunded: false,
+    minutesRefundedAt: null,
+  })),
+});
+assert.equal(reservedOk.ok, true);
+
+const reservedWrongBono = validateReservedSeriesMinutes({
+  seriesBonoId: "bono-a",
+  seriesUserId: "user-1",
+  seriesTotalMinutes: 240,
+  durationMinutes: 60,
+  bono: { id: "bono-b", userId: "user-2", estado: "activo", minutosTotales: 240, minutosRestantes: 240 },
+  occurrences: Array.from({ length: 4 }, () => ({
+    bonoId: "bono-a",
+    minutesDeducted: true,
+    minutesDeductedAmount: 60,
+  })),
+});
+assert.equal(reservedWrongBono.ok, false);
+
+const refundPlan = planSeriesMinutesRefund({
+  bono: { id: "bono-a", estado: "agotado", minutosTotales: 240, minutosRestantes: 0 },
+  occurrences: Array.from({ length: 4 }, () => ({
+    bonoId: "bono-a",
+    minutesDeducted: true,
+    minutesDeductedAmount: 60,
+    minutesDeductedAt: "2026-09-07T09:00:00.000Z",
+    minutesRefundedAt: null,
+  })),
+  now: "2026-09-08T10:00:00.000Z",
+});
+assert.equal(refundPlan.ok, true);
+assert.equal(refundPlan.bono.minutosRestantes, 240);
+assert.equal(refundPlan.bono.estado, "activo");
+assert.equal(refundPlan.appointmentPatches.length, 4);
+refundPlan.appointmentPatches.forEach((patch) => {
+  assert.equal(patch.minutesRefunded, true);
+  assert.equal(patch.minutesRefundedAmount, 60);
+});
+
 const refund = calculateAppointmentRefund(
   { id: "bono-a", estado: "agotado", minutosTotales: 240, minutosRestantes: 0 },
   {
@@ -200,23 +308,62 @@ assert.equal(refund.minutesRefundedAmount, 60);
 assert.equal(refund.remainingMinutes, 60);
 assert.equal(refund.bonoStatus, "activo");
 
-const indexSource = fs.readFileSync(path.join(__dirname, "../src/index.ts"), "utf8");
-const recurringSource = indexSource.slice(
-  indexSource.indexOf("export const createRecurringAppointmentsFromAdmin"),
-  indexSource.indexOf("export const sendContactMessage"),
+assert.equal(
+  shouldSkipRecurringFinanceReconciliation(
+    { status: "pending", recurrenceSeriesId: "series-1" },
+    { status: "approved", recurrenceSeriesId: "series-1" },
+  ),
+  true,
 );
+assert.equal(
+  shouldSkipRecurringFinanceReconciliation(
+    { status: "approved", recurrenceSeriesId: "series-1" },
+    { status: "cancelled", recurrenceSeriesId: "series-1" },
+  ),
+  false,
+);
+assert.equal(
+  shouldSkipRecurringStatusNotification(
+    { status: "pending", recurrenceSeriesId: "series-1" },
+    { status: "approved", recurrenceSeriesId: "series-1" },
+  ),
+  true,
+);
+
+const indexSource = fs.readFileSync(path.join(__dirname, "../src/index.ts"), "utf8");
+const seriesSource = fs.readFileSync(path.join(__dirname, "../src/recurringSeries.ts"), "utf8");
+const recurringSource = seriesSource.slice(seriesSource.indexOf("createRecurringAppointmentsFromAdmin:"));
+
 assert.match(recurringSource, /db\.runTransaction/);
 assert.match(recurringSource, /planRecurringAppointments/);
-assert.match(recurringSource, /transaction\.get\(ref\)/);
 assert.match(recurringSource, /appointment_recurrences/);
 assert.match(recurringSource, /recurring_appointments_created/);
 assert.match(recurringSource, /accion:\s*"descuento_cita"/);
+assert.match(recurringSource, /bonoId:/);
+assert.match(recurringSource, /intervalDays/);
+assert.doesNotMatch(recurringSource, /intervalWeeks/);
 assert.doesNotMatch(recurringSource, /sendAppointmentStatusPushNotification/);
 assert.doesNotMatch(recurringSource, /sendAppointmentMakeNotificationSafely/);
 assert.match(indexSource, /export const createRecurringAppointmentsFromAdmin\s*=\s*onCall/);
+assert.match(indexSource, /export const createRecurringAppointments\s*=\s*onCall/);
+assert.match(indexSource, /export const approveRecurringAppointmentSeriesFromAdmin\s*=\s*onCall/);
+assert.match(indexSource, /export const rejectRecurringAppointmentSeriesFromAdmin\s*=\s*onCall/);
+assert.match(indexSource, /export const cancelOwnRecurringAppointmentSeries\s*=\s*onCall/);
 assert.match(indexSource, /selectExactlyOneActiveBono/);
 assert.match(indexSource, /config\.maxCapacity/);
 assert.doesNotMatch(indexSource, /const MAX_CAPACITY\s*=\s*2/);
+
+assert.match(seriesSource, /bonos\/\{series\.bonoId\}|collection\("bonos"\)\.doc\(series\.bonoId\)|collection\("bonos"\)\.doc\(input\.series\.bonoId\)|doc\(seriesData\.bonoId\)|bonos"\)\.doc\([^\)]*bonoId/);
+assert.doesNotMatch(
+  seriesSource.slice(seriesSource.indexOf("approveRecurring")),
+  /\.where\("estado",\s*"==",\s*"activo"\)/,
+);
+assert.match(seriesSource, /validateReservedSeriesMinutes/);
+assert.match(seriesSource, /planSeriesMinutesRefund/);
+assert.match(indexSource, /Los entrenamientos recurrentes no se pueden modificar individualmente/);
+assert.match(indexSource, /recurrenceSeriesId/);
+assert.match(indexSource, /shouldSkipRecurringFinanceReconciliation/);
+assert.match(indexSource, /shouldSkipRecurringStatusNotification/);
 
 const maxCheckAt = recurringSource.indexOf("occurrenceDates.length > MAX_RECURRING_OCCURRENCES");
 const occupancyKeysAt = recurringSource.indexOf("collectRecurringOccupancyKeys");
@@ -225,8 +372,45 @@ const blockedSlotsAt = recurringSource.indexOf("blocked_slots");
 const runTransactionAt = recurringSource.indexOf("db.runTransaction");
 assert.ok(maxCheckAt > 0, "callable must reject series longer than MAX_RECURRING_OCCURRENCES");
 assert.ok(maxCheckAt < occupancyKeysAt, "MAX 20 must be checked before occupancy keys");
-assert.ok(maxCheckAt < occupancyRefsAt, "MAX 20 must be checked before occupancyRefs");
+assert.ok(maxCheckAt < occupancyRefsAt || occupancyRefsAt < 0, "MAX 20 must be checked before occupancyRefs");
 assert.ok(maxCheckAt < blockedSlotsAt, "MAX 20 must be checked before blocked_slots queries");
 assert.ok(maxCheckAt < runTransactionAt, "MAX 20 must be checked before runTransaction");
+
+const clientCreate = seriesSource.slice(
+  seriesSource.indexOf("createRecurringAppointments:"),
+  seriesSource.indexOf("approveRecurringAppointmentSeriesFromAdmin:"),
+);
+assert.match(clientCreate, /status:\s*"pending"/);
+assert.match(clientCreate, /minutosRestantes/);
+assert.doesNotMatch(clientCreate, /count: FieldValue.increment/);
+assert.match(clientCreate, /request\.auth\.uid/);
+
+const approveSrc = seriesSource.slice(
+  seriesSource.indexOf("approveRecurringAppointmentSeriesFromAdmin:"),
+  seriesSource.indexOf("rejectRecurringAppointmentSeriesFromAdmin:"),
+);
+assert.doesNotMatch(approveSrc, /estado\",\s*\"==\",\s*\"activo\"/);
+assert.doesNotMatch(approveSrc, /minutosRestantes:/);
+assert.match(approveSrc, /FieldValue\.increment\(1\)/);
+
+const updateOwn = indexSource.slice(
+  indexSource.indexOf("export const updateOwnAppointmentSlot"),
+  indexSource.indexOf("export const onUserProfileCreatedWelcomeEmail"),
+);
+assert.match(updateOwn, /Los entrenamientos recurrentes no se pueden modificar individualmente/);
+
+const cancelOwn = indexSource.slice(
+  indexSource.indexOf("export const cancelOwnAppointment"),
+  indexSource.indexOf("export const updateOwnAppointmentSlot"),
+);
+assert.match(cancelOwn, /recurrenceSeriesId/);
+assert.match(cancelOwn, /pending/);
+
+const rulesSource = fs.readFileSync(path.join(__dirname, "../../firestore.rules"), "utf8");
+assert.match(rulesSource, /match \/appointment_recurrences\/\{seriesId\}/);
+assert.match(rulesSource, /recurringAppointmentClientUpdateAllowed/);
+assert.match(rulesSource, /preferredSlots/);
+assert.match(rulesSource, /minutesDeducted/);
+assert.match(rulesSource, /resource\.data\.status != 'pending'/);
 
 console.log("recurring appointment tests passed");

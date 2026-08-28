@@ -128,6 +128,26 @@ export interface Appointment {
     updatedAt?: string;
 }
 
+
+export interface AppointmentRecurrence {
+    id: string;
+    userId: string;
+    serviceType: string;
+    duration: string;
+    assignedTrainer?: string;
+    startDate: string;
+    startTime: string;
+    intervalDays: number;
+    endDate: string;
+    occurrenceCount: number;
+    totalMinutes: number;
+    bonoId: string;
+    status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+    origin: 'admin' | 'client';
+    createdAt: string;
+    updatedAt?: string;
+}
+
 export interface BlockedSlot {
     id: string;
     date: string;       // "YYYY-MM-DD"

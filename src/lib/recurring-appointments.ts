@@ -2,6 +2,12 @@ export const MAX_RECURRING_OCCURRENCES = 20;
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+export interface RecurringEndDateOption {
+    endDate: string;
+    occurrenceCount: number;
+    totalMinutes: number;
+}
+
 function isIsoDate(value: string): boolean {
     if (!ISO_DATE_RE.test(value)) return false;
     const [year, month, day] = value.split('-').map(Number);
@@ -16,22 +22,68 @@ export function addUtcDays(dateStr: string, days: number): string {
     return utc.toISOString().slice(0, 10);
 }
 
-export function generateWeeklyOccurrenceDates(
+function civilDateFromExpiration(value: string | undefined): string | undefined {
+    if (!value) return undefined;
+    if (isIsoDate(value)) return value;
+    const expiration = new Date(value);
+    if (Number.isNaN(expiration.getTime())) return undefined;
+    const utc = new Date(Date.UTC(expiration.getFullYear(), expiration.getMonth(), expiration.getDate()));
+    return utc.toISOString().slice(0, 10);
+}
+
+export function generateRecurringOccurrenceDates(
     startDate: string,
-    intervalWeeks: number,
+    intervalDays: number,
     endDate: string,
 ): string[] {
     if (!isIsoDate(startDate) || !isIsoDate(endDate)) return [];
-    if (!Number.isInteger(intervalWeeks) || intervalWeeks < 1) return [];
+    if (!Number.isInteger(intervalDays) || intervalDays < 1) return [];
     if (endDate < startDate) return [];
 
     const dates: string[] = [];
     let current = startDate;
     while (current <= endDate) {
         dates.push(current);
-        current = addUtcDays(current, intervalWeeks * 7);
+        current = addUtcDays(current, intervalDays);
     }
     return dates;
+}
+
+export function getRecurringEndDateOptions(input: {
+    startDate: string;
+    intervalDays: number;
+    durationMinutes: number;
+    remainingMinutes: number;
+    bonoExpirationDate?: string | null;
+    maxOccurrences?: number;
+}): RecurringEndDateOption[] {
+    if (!isIsoDate(input.startDate)) return [];
+    if (!Number.isInteger(input.intervalDays) || input.intervalDays < 1) return [];
+    if (![30, 45, 60].includes(input.durationMinutes) || input.durationMinutes <= 0) return [];
+
+    const maxByMinutes = Math.floor(Math.max(0, input.remainingMinutes) / input.durationMinutes);
+    const maxOccurrences = Math.min(
+        input.maxOccurrences ?? MAX_RECURRING_OCCURRENCES,
+        MAX_RECURRING_OCCURRENCES,
+        maxByMinutes,
+    );
+    if (maxOccurrences < 2) return [];
+
+    const expirationDate = input.bonoExpirationDate ? civilDateFromExpiration(input.bonoExpirationDate) : undefined;
+    const options: RecurringEndDateOption[] = [];
+    let current = input.startDate;
+    for (let index = 0; index < maxOccurrences; index += 1) {
+        if (expirationDate && current > expirationDate) break;
+        if (index >= 1) {
+            options.push({
+                endDate: current,
+                occurrenceCount: index + 1,
+                totalMinutes: (index + 1) * input.durationMinutes,
+            });
+        }
+        current = addUtcDays(current, input.intervalDays);
+    }
+    return options;
 }
 
 export function formatRecurringSeriesPreview(occurrenceCount: number, durationMinutes: number): string {

@@ -545,7 +545,7 @@ export interface CreateRecurringAppointmentsFromAdminInput {
     serviceType: string;
     assignedTrainer: string;
     comment: string;
-    intervalWeeks: number;
+    intervalDays: number;
     endDate: string;
 }
 
@@ -760,6 +760,57 @@ export async function createRecurringAppointmentsFromAdmin(
 
     const result = await callable(input);
     return result.data;
+}
+
+export async function createRecurringAppointments(input: {
+    date: string;
+    time: string;
+    durationMinutes: 30 | 45 | 60;
+    intervalDays: number;
+    endDate: string;
+    comment?: string;
+}): Promise<{ success: boolean; seriesId: string; appointmentIds: string[]; occurrenceCount: number; totalMinutes: number }> {
+    const callable = httpsCallable<
+        typeof input,
+        { success: boolean; seriesId: string; appointmentIds: string[]; occurrenceCount: number; totalMinutes: number }
+    >(firebaseFunctions, 'createRecurringAppointments');
+    const result = await callable(input);
+    return result.data;
+}
+
+export async function approveRecurringAppointmentSeriesFromAdmin(input: {
+    seriesId: string;
+    assignedTrainer?: string;
+    sessionType?: string;
+}): Promise<{ success: boolean; seriesId: string; appointmentIds: string[] }> {
+    const callable = httpsCallable<
+        typeof input,
+        { success: boolean; seriesId: string; appointmentIds: string[] }
+    >(firebaseFunctions, 'approveRecurringAppointmentSeriesFromAdmin');
+    const result = await callable(input);
+    return result.data;
+}
+
+export async function rejectRecurringAppointmentSeriesFromAdmin(seriesId: string): Promise<void> {
+    const callable = httpsCallable<{ seriesId: string }, { success: boolean }>(
+        firebaseFunctions,
+        'rejectRecurringAppointmentSeriesFromAdmin',
+    );
+    await callable({ seriesId });
+}
+
+export async function cancelOwnRecurringAppointmentSeries(seriesId: string): Promise<void> {
+    const callable = httpsCallable<{ seriesId: string }, { success: boolean }>(
+        firebaseFunctions,
+        'cancelOwnRecurringAppointmentSeries',
+    );
+    await callable({ seriesId });
+}
+
+export async function getAppointmentRecurrence(seriesId: string) {
+    const snap = await getDoc(doc(db, 'appointment_recurrences', seriesId));
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...snap.data() };
 }
 
 export async function sendContactMessage(input: {

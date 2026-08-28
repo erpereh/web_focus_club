@@ -84,7 +84,8 @@ import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaCo
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import {
   formatRecurringSeriesPreview,
-  generateWeeklyOccurrenceDates,
+  generateRecurringOccurrenceDates,
+  getRecurringEndDateOptions,
   MAX_RECURRING_OCCURRENCES,
 } from '@/lib/recurring-appointments';
 import {
@@ -112,6 +113,8 @@ import {
   getUserProfile,
   createAppointmentFromAdmin as createAppointmentFromAdminFS,
   createRecurringAppointmentsFromAdmin as createRecurringAppointmentsFromAdminFS,
+  approveRecurringAppointmentSeriesFromAdmin as approveRecurringAppointmentSeriesFromAdminFS,
+  rejectRecurringAppointmentSeriesFromAdmin as rejectRecurringAppointmentSeriesFromAdminFS,
   createUserFromAdmin as createUserFromAdminFS,
   updateUserFromAdmin as updateUserFromAdminFS,
   deleteUserFromAdmin as deleteUserFromAdminFS,
@@ -209,7 +212,7 @@ interface AdminAppointmentFormState {
   status: 'pending' | 'approved';
   comment: string;
   bookingType: 'single' | 'recurring';
-  intervalWeeks: number;
+  intervalDays: number;
   endDate: string;
 }
 
@@ -241,7 +244,7 @@ const EMPTY_ADMIN_APPOINTMENT_FORM: AdminAppointmentFormState = {
   status: 'pending',
   comment: '',
   bookingType: 'single',
-  intervalWeeks: 1,
+  intervalDays: 1,
   endDate: '',
 };
 
@@ -1029,6 +1032,10 @@ export default function AdminPage() {
   // Estado para modal "Modificar Franja"
   const [showEditSlotModal, setShowEditSlotModal] = useState(false);
   const [editSlotData, setEditSlotData] = useState<TimeSlot>({ date: '', time: '' });
+  const [showSeriesApprovalModal, setShowSeriesApprovalModal] = useState(false);
+  const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
+  const [seriesApprovalTrainer, setSeriesApprovalTrainer] = useState('');
+  const [seriesActionBusy, setSeriesActionBusy] = useState(false);
 
   // Estado para horarios bloqueados
   const [blockedSlots, setBlockedSlots] = useState<BlockedSlot[]>([]);
@@ -1513,19 +1520,16 @@ export default function AdminPage() {
     if (!createAppointmentForm.serviceType) return 'Selecciona un servicio.';
     if (!createAppointmentForm.assignedTrainer) return 'Selecciona un entrenador.';
     if (createAppointmentForm.bookingType === 'recurring') {
-      if (!Number.isInteger(createAppointmentForm.intervalWeeks) || createAppointmentForm.intervalWeeks < 1) {
-        return 'El intervalo debe ser un numero entero de semanas mayor o igual a 1.';
+      if (!Number.isInteger(createAppointmentForm.intervalDays) || createAppointmentForm.intervalDays < 1) {
+        return 'El intervalo debe ser un numero entero de dias mayor o igual a 1.';
       }
       if (!createAppointmentForm.endDate) return 'Selecciona una fecha final.';
-      if (createAppointmentForm.endDate < createAppointmentForm.date) {
-        return 'La fecha final no puede ser anterior a la fecha inicial.';
-      }
-      const occurrenceDates = generateWeeklyOccurrenceDates(
+      const occurrenceDates = generateRecurringOccurrenceDates(
         createAppointmentForm.date,
-        createAppointmentForm.intervalWeeks,
+        createAppointmentForm.intervalDays,
         createAppointmentForm.endDate,
       );
-      if (occurrenceDates.length === 0) return 'La serie debe incluir al menos una sesion.';
+      if (occurrenceDates.length < 2) return 'Un entrenamiento recurrente requiere al menos 2 sesiones.';
       if (occurrenceDates.length > MAX_RECURRING_OCCURRENCES) {
         return `La serie no puede superar ${MAX_RECURRING_OCCURRENCES} sesiones.`;
       }
@@ -1555,7 +1559,7 @@ export default function AdminPage() {
           serviceType: createAppointmentForm.serviceType,
           assignedTrainer: createAppointmentForm.assignedTrainer,
           comment: createAppointmentForm.comment.trim(),
-          intervalWeeks: createAppointmentForm.intervalWeeks,
+          intervalDays: createAppointmentForm.intervalDays,
           endDate: createAppointmentForm.endDate,
         });
         await refreshData();
@@ -1820,6 +1824,50 @@ export default function AdminPage() {
     setShowApprovalModal(false);
     setApprovalData({ assignedTrainer: '', sessionType: '' });
     setSelectedAppointmentId(null);
+  };
+
+  const handleApproveRecurringSeries = async () => {
+    if (!selectedSeriesId) return;
+    const seriesAppointment = appointments.find((item) => item.recurrenceSeriesId === selectedSeriesId);
+    setSeriesActionBusy(true);
+    try {
+      await approveRecurringAppointmentSeriesFromAdminFS({
+        seriesId: selectedSeriesId,
+        assignedTrainer: seriesApprovalTrainer || undefined,
+        sessionType: seriesAppointment?.serviceType,
+      });
+      await addActivityLog({
+        action: 'recurring_appointments_approved',
+        adminEmail: user?.email || 'unknown',
+        details: `Serie ID: ${selectedSeriesId}`,
+      });
+      await refreshData();
+      setShowSeriesApprovalModal(false);
+      setSelectedSeriesId(null);
+      setSeriesApprovalTrainer('');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'No se pudo aprobar la serie.');
+    } finally {
+      setSeriesActionBusy(false);
+    }
+  };
+
+  const handleRejectRecurringSeries = async (seriesId: string) => {
+    if (!confirm('¿Rechazar toda la serie pendiente? Se devolverán los minutos reservados.')) return;
+    setSeriesActionBusy(true);
+    try {
+      await rejectRecurringAppointmentSeriesFromAdminFS(seriesId);
+      await addActivityLog({
+        action: 'recurring_appointments_rejected',
+        adminEmail: user?.email || 'unknown',
+        details: `Serie ID: ${seriesId}`,
+      });
+      await refreshData();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'No se pudo rechazar la serie.');
+    } finally {
+      setSeriesActionBusy(false);
+    }
   };
 
   // Manejar guardado de CMS
@@ -3197,6 +3245,11 @@ export default function AdminPage() {
                                       {appointment.recurrenceSeriesId && (
                                         <Repeat className="w-4 h-4 text-[var(--color-accent-val)]" aria-label="Entrenamiento recurrente" />
                                       )}
+                                      {appointment.recurrenceSeriesId && appointment.status === 'pending' && (
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
+                                          Serie pendiente
+                                        </span>
+                                      )}
                                     </h3>
                                     <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border', statusConfig[appointment.status].color)}>
                                       <StatusIcon className="w-3 h-3" />
@@ -3292,7 +3345,35 @@ export default function AdminPage() {
 
                               {/* Actions */}
                               <div className="flex flex-row lg:flex-col gap-2 lg:w-40">
-                                {appointment.status === 'pending' && (
+                                {appointment.status === 'pending' && appointment.recurrenceSeriesId && (
+                                  <>
+                                    <PremiumButton
+                                      variant="cta"
+                                      size="sm"
+                                      icon={<Check className="w-4 h-4" />}
+                                      disabled={seriesActionBusy}
+                                      onClick={() => {
+                                        setSelectedSeriesId(appointment.recurrenceSeriesId!);
+                                        setSeriesApprovalTrainer('');
+                                        setShowSeriesApprovalModal(true);
+                                      }}
+                                      className="flex-1 lg:flex-none"
+                                    >
+                                      Aprobar serie
+                                    </PremiumButton>
+                                    <PremiumButton
+                                      variant="ghost"
+                                      size="sm"
+                                      icon={<XCircle className="w-4 h-4" />}
+                                      disabled={seriesActionBusy}
+                                      onClick={() => handleRejectRecurringSeries(appointment.recurrenceSeriesId!)}
+                                      className="flex-1 lg:flex-none text-destructive hover:bg-destructive/10"
+                                    >
+                                      Rechazar serie
+                                    </PremiumButton>
+                                  </>
+                                )}
+                                {appointment.status === 'pending' && !appointment.recurrenceSeriesId && (
                                   <>
                                     <PremiumButton
                                       variant="cta"
@@ -3331,7 +3412,18 @@ export default function AdminPage() {
                                     </PremiumButton>
                                   </>
                                 )}
-                                {appointment.status === 'approved' && (
+                                {appointment.status === 'approved' && appointment.recurrenceSeriesId && (
+                                  <PremiumButton
+                                    variant="ghost"
+                                    size="sm"
+                                    icon={<XCircle className="w-4 h-4" />}
+                                    onClick={() => handleStatusUpdate(appointment.id, 'cancelled')}
+                                    className="w-full text-destructive hover:bg-destructive/10"
+                                  >
+                                    Cancelar
+                                  </PremiumButton>
+                                )}
+                                {appointment.status === 'approved' && !appointment.recurrenceSeriesId && (
                                   <>
                                     <PremiumButton
                                       variant="outline"
@@ -3357,7 +3449,7 @@ export default function AdminPage() {
                                     </PremiumButton>
                                   </>
                                 )}
-                                {appointment.status === 'rejected' && (
+                                {appointment.status === 'rejected' && !appointment.recurrenceSeriesId && (
                                   <PremiumButton
                                     variant="outline"
                                     size="sm"
@@ -6794,25 +6886,36 @@ export default function AdminPage() {
                                   type="number"
                                   min={1}
                                   step={1}
-                                  value={createAppointmentForm.intervalWeeks}
+                                  value={createAppointmentForm.intervalDays}
                                   onChange={(e) => setCreateAppointmentForm(prev => ({
                                     ...prev,
-                                    intervalWeeks: Number.parseInt(e.target.value, 10) || 1,
+                                    intervalDays: Number.parseInt(e.target.value, 10) || 1,
                                   }))}
                                   className="w-24 px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                                 />
-                                <span className="text-sm text-[var(--color-text-secondary)]">semana(s)</span>
+                                <span className="text-sm text-[var(--color-text-secondary)]">dia(s)</span>
                               </div>
                             </div>
                             <div>
                               <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Hasta *</label>
-                              <input
-                                type="date"
+                              <select
                                 value={createAppointmentForm.endDate}
-                                min={createAppointmentForm.date || formatDateInputLocal(new Date())}
                                 onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, endDate: e.target.value }))}
                                 className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                              />
+                              >
+                                <option value="">Selecciona la ultima sesion</option>
+                                {getRecurringEndDateOptions({
+                                  startDate: createAppointmentForm.date,
+                                  intervalDays: createAppointmentForm.intervalDays,
+                                  durationMinutes: createAppointmentForm.durationMinutes,
+                                  remainingMinutes: selectedCreateAppointmentBono ? getBonoMinutosRestantes(selectedCreateAppointmentBono) : 0,
+                                  bonoExpirationDate: selectedCreateAppointmentBono?.fechaExpiracion,
+                                }).map((option) => (
+                                  <option key={option.endDate} value={option.endDate}>
+                                    {new Date(`${option.endDate}T00:00:00`).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })} ? {option.occurrenceCount} sesiones ? {option.totalMinutes} min
+                                  </option>
+                                ))}
+                              </select>
                             </div>
                           </div>
                         )}
@@ -6820,9 +6923,9 @@ export default function AdminPage() {
                         {createAppointmentForm.bookingType === 'recurring' && createAppointmentForm.date && createAppointmentForm.endDate && (
                           <div className="p-3 rounded-xl bg-[var(--color-accent-dim)] border border-[var(--color-accent-border)] text-sm text-[var(--color-text-primary)]">
                             {(() => {
-                              const dates = generateWeeklyOccurrenceDates(
+                              const dates = generateRecurringOccurrenceDates(
                                 createAppointmentForm.date,
-                                createAppointmentForm.intervalWeeks,
+                                createAppointmentForm.intervalDays,
                                 createAppointmentForm.endDate,
                               );
                               if (dates.length === 0) return 'La serie debe incluir al menos una sesion.';
@@ -6904,9 +7007,9 @@ export default function AdminPage() {
                           </div>
                         )}
                         {createAppointmentForm.bookingType === 'recurring' && selectedCreateAppointmentBono && (() => {
-                          const dates = generateWeeklyOccurrenceDates(
+                          const dates = generateRecurringOccurrenceDates(
                             createAppointmentForm.date,
-                            createAppointmentForm.intervalWeeks,
+                            createAppointmentForm.intervalDays,
                             createAppointmentForm.endDate,
                           );
                           const totalMinutes = dates.length * createAppointmentForm.durationMinutes;
@@ -6933,7 +7036,7 @@ export default function AdminPage() {
                           <PremiumButton
                             type="submit"
                             variant="cta"
-                            disabled={creatingAppointment}
+                            disabled={creatingAppointment || (createAppointmentForm.bookingType === 'recurring' && !createAppointmentForm.endDate)}
                             icon={creatingAppointment ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CalendarClock className="w-4 h-4" />}
                           >
                             {creatingAppointment
@@ -7705,6 +7808,65 @@ export default function AdminPage() {
                             })}
                           </div>
                         )}
+                      </div>
+                    </GlassCard>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ============================================
+                SERIES APPROVAL MODAL
+                ============================================ */}
+            <AnimatePresence>
+              {showSeriesApprovalModal && selectedSeriesId && (
+                <motion.div
+                  key="series-approval-modal"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+                  onClick={() => setShowSeriesApprovalModal(false)}
+                >
+                  <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full max-w-lg"
+                  >
+                    <GlassCard className="p-6">
+                      <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-1">Aprobar serie</h2>
+                      <p className="text-sm text-[var(--color-text-secondary)] mb-6">
+                        Se confirmar?n todas las sesiones pendientes. Los minutos ya est?n reservados y no se volver?n a descontar.
+                      </p>
+                      <div className="space-y-4 mb-6">
+                        <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Entrenador asignado</label>
+                          <select
+                            value={seriesApprovalTrainer}
+                            onChange={(e) => setSeriesApprovalTrainer(e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                          >
+                            <option value="">Sin asignar</option>
+                            {trainers.filter(trainer => trainer.active).map((trainer) => (
+                              <option key={trainer.id} value={trainer.id}>{trainer.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      <div className="flex gap-3 justify-end">
+                        <PremiumButton variant="ghost" onClick={() => setShowSeriesApprovalModal(false)}>
+                          Cancelar
+                        </PremiumButton>
+                        <PremiumButton
+                          variant="cta"
+                          icon={<Check className="w-4 h-4" />}
+                          disabled={seriesActionBusy}
+                          onClick={handleApproveRecurringSeries}
+                        >
+                          {seriesActionBusy ? 'Aprobando...' : 'Aprobar serie'}
+                        </PremiumButton>
                       </div>
                     </GlassCard>
                   </motion.div>

@@ -1,11 +1,13 @@
 import {
   calculateAppointmentDeduction,
+  calculateAppointmentRefund,
   getBonoRemainingMinutes,
   getSlotBlocks,
   isBonoExpiredAt,
   isSlotAtCapacity,
   selectExactlyOneActiveBono,
   slotOccupancyDocId,
+  type LifecycleAppointment,
   type LifecycleBono,
 } from "./appointmentLifecycle.js";
 import { doesSessionFitWithinSchedule, generateTimeSlots, normalizeSiteConfig, type SiteConfig } from "./siteConfig.js";
@@ -23,11 +25,11 @@ const TIME_RE = /^\d{2}:\d{2}$/;
 export type RecurringDurationMinutes = 30 | 45 | 60;
 
 export interface ParsedRecurringAppointmentsData {
-  userId: string;
+  userId?: string;
   startDate: string;
   startTime: string;
   endDate: string;
-  intervalWeeks: number;
+  intervalDays: number;
   duration: "30" | "45" | "60";
   durationMinutes: RecurringDurationMinutes;
   serviceType: string;
@@ -64,7 +66,7 @@ export interface PlanRecurringAppointmentsInput {
   startDate: string;
   startTime: string;
   endDate: string;
-  intervalWeeks: number;
+  intervalDays: number;
   durationMinutes: number;
   now: Date;
   siteConfig: Partial<SiteConfig>;
@@ -72,6 +74,21 @@ export interface PlanRecurringAppointmentsInput {
   blockedKeys: Set<string>;
   userSlotKeys: Set<string>;
   activeBonos: LifecycleBono[];
+  requireBono?: boolean;
+}
+
+export interface RecurringEndDateOption {
+  endDate: string;
+  occurrenceCount: number;
+  totalMinutes: number;
+}
+
+export interface ReservedOccurrenceMinutes {
+  bonoId?: string;
+  minutesDeducted?: boolean;
+  minutesDeductedAmount?: number;
+  minutesRefunded?: boolean;
+  minutesRefundedAt?: string | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -97,22 +114,68 @@ export function formatDateEs(isoDate: string): string {
   return `${day}/${month}/${year}`;
 }
 
-export function generateWeeklyOccurrenceDates(
+export function civilDateFromExpiration(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  if (isIsoDate(value)) return value;
+  const expiration = new Date(value);
+  if (Number.isNaN(expiration.getTime())) return undefined;
+  const utc = new Date(Date.UTC(expiration.getFullYear(), expiration.getMonth(), expiration.getDate()));
+  return utc.toISOString().slice(0, 10);
+}
+
+export function generateRecurringOccurrenceDates(
   startDate: string,
-  intervalWeeks: number,
+  intervalDays: number,
   endDate: string,
 ): string[] {
   if (!isIsoDate(startDate) || !isIsoDate(endDate)) return [];
-  if (!Number.isInteger(intervalWeeks) || intervalWeeks < 1) return [];
+  if (!Number.isInteger(intervalDays) || intervalDays < 1) return [];
   if (endDate < startDate) return [];
 
   const dates: string[] = [];
   let current = startDate;
   while (current <= endDate) {
     dates.push(current);
-    current = addUtcDays(current, intervalWeeks * 7);
+    current = addUtcDays(current, intervalDays);
   }
   return dates;
+}
+
+export function getRecurringEndDateOptions(input: {
+  startDate: string;
+  intervalDays: number;
+  durationMinutes: number;
+  remainingMinutes: number;
+  bonoExpirationDate?: string | null;
+  maxOccurrences?: number;
+}): RecurringEndDateOption[] {
+  if (!isIsoDate(input.startDate)) return [];
+  if (!Number.isInteger(input.intervalDays) || input.intervalDays < 1) return [];
+  if (![30, 45, 60].includes(input.durationMinutes) || input.durationMinutes <= 0) return [];
+
+  const maxByMinutes = Math.floor(Math.max(0, input.remainingMinutes) / input.durationMinutes);
+  const maxOccurrences = Math.min(
+    input.maxOccurrences ?? MAX_RECURRING_OCCURRENCES,
+    MAX_RECURRING_OCCURRENCES,
+    maxByMinutes,
+  );
+  if (maxOccurrences < 2) return [];
+
+  const expirationDate = input.bonoExpirationDate ? civilDateFromExpiration(input.bonoExpirationDate) : undefined;
+  const options: RecurringEndDateOption[] = [];
+  let current = input.startDate;
+  for (let index = 0; index < maxOccurrences; index += 1) {
+    if (expirationDate && current > expirationDate) break;
+    if (index >= 1) {
+      options.push({
+        endDate: current,
+        occurrenceCount: index + 1,
+        totalMinutes: (index + 1) * input.durationMinutes,
+      });
+    }
+    current = addUtcDays(current, input.intervalDays);
+  }
+  return options;
 }
 
 export function collectRecurringOccupancyKeys(
@@ -137,17 +200,6 @@ function slotDateTime(date: string, time: string): Date {
   return new Date(`${date}T${time}:00`);
 }
 
-function bonoExpirationDate(bono: LifecycleBono): string | undefined {
-  if (!bono.fechaExpiracion) return undefined;
-  const expiration = new Date(bono.fechaExpiracion);
-  if (Number.isNaN(expiration.getTime())) return undefined;
-  const localYear = expiration.getFullYear();
-  const localMonth = expiration.getMonth();
-  const localDay = expiration.getDate();
-  const utc = new Date(Date.UTC(localYear, localMonth, localDay));
-  return utc.toISOString().slice(0, 10);
-}
-
 function normalizeText(value: unknown, fieldName: string, maxLength: number, required = true):
   { ok: true; value: string } | { ok: false; message: string } {
   if (typeof value !== "string") {
@@ -160,23 +212,17 @@ function normalizeText(value: unknown, fieldName: string, maxLength: number, req
   return { ok: true, value: text };
 }
 
-export function parseRecurringAppointmentsData(data: unknown):
+function parseRecurringCore(data: Record<string, unknown>, requireTrainer: boolean):
   { ok: true; value: ParsedRecurringAppointmentsData } | { ok: false; message: string } {
-  if (!isRecord(data)) {
-    return { ok: false, message: "Los datos de la serie no son validos." };
-  }
-
-  const userId = normalizeText(data.userId, "cliente", 128);
-  if (!userId.ok) return userId;
   const startDate = normalizeText(data.date, "fecha inicial", 10);
   if (!startDate.ok) return startDate;
   const startTime = normalizeText(data.time, "hora", 5);
   if (!startTime.ok) return startTime;
   const endDate = normalizeText(data.endDate, "fecha final", 10);
   if (!endDate.ok) return endDate;
-  const serviceType = normalizeText(data.serviceType, "servicio", 180);
+  const serviceType = normalizeText(data.serviceType, "servicio", 180, false);
   if (!serviceType.ok) return serviceType;
-  const assignedTrainer = normalizeText(data.assignedTrainer, "entrenador", 128);
+  const assignedTrainer = normalizeText(data.assignedTrainer, "entrenador", 128, requireTrainer);
   if (!assignedTrainer.ok) return assignedTrainer;
   const comment = normalizeText(data.comment, "comentario", 1000, false);
   if (!comment.ok) return comment;
@@ -185,14 +231,14 @@ export function parseRecurringAppointmentsData(data: unknown):
     return { ok: false, message: "La fecha u hora no tiene un formato valido." };
   }
 
-  const durationMinutes = Number(data.durationMinutes);
+  const durationMinutes = Number(data.durationMinutes ?? data.duration);
   if (![30, 45, 60].includes(durationMinutes)) {
     return { ok: false, message: "La duracion de la cita no es valida." };
   }
 
-  const intervalWeeks = Number(data.intervalWeeks);
-  if (!Number.isInteger(intervalWeeks) || intervalWeeks < 1) {
-    return { ok: false, message: "El intervalo de semanas debe ser un entero mayor o igual a 1." };
+  const intervalDays = Number(data.intervalDays);
+  if (!Number.isInteger(intervalDays) || intervalDays < 1) {
+    return { ok: false, message: "El intervalo de dias debe ser un entero mayor o igual a 1." };
   }
 
   if (endDate.value < startDate.value) {
@@ -202,11 +248,10 @@ export function parseRecurringAppointmentsData(data: unknown):
   return {
     ok: true,
     value: {
-      userId: userId.value,
       startDate: startDate.value,
       startTime: startTime.value,
       endDate: endDate.value,
-      intervalWeeks,
+      intervalDays,
       duration: String(durationMinutes) as "30" | "45" | "60",
       durationMinutes: durationMinutes as RecurringDurationMinutes,
       serviceType: serviceType.value,
@@ -216,11 +261,31 @@ export function parseRecurringAppointmentsData(data: unknown):
   };
 }
 
+export function parseRecurringAppointmentsData(data: unknown):
+  { ok: true; value: ParsedRecurringAppointmentsData } | { ok: false; message: string } {
+  if (!isRecord(data)) {
+    return { ok: false, message: "Los datos de la serie no son validos." };
+  }
+  const userId = normalizeText(data.userId, "cliente", 128);
+  if (!userId.ok) return userId;
+  const parsed = parseRecurringCore(data, true);
+  if (!parsed.ok) return parsed;
+  return { ok: true, value: { ...parsed.value, userId: userId.value } };
+}
+
+export function parseClientRecurringAppointmentsData(data: unknown):
+  { ok: true; value: ParsedRecurringAppointmentsData } | { ok: false; message: string } {
+  if (!isRecord(data)) {
+    return { ok: false, message: "Los datos de la serie no son validos." };
+  }
+  return parseRecurringCore(data, false);
+}
+
 export function planRecurringAppointments(input: PlanRecurringAppointmentsInput): RecurringSeriesPlanResult {
   const emptyFail = (message: string): RecurringSeriesPlanResult => ({ ok: false, message, writes: [] });
 
-  if (!Number.isInteger(input.intervalWeeks) || input.intervalWeeks < 1) {
-    return emptyFail("El intervalo de semanas debe ser un entero mayor o igual a 1.");
+  if (!Number.isInteger(input.intervalDays) || input.intervalDays < 1) {
+    return emptyFail("El intervalo de dias debe ser un entero mayor o igual a 1.");
   }
   if (!isIsoDate(input.startDate) || !isIsoDate(input.endDate) || !TIME_RE.test(input.startTime)) {
     return emptyFail("La fecha u hora no tiene un formato valido.");
@@ -232,9 +297,12 @@ export function planRecurringAppointments(input: PlanRecurringAppointmentsInput)
     return emptyFail("La duracion de la cita no es valida.");
   }
 
-  const dates = generateWeeklyOccurrenceDates(input.startDate, input.intervalWeeks, input.endDate);
+  const dates = generateRecurringOccurrenceDates(input.startDate, input.intervalDays, input.endDate);
   if (dates.length === 0) {
     return emptyFail("La serie debe incluir al menos una sesion.");
+  }
+  if (dates.length < 2) {
+    return emptyFail("Un entrenamiento recurrente requiere al menos 2 sesiones.");
   }
   if (dates.length > MAX_RECURRING_OCCURRENCES) {
     return emptyFail(`La serie no puede superar ${MAX_RECURRING_OCCURRENCES} sesiones.`);
@@ -283,6 +351,26 @@ export function planRecurringAppointments(input: PlanRecurringAppointmentsInput)
     return emptyFail("La serie es demasiado larga para crearse de forma atomica.");
   }
 
+  const requireBono = input.requireBono !== false;
+  if (!requireBono) {
+    return {
+      ok: true,
+      writes: {
+        dates,
+        occurrenceCount: dates.length,
+        totalMinutes: dates.length * input.durationMinutes,
+        occupancyWrites,
+        bono: {
+          bonoId: "",
+          minutosRestantes: 0,
+          estado: "activo",
+          minutesDeductedAmount: input.durationMinutes,
+        },
+        minutesDeductedAmount: input.durationMinutes,
+      },
+    };
+  }
+
   if (input.activeBonos.length === 0) {
     return emptyFail("El cliente no tiene un bono activo. No se puede crear la serie.");
   }
@@ -295,7 +383,7 @@ export function planRecurringAppointments(input: PlanRecurringAppointmentsInput)
     return emptyFail("El bono caduca antes de finalizar la serie.");
   }
 
-  const expirationDate = bonoExpirationDate(selectedBono);
+  const expirationDate = civilDateFromExpiration(selectedBono.fechaExpiracion);
   if (expirationDate && dates.some((date) => date > expirationDate)) {
     return emptyFail("El bono caduca antes de finalizar la serie.");
   }
@@ -333,4 +421,102 @@ export function planRecurringAppointments(input: PlanRecurringAppointmentsInput)
       minutesDeductedAmount: input.durationMinutes,
     },
   };
+}
+
+export function validateReservedSeriesMinutes(input: {
+  seriesBonoId: string;
+  seriesUserId: string;
+  seriesTotalMinutes: number;
+  durationMinutes: number;
+  bono?: LifecycleBono & { userId?: string };
+  occurrences: ReservedOccurrenceMinutes[];
+}): { ok: true } | { ok: false; message: string } {
+  if (!input.seriesBonoId) {
+    return { ok: false, message: "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto." };
+  }
+  if (!input.bono) {
+    return { ok: false, message: "No se ha encontrado el bono reservado de la serie." };
+  }
+  if (input.bono.userId && input.bono.userId !== input.seriesUserId) {
+    return { ok: false, message: "El bono original no pertenece al usuario de esta serie." };
+  }
+  if (input.occurrences.length === 0) {
+    return { ok: false, message: "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto." };
+  }
+
+  let deductedTotal = 0;
+  for (const occurrence of input.occurrences) {
+    if (occurrence.bonoId !== input.seriesBonoId
+      || occurrence.minutesDeducted !== true
+      || occurrence.minutesDeductedAmount !== input.durationMinutes
+      || occurrence.minutesRefunded === true
+      || occurrence.minutesRefundedAt) {
+      return { ok: false, message: "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto." };
+    }
+    deductedTotal += occurrence.minutesDeductedAmount ?? 0;
+  }
+
+  if (deductedTotal !== input.seriesTotalMinutes) {
+    return { ok: false, message: "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto." };
+  }
+  return { ok: true };
+}
+
+export function planSeriesMinutesRefund(input: {
+  bono: LifecycleBono;
+  occurrences: LifecycleAppointment[];
+  now: string;
+}): { ok: true; bono: { minutosRestantes: number; estado: LifecycleBono["estado"] }; appointmentPatches: Record<string, unknown>[] }
+  | { ok: false; message: string } {
+  let bono = { ...input.bono };
+  const appointmentPatches: Record<string, unknown>[] = [];
+  for (const occurrence of input.occurrences) {
+    const refund = calculateAppointmentRefund(bono, occurrence, input.now);
+    if (!refund.ok) {
+      return { ok: false, message: "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto." };
+    }
+    bono = {
+      ...bono,
+      minutosRestantes: refund.remainingMinutes,
+      estado: refund.bonoStatus,
+    };
+    appointmentPatches.push({
+      minutesRefunded: refund.minutesRefunded,
+      minutesRefundedAmount: refund.minutesRefundedAmount,
+      minutesRefundedAt: refund.minutesRefundedAt,
+      minutesRefundReason: null,
+    });
+  }
+  return {
+    ok: true,
+    bono: { minutosRestantes: bono.minutosRestantes ?? 0, estado: bono.estado },
+    appointmentPatches,
+  };
+}
+
+export function isRecurringBulkManagedTransition(
+  before: { status?: string; recurrenceSeriesId?: string },
+  after: { status?: string; recurrenceSeriesId?: string },
+): "approve" | "reject" | "cancel-pending" | undefined {
+  const seriesId = after.recurrenceSeriesId || before.recurrenceSeriesId;
+  if (!seriesId) return undefined;
+  if (before.status === "pending" && after.status === "approved") return "approve";
+  if (before.status === "pending" && after.status === "rejected") return "reject";
+  if (before.status === "pending" && after.status === "cancelled") return "cancel-pending";
+  return undefined;
+}
+
+export function shouldSkipRecurringFinanceReconciliation(
+  before: { status?: string; recurrenceSeriesId?: string },
+  after: { status?: string; recurrenceSeriesId?: string },
+): boolean {
+  return Boolean(isRecurringBulkManagedTransition(before, after));
+}
+
+export function shouldSkipRecurringStatusNotification(appointment: {
+  status?: string;
+  recurrenceSeriesId?: string;
+}, after?: { status?: string; recurrenceSeriesId?: string }): boolean {
+  if (!after) return Boolean(appointment.recurrenceSeriesId);
+  return Boolean(isRecurringBulkManagedTransition(appointment, after));
 }
