@@ -90,3 +90,48 @@ export function formatRecurringSeriesPreview(occurrenceCount: number, durationMi
     const totalMinutes = occurrenceCount * durationMinutes;
     return `${occurrenceCount} sesiones · ${durationMinutes} min · ${totalMinutes} min en total`;
 }
+
+
+export function formatRecurringHastaOptionLabel(option: RecurringEndDateOption): string {
+    const [year, month, day] = option.endDate.split('-');
+    return `${day}/${month}/${year} · ${option.occurrenceCount} sesiones · ${option.totalMinutes} min`;
+}
+
+export type RecurringHastaEmptyReason = 'no-start-date' | 'no-valid-end';
+
+export function getRecurringHastaViewModel(input: {
+    startDate?: string | null;
+    intervalDays: number;
+    durationMinutes: number;
+    remainingMinutes: number;
+    bonoExpirationDate?: string | null;
+}): {
+    startDate: string | null;
+    options: RecurringEndDateOption[];
+    emptyReason: RecurringHastaEmptyReason | null;
+} {
+    const startDate = input.startDate && isIsoDate(input.startDate) ? input.startDate : null;
+    if (!startDate) {
+        return { startDate: null, options: [], emptyReason: 'no-start-date' };
+    }
+    const options = getRecurringEndDateOptions({
+        startDate,
+        intervalDays: input.intervalDays,
+        durationMinutes: input.durationMinutes,
+        remainingMinutes: input.remainingMinutes,
+        bonoExpirationDate: input.bonoExpirationDate,
+    });
+    return {
+        startDate,
+        options,
+        emptyReason: options.length === 0 ? 'no-valid-end' : null,
+    };
+}
+
+export function sanitizeRecurringEndDate(
+    selectedEndDate: string | null | undefined,
+    options: RecurringEndDateOption[],
+): string {
+    if (!selectedEndDate) return '';
+    return options.some((option) => option.endDate === selectedEndDate) ? selectedEndDate : '';
+}

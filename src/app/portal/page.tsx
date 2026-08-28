@@ -48,8 +48,10 @@ import type { TimeSlot, Appointment, Bono, Trainer } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import {
   formatRecurringSeriesPreview,
-  getRecurringEndDateOptions,
+  getRecurringHastaViewModel,
+  sanitizeRecurringEndDate,
 } from '@/lib/recurring-appointments';
+import { RecurringHastaSelect } from '@/components/ui/recurring-hasta-select';
 import {
   createAppointmentSecure,
   createRecurringAppointments,
@@ -83,6 +85,7 @@ interface FormData {
   reason: string;
   bookingType: 'single' | 'recurring';
   intervalDays: number;
+  startDate: string;
   endDate: string;
 }
 
@@ -175,6 +178,7 @@ export default function PortalPage() {
     reason: '',
     bookingType: 'single',
     intervalDays: 3,
+    startDate: '',
     endDate: '',
   });
   const [submitSuccess, setSubmitSuccess] = useState(false);
@@ -340,6 +344,21 @@ export default function PortalPage() {
       });
     return keys;
   }, [userAppointments]);
+
+  const recurringHasta = useMemo(() => getRecurringHastaViewModel({
+    startDate: formData.startDate,
+    intervalDays: formData.intervalDays,
+    durationMinutes: parseInt(formData.duration, 10),
+    remainingMinutes: activeBono ? getBonoMinutosRestantes(activeBono) : 0,
+    bonoExpirationDate: activeBono?.fechaExpiracion,
+  }), [formData.startDate, formData.intervalDays, formData.duration, activeBono]);
+
+  useEffect(() => {
+    setFormData((prev) => {
+      const nextEndDate = sanitizeRecurringEndDate(prev.endDate, recurringHasta.options);
+      return nextEndDate === prev.endDate ? prev : { ...prev, endDate: nextEndDate };
+    });
+  }, [recurringHasta.options]);
 
   // Al modificar una cita, su franja actual no debe bloquearse contra sí misma.
   const rescheduleBookedSlotKeys = useMemo(() => {
@@ -515,7 +534,21 @@ export default function PortalPage() {
   // ============================================
 
   const handleSelectSlot = (slot: TimeSlot) => {
-    setFormData(prev => ({ ...prev, preferredSlot: slot }));
+    setFormData(prev => ({
+      ...prev,
+      preferredSlot: slot,
+      startDate: slot.date,
+      endDate: prev.startDate === slot.date ? prev.endDate : '',
+    }));
+  };
+
+  const handleSelectDate = (date: string | null) => {
+    setFormData(prev => ({
+      ...prev,
+      startDate: date ?? '',
+      endDate: date && prev.startDate === date ? prev.endDate : '',
+      preferredSlot: date && prev.preferredSlot?.date === date ? prev.preferredSlot : null,
+    }));
   };
 
   const handleClearSlot = () => {
@@ -576,6 +609,7 @@ export default function PortalPage() {
           reason: '',
           bookingType: 'single',
           intervalDays: 3,
+          startDate: '',
           endDate: '',
         });
         setShowReservaDrawer(false);
@@ -1706,10 +1740,37 @@ export default function PortalPage() {
                   </div>
                 ) : (
                   <>
-                    {/* Duración de la sesión */}
                     <GlassCard className="p-5">
                       <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">
                         <span className="w-6 h-6 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs flex items-center justify-center">1</span>
+                        Tipo de reserva
+                      </h3>
+                      <div className="grid grid-cols-2 gap-2">
+                        {([
+                          { value: 'single', label: 'Sesion unica' },
+                          { value: 'recurring', label: 'Entrenamiento recurrente' },
+                        ] as const).map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, bookingType: option.value, endDate: '' }))}
+                            className={cn(
+                              'px-4 py-3 rounded-xl border text-sm font-medium transition-colors',
+                              formData.bookingType === option.value
+                                ? 'bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)]'
+                                : 'bg-muted/10 border-border text-[var(--color-text-secondary)]'
+                            )}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </GlassCard>
+
+                    {/* Duración de la sesión */}
+                    <GlassCard className="p-5">
+                      <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs flex items-center justify-center">2</span>
                         Duración de la Sesión
                       </h3>
                       <div className="flex gap-2">
@@ -1724,6 +1785,7 @@ export default function PortalPage() {
                                 ...prev,
                                 duration: d.value,
                                 preferredSlot: prev.duration === d.value ? prev.preferredSlot : null,
+                                endDate: prev.duration === d.value ? prev.endDate : '',
                               }))}
                               className={cn(
                                 'flex-1 px-3 py-3 rounded-xl border text-sm font-medium transition-all',
@@ -1747,31 +1809,41 @@ export default function PortalPage() {
                       )}
                     </GlassCard>
 
-
+                    {/* Calendario */}
                     <GlassCard className="p-5">
-                      <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-4">Tipo de reserva</h3>
-                      <div className="grid grid-cols-2 gap-2">
-                        {([
-                          { value: 'single', label: 'Sesion unica' },
-                          { value: 'recurring', label: 'Entrenamiento recurrente' },
-                        ] as const).map((option) => (
-                          <button
-                            key={option.value}
-                            type="button"
-                            onClick={() => setFormData(prev => ({ ...prev, bookingType: option.value, endDate: '' }))}
-                            className={cn(
-                              'px-4 py-3 rounded-xl border text-sm font-medium transition-colors',
-                              formData.bookingType === option.value
-                                ? 'bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)]'
-                                : 'bg-muted/10 border-border text-[var(--color-text-secondary)]'
-                            )}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
+                      <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1 flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs flex items-center justify-center">3</span>
+                        Franja Horaria
+                      </h3>
+                      <p className="text-xs text-[var(--color-text-secondary)] mb-4 ml-8">{formData.bookingType === 'recurring' ? 'Elige el día inicial y la primera franja. El resto se calcula automaticamente.' : 'Elige la franja que prefieras.'}</p>
+                      <InteractiveCalendar
+                        selectedSlot={formData.preferredSlot}
+                        onSelectSlot={handleSelectSlot}
+                        onClearSlot={handleClearSlot}
+                        selectedDate={formData.startDate || null}
+                        onSelectDate={handleSelectDate}
+                        selectedDuration={parseInt(formData.duration, 10) as 30 | 45 | 60}
+                        userBookedSlotKeys={userBookedSlotKeys}
+                      />
                       {formData.bookingType === 'recurring' && (
-                        <div className="mt-4 space-y-3">
+                        <p className="mt-3 text-xs text-[var(--color-text-secondary)]">
+                          Fecha inicial:{' '}
+                          <span className="text-[var(--color-text-primary)] font-medium">
+                            {formData.startDate
+                              ? formData.startDate.split('-').reverse().join('/')
+                              : 'Selecciona un día en el calendario'}
+                          </span>
+                        </p>
+                      )}
+                    </GlassCard>
+
+                    {formData.bookingType === 'recurring' && (
+                      <GlassCard className="p-5">
+                        <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs flex items-center justify-center">4</span>
+                          Recurrencia
+                        </h3>
+                        <div className="space-y-3">
                           <div className="flex items-center gap-2">
                             <label className="text-sm text-[var(--color-text-secondary)]">Cada</label>
                             <input
@@ -1789,53 +1861,32 @@ export default function PortalPage() {
                           </div>
                           <div>
                             <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Hasta</label>
-                            <select
+                            <RecurringHastaSelect
+                              options={recurringHasta.options}
                               value={formData.endDate}
-                              onChange={(e) => setFormData(prev => ({ ...prev, endDate: e.target.value }))}
-                              disabled={!formData.preferredSlot || (formData.bookingType === 'recurring' && !formData.endDate)}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)]"
-                            >
-                              <option value="">Selecciona la ultima sesion</option>
-                              {formData.preferredSlot && getRecurringEndDateOptions({
-                                startDate: formData.preferredSlot.date,
-                                intervalDays: formData.intervalDays,
-                                durationMinutes: parseInt(formData.duration, 10),
-                                remainingMinutes: activeBono ? getBonoMinutosRestantes(activeBono) : 0,
-                                bonoExpirationDate: activeBono?.fechaExpiracion,
-                              }).map((option) => (
-                                <option key={option.endDate} value={option.endDate}>
-                                  {option.endDate} ? {formatRecurringSeriesPreview(option.occurrenceCount, parseInt(formData.duration, 10))}
-                                </option>
-                              ))}
-                            </select>
+                              onChange={(endDate) => setFormData(prev => ({ ...prev, endDate }))}
+                              emptyReason={recurringHasta.emptyReason}
+                            />
                           </div>
+                          {formData.endDate && recurringHasta.options.some((option) => option.endDate === formData.endDate) && (
+                            <p className="text-sm text-[var(--color-text-primary)]">
+                              {formatRecurringSeriesPreview(
+                                recurringHasta.options.find((option) => option.endDate === formData.endDate)?.occurrenceCount ?? 0,
+                                parseInt(formData.duration, 10),
+                              )}
+                            </p>
+                          )}
                           <p className="text-xs text-[var(--color-text-secondary)]">
                             Las sesiones quedaran pendientes de aprobacion. Los minutos se reservan al enviar la solicitud.
                           </p>
                         </div>
-                      )}
-                    </GlassCard>
-
-                    {/* Calendario */}
-                    <GlassCard className="p-5">
-                      <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1 flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs flex items-center justify-center">2</span>
-                        Franja Horaria
-                      </h3>
-                      <p className="text-xs text-[var(--color-text-secondary)] mb-4 ml-8">{formData.bookingType === 'recurring' ? 'Elige la primera franja. El resto se calcula automaticamente.' : 'Elige la franja que prefieras.'}</p>
-                      <InteractiveCalendar
-                        selectedSlot={formData.preferredSlot}
-                        onSelectSlot={handleSelectSlot}
-                        onClearSlot={handleClearSlot}
-                        selectedDuration={parseInt(formData.duration, 10) as 30 | 45 | 60}
-                        userBookedSlotKeys={userBookedSlotKeys}
-                      />
-                    </GlassCard>
+                      </GlassCard>
+                    )}
 
                     {/* Comentario */}
                     <GlassCard className="p-5">
                       <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs flex items-center justify-center">3</span>
+                        <span className="w-6 h-6 rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs flex items-center justify-center">{formData.bookingType === 'recurring' ? '5' : '4'}</span>
                         Comentario (opcional)
                       </h3>
                       <textarea

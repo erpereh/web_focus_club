@@ -27,6 +27,8 @@ interface InteractiveCalendarProps {
   onSelectSlot: (slot: TimeSlot) => void;
   /** Se llama cuando el usuario deselecciona la franja actual */
   onClearSlot: () => void;
+  selectedDate?: string | null;
+  onSelectDate?: (date: string | null) => void;
   /** Duración de la sesión en minutos (30, 45 o 60). Determina cuántos bloques valida el click. */
   selectedDuration?: 30 | 45 | 60;
   /** Claves "YYYY-MM-DD_HH:MM" de los bloques ya reservados por este usuario (pending o approved). */
@@ -109,6 +111,8 @@ export function InteractiveCalendar({
   selectedSlot,
   onSelectSlot,
   onClearSlot,
+  selectedDate,
+  onSelectDate,
   selectedDuration = 60,
   userBookedSlotKeys,
 }: InteractiveCalendarProps) {
@@ -341,7 +345,10 @@ export function InteractiveCalendar({
             const day = i + 1;
             const past = isPastDay(currentYear, currentMonth, day);
             const today = isToday(currentYear, currentMonth, day);
-            const isSelected = selectedDay === day;
+            const dateKey = formatDateKey(currentYear, currentMonth, day);
+            const isSelected = selectedDate
+              ? selectedDate === dateKey
+              : selectedDay === day;
             const hasAvail = !past && dayHasAvailability(day);
             const { hasPartial, hasFull } = getDayOccupancySummary(day);
 
@@ -349,7 +356,11 @@ export function InteractiveCalendar({
               <button
                 key={day}
                 disabled={past || loading}
-                onClick={() => setSelectedDay(isSelected ? null : day)}
+                onClick={() => {
+                  const nextDay = isSelected ? null : day;
+                  setSelectedDay(nextDay);
+                  onSelectDate?.(nextDay ? formatDateKey(currentYear, currentMonth, nextDay) : null);
+                }}
                 className={cn(
                   'aspect-square rounded-xl flex flex-col items-center justify-center relative transition-all duration-200 text-sm font-medium',
                   past && 'opacity-30 cursor-not-allowed text-[var(--color-text-secondary)]',

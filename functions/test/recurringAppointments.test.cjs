@@ -103,6 +103,23 @@ assert.deepEqual(
   ],
 );
 
+const weeklyOptions = getRecurringEndDateOptions({
+  startDate: "2026-09-08",
+  intervalDays: 7,
+  durationMinutes: 30,
+  remainingMinutes: 360,
+  bonoExpirationDate: "2026-10-31",
+});
+assert.deepEqual(weeklyOptions.slice(0, 3), [
+  { endDate: "2026-09-15", occurrenceCount: 2, totalMinutes: 60 },
+  { endDate: "2026-09-22", occurrenceCount: 3, totalMinutes: 90 },
+  { endDate: "2026-09-29", occurrenceCount: 4, totalMinutes: 120 },
+]);
+assert.deepEqual(
+  weeklyOptions.map((option) => option.endDate),
+  generateRecurringOccurrenceDates("2026-09-08", 7, weeklyOptions[weeklyOptions.length - 1].endDate).slice(1),
+);
+
 const parsedPastEnd = parseRecurringAppointmentsData({
   userId: "user-1",
   date: "2026-09-28",

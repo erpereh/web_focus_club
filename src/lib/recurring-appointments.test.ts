@@ -3,6 +3,9 @@ import {
     formatRecurringSeriesPreview,
     generateRecurringOccurrenceDates,
     getRecurringEndDateOptions,
+    formatRecurringHastaOptionLabel,
+    getRecurringHastaViewModel,
+    sanitizeRecurringEndDate,
     MAX_RECURRING_OCCURRENCES,
 } from './recurring-appointments';
 
@@ -85,9 +88,113 @@ describe('getRecurringEndDateOptions', () => {
     });
 });
 
+describe('getRecurringEndDateOptions weekly 30 min from 08/09', () => {
+    const options = getRecurringEndDateOptions({
+        startDate: '2026-09-08',
+        intervalDays: 7,
+        durationMinutes: 30,
+        remainingMinutes: 360,
+        bonoExpirationDate: '2026-10-31',
+    });
+
+    it('includes 15/09, 22/09 and 29/09 as the first weekly ends', () => {
+        expect(options.slice(0, 3)).toEqual([
+            { endDate: '2026-09-15', occurrenceCount: 2, totalMinutes: 60 },
+            { endDate: '2026-09-22', occurrenceCount: 3, totalMinutes: 90 },
+            { endDate: '2026-09-29', occurrenceCount: 4, totalMinutes: 120 },
+        ]);
+    });
+
+    it('only includes exact 7-day multiples from 08/09', () => {
+        expect(options.map((option) => option.endDate)).toEqual(
+            generateRecurringOccurrenceDates('2026-09-08', 7, options[options.length - 1].endDate).slice(1),
+        );
+    });
+});
+
+describe('getRecurringHastaViewModel', () => {
+    it('feeds Hasta from a selected date without a time slot', () => {
+        const view = getRecurringHastaViewModel({
+            startDate: '2026-09-08',
+            intervalDays: 7,
+            durationMinutes: 30,
+            remainingMinutes: 360,
+            bonoExpirationDate: '2026-10-31',
+        });
+        expect(view.emptyReason).toBeNull();
+        expect(view.startDate).toBe('2026-09-08');
+        expect(view.options[0]).toEqual({ endDate: '2026-09-15', occurrenceCount: 2, totalMinutes: 60 });
+    });
+
+    it('stays empty until a YYYY-MM-DD start date exists', () => {
+        expect(getRecurringHastaViewModel({
+            startDate: null,
+            intervalDays: 7,
+            durationMinutes: 30,
+            remainingMinutes: 360,
+        }).emptyReason).toBe('no-start-date');
+    });
+    it('explains when minutes cannot cover two sessions', () => {
+        expect(getRecurringHastaViewModel({
+            startDate: '2026-09-08',
+            intervalDays: 7,
+            durationMinutes: 30,
+            remainingMinutes: 30,
+            bonoExpirationDate: '2026-10-31',
+        }).emptyReason).toBe('no-valid-end');
+    });
+});
+
+describe('formatRecurringHastaOptionLabel', () => {
+    it('formats the Hasta option as DD/MM/YYYY with sessions and minutes', () => {
+        expect(formatRecurringHastaOptionLabel({
+            endDate: '2026-09-15',
+            occurrenceCount: 2,
+            totalMinutes: 60,
+        })).toBe('15/09/2026 · 2 sesiones · 60 min');
+    });
+});
+
 describe('formatRecurringSeriesPreview', () => {
     it('matches the admin summary copy', () => {
         expect(formatRecurringSeriesPreview(13, 45)).toBe('13 sesiones \u00b7 45 min \u00b7 585 min en total');
         expect(formatRecurringSeriesPreview(4, 60)).toBe('4 sesiones \u00b7 60 min \u00b7 240 min en total');
+    });
+});
+
+describe('sanitizeRecurringEndDate', () => {
+    const weeklyOptions = getRecurringEndDateOptions({
+        startDate: '2026-09-08',
+        intervalDays: 7,
+        durationMinutes: 30,
+        remainingMinutes: 360,
+        bonoExpirationDate: '2026-10-31',
+    });
+
+    it('keeps an endDate that is still a valid option', () => {
+        expect(sanitizeRecurringEndDate('2026-09-29', weeklyOptions)).toBe('2026-09-29');
+    });
+
+    it('clears an obsolete endDate when intervalDays changes', () => {
+        const everyTenDays = getRecurringEndDateOptions({
+            startDate: '2026-09-08',
+            intervalDays: 10,
+            durationMinutes: 30,
+            remainingMinutes: 360,
+            bonoExpirationDate: '2026-10-31',
+        });
+        expect(everyTenDays.some((option) => option.endDate === '2026-09-29')).toBe(false);
+        expect(sanitizeRecurringEndDate('2026-09-29', everyTenDays)).toBe('');
+    });
+
+    it('clears an obsolete endDate when remaining minutes no longer cover it', () => {
+        const fewerMinutes = getRecurringEndDateOptions({
+            startDate: '2026-09-08',
+            intervalDays: 7,
+            durationMinutes: 30,
+            remainingMinutes: 60,
+            bonoExpirationDate: '2026-10-31',
+        });
+        expect(sanitizeRecurringEndDate('2026-09-29', fewerMinutes)).toBe('');
     });
 });

@@ -85,9 +85,11 @@ import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@
 import {
   formatRecurringSeriesPreview,
   generateRecurringOccurrenceDates,
-  getRecurringEndDateOptions,
+  getRecurringHastaViewModel,
   MAX_RECURRING_OCCURRENCES,
+  sanitizeRecurringEndDate,
 } from '@/lib/recurring-appointments';
+import { RecurringHastaSelect } from '@/components/ui/recurring-hasta-select';
 import {
   getAppointments,
   getAppointmentsByUser,
@@ -1373,6 +1375,20 @@ export default function AdminPage() {
   const selectedCreateAppointmentBono = createAppointmentForm.userId
     ? clientBonos[createAppointmentForm.userId]
     : null;
+  const createRecurringHasta = useMemo(() => getRecurringHastaViewModel({
+    startDate: createAppointmentForm.date,
+    intervalDays: createAppointmentForm.intervalDays,
+    durationMinutes: createAppointmentForm.durationMinutes,
+    remainingMinutes: selectedCreateAppointmentBono ? getBonoMinutosRestantes(selectedCreateAppointmentBono) : 0,
+    bonoExpirationDate: selectedCreateAppointmentBono?.fechaExpiracion,
+  }), [createAppointmentForm.date, createAppointmentForm.intervalDays, createAppointmentForm.durationMinutes, selectedCreateAppointmentBono]);
+
+  useEffect(() => {
+    setCreateAppointmentForm((prev) => {
+      const nextEndDate = sanitizeRecurringEndDate(prev.endDate, createRecurringHasta.options);
+      return nextEndDate === prev.endDate ? prev : { ...prev, endDate: nextEndDate };
+    });
+  }, [createRecurringHasta.options]);
 
   const filteredCreateAppointmentClients = useMemo(() => {
     const queryText = createAppointmentClientSearch.trim().toLowerCase();
@@ -6811,7 +6827,7 @@ export default function AdminPage() {
                               type="date"
                               value={createAppointmentForm.date}
                               min={formatDateInputLocal(new Date())}
-                              onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, date: e.target.value, time: '' }))}
+                              onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, date: e.target.value, time: '', endDate: '' }))}
                               className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                             />
                           </div>
@@ -6819,7 +6835,7 @@ export default function AdminPage() {
                             <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Duracion *</label>
                             <select
                               value={createAppointmentForm.durationMinutes}
-                              onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, durationMinutes: Number(e.target.value) as 30 | 45 | 60, time: '' }))}
+                              onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, durationMinutes: Number(e.target.value) as 30 | 45 | 60, time: '', endDate: '' }))}
                               className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                             >
                               <option value={30}>30 minutos</option>
@@ -6890,6 +6906,7 @@ export default function AdminPage() {
                                   onChange={(e) => setCreateAppointmentForm(prev => ({
                                     ...prev,
                                     intervalDays: Number.parseInt(e.target.value, 10) || 1,
+                                    endDate: '',
                                   }))}
                                   className="w-24 px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                                 />
@@ -6898,24 +6915,12 @@ export default function AdminPage() {
                             </div>
                             <div>
                               <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Hasta *</label>
-                              <select
+                              <RecurringHastaSelect
+                                options={createRecurringHasta.options}
                                 value={createAppointmentForm.endDate}
-                                onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, endDate: e.target.value }))}
-                                className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                              >
-                                <option value="">Selecciona la ultima sesion</option>
-                                {getRecurringEndDateOptions({
-                                  startDate: createAppointmentForm.date,
-                                  intervalDays: createAppointmentForm.intervalDays,
-                                  durationMinutes: createAppointmentForm.durationMinutes,
-                                  remainingMinutes: selectedCreateAppointmentBono ? getBonoMinutosRestantes(selectedCreateAppointmentBono) : 0,
-                                  bonoExpirationDate: selectedCreateAppointmentBono?.fechaExpiracion,
-                                }).map((option) => (
-                                  <option key={option.endDate} value={option.endDate}>
-                                    {new Date(`${option.endDate}T00:00:00`).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })} ? {option.occurrenceCount} sesiones ? {option.totalMinutes} min
-                                  </option>
-                                ))}
-                              </select>
+                                onChange={(endDate) => setCreateAppointmentForm(prev => ({ ...prev, endDate }))}
+                                emptyReason={createRecurringHasta.emptyReason}
+                              />
                             </div>
                           </div>
                         )}
