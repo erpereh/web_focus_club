@@ -10,6 +10,7 @@ import {
   planRecurringAppointments,
   planSeriesMinutesRefund,
   validateReservedSeriesMinutes,
+  buildPendingSeriesOccurrencePatch,
 } from "./recurringAppointments.js";
 import { normalizeSiteConfig, type SiteConfig } from "./siteConfig.js";
 
@@ -847,14 +848,11 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
       }));
 
       occurrences.forEach((occurrence, index) => {
-        transaction.set(occurrence.ref, {
+        transaction.set(occurrence.ref, buildPendingSeriesOccurrencePatch({
           status: input.appointmentStatus,
-          updatedAt: now,
-          cancelledBy: input.appointmentStatus === "cancelled" ? "customer" : undefined,
-          cancelledAt: input.appointmentStatus === "cancelled" ? now : undefined,
-          cancellationReason: input.appointmentStatus === "cancelled" ? "cancelled_by_customer" : undefined,
-          ...refundPlan.appointmentPatches[index],
-        }, { merge: true });
+          now,
+          refundPatch: refundPlan.appointmentPatches[index],
+        }), { merge: true });
       });
 
       transaction.set(bonoRef, {

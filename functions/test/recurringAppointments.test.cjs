@@ -19,6 +19,7 @@ const {
   shouldSkipRecurringFinanceReconciliation,
   shouldSkipRecurringStatusNotification,
   validateReservedSeriesMinutes,
+  buildPendingSeriesOccurrencePatch,
 } = require("../lib/recurringAppointments.js");
 
 const now = new Date("2026-09-01T08:00:00.000Z");
@@ -309,6 +310,33 @@ refundPlan.appointmentPatches.forEach((patch) => {
   assert.equal(patch.minutesRefundedAmount, 60);
 });
 
+const rejectedOccurrencePatch = buildPendingSeriesOccurrencePatch({
+  status: "rejected",
+  now: "2026-09-08T10:00:00.000Z",
+  refundPatch: refundPlan.appointmentPatches[0],
+});
+assert.equal(rejectedOccurrencePatch.status, "rejected");
+assert.equal(rejectedOccurrencePatch.updatedAt, "2026-09-08T10:00:00.000Z");
+assert.equal(rejectedOccurrencePatch.minutesRefunded, true);
+assert.equal(rejectedOccurrencePatch.minutesRefundedAmount, 60);
+assert.equal(rejectedOccurrencePatch.minutesRefundedAt, "2026-09-08T10:00:00.000Z");
+assert.ok(!Object.prototype.hasOwnProperty.call(rejectedOccurrencePatch, "cancelledBy"));
+assert.ok(!Object.prototype.hasOwnProperty.call(rejectedOccurrencePatch, "cancelledAt"));
+assert.ok(!Object.prototype.hasOwnProperty.call(rejectedOccurrencePatch, "cancellationReason"));
+assert.ok(Object.values(rejectedOccurrencePatch).every((value) => value !== undefined));
+
+const cancelledOccurrencePatch = buildPendingSeriesOccurrencePatch({
+  status: "cancelled",
+  now: "2026-09-08T10:00:00.000Z",
+  refundPatch: refundPlan.appointmentPatches[0],
+});
+assert.equal(cancelledOccurrencePatch.status, "cancelled");
+assert.equal(cancelledOccurrencePatch.cancelledBy, "customer");
+assert.equal(cancelledOccurrencePatch.cancelledAt, "2026-09-08T10:00:00.000Z");
+assert.equal(cancelledOccurrencePatch.cancellationReason, "cancelled_by_customer");
+assert.equal(cancelledOccurrencePatch.minutesRefunded, true);
+assert.ok(Object.values(cancelledOccurrencePatch).every((value) => value !== undefined));
+
 const refund = calculateAppointmentRefund(
   { id: "bono-a", estado: "agotado", minutosTotales: 240, minutosRestantes: 0 },
   {
@@ -377,6 +405,8 @@ assert.doesNotMatch(
 );
 assert.match(seriesSource, /validateReservedSeriesMinutes/);
 assert.match(seriesSource, /planSeriesMinutesRefund/);
+assert.match(seriesSource, /buildPendingSeriesOccurrencePatch/);
+assert.doesNotMatch(seriesSource, /cancelledBy:\s*input\.appointmentStatus === "cancelled" \? "customer" : undefined/);
 assert.match(indexSource, /Los entrenamientos recurrentes no se pueden modificar individualmente/);
 assert.match(indexSource, /recurrenceSeriesId/);
 assert.match(indexSource, /shouldSkipRecurringFinanceReconciliation/);

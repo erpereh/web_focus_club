@@ -57,8 +57,10 @@ import {
     normalizeSiteConfig,
     sanitizeSiteConfigUpdate,
 } from './site-config';
+import { getSlotBlocks } from './appointment-slots';
 
 export { normalizeSiteConfig };
+export { doesSessionFitWithinSchedule, generateTimeSlots } from './appointment-slots';
 
 const DEFAULT_CENTRO_ZONAS: CentroZona[] = [
     {
@@ -1210,29 +1212,6 @@ function slotOccupancyId(date: string, time: string): string {
     return `${date}_${time}`;
 }
 
-/**
- * Devuelve los bloques de 30 min que cubre una sesión.
- * Ej: startTime="09:00", durationMinutes=60 → ["09:00", "09:30"]
- *     startTime="09:00", durationMinutes=45 → ["09:00", "09:30"]
- *     startTime="09:00", durationMinutes=30 → ["09:00"]
- */
-function getSlotBlocks(startTime: string, durationMinutes: number): string[] {
-    const [h, m] = startTime.split(':').map(Number);
-    const startTotal = h * 60 + m;
-    const numBlocks = Math.ceil(durationMinutes / 15);
-    const blocks = new Set<string>();
-
-    for (let i = 0; i < numBlocks; i += 1) {
-        const total = startTotal + i * 15;
-        const legacyTotal = Math.floor(total / 30) * 30;
-        [total, legacyTotal].forEach((blockTotal) => {
-            blocks.add(`${String(Math.floor(blockTotal / 60)).padStart(2, '0')}:${String(blockTotal % 60).padStart(2, '0')}`);
-        });
-    }
-
-    return Array.from(blocks);
-}
-
 async function incrementSingleSlot(date: string, time: string): Promise<void> {
     const ref = doc(db, 'slot_occupancy', slotOccupancyId(date, time));
     const snap = await getDoc(ref);
@@ -1396,6 +1375,49 @@ export function subscribeMonthAvailability(
     };
 }
 
+const FIRESTORE_IN_QUERY_LIMIT = 30;
+
+function chunkValues<T>(values: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let index = 0; index < values.length; index += size) {
+        chunks.push(values.slice(index, index + size));
+    }
+    return chunks;
+}
+
+/**
+ * One-shot occupancy + blocked_slots for a bounded set of dates (max 20 recurring occurrences).
+ * Client helper only — not a Cloud Function.
+ */
+export async function getAvailabilityForDates(dates: string[]): Promise<{
+    occupancy: Record<string, number>;
+    blockedSlots: BlockedSlot[];
+}> {
+    const uniqueDates = [...new Set(dates.filter(Boolean))];
+    if (uniqueDates.length === 0) {
+        return { occupancy: {}, blockedSlots: [] };
+    }
+
+    const occupancy: Record<string, number> = {};
+    const blockedSlots: BlockedSlot[] = [];
+
+    await Promise.all(chunkValues(uniqueDates, FIRESTORE_IN_QUERY_LIMIT).map(async (dateChunk) => {
+        const [occupancySnap, blockedSnap] = await Promise.all([
+            getDocs(query(collection(db, 'slot_occupancy'), where('date', 'in', dateChunk))),
+            getDocs(query(collection(db, 'blocked_slots'), where('date', 'in', dateChunk))),
+        ]);
+        occupancySnap.docs.forEach((d) => {
+            const data = d.data() as SlotOccupancy;
+            occupancy[`${data.date}_${data.time}`] = data.count;
+        });
+        blockedSnap.docs.forEach((d) => {
+            blockedSlots.push({ id: d.id, ...d.data() } as BlockedSlot);
+        });
+    }));
+
+    return { occupancy, blockedSlots };
+}
+
 // ============================================
 // ENTRENADORES (TRAINERS)
 // ============================================
@@ -1531,39 +1553,6 @@ export async function addActivityLog(log: Omit<ActivityLog, 'timestamp'>): Promi
 // ============================================
 // CONFIGURACIÓN GLOBAL DEL SITIO
 // ============================================
-
-/**
- * Genera un array de franjas horarias a partir de la configuración.
- * Ej: { startHour: 8, endHour: 20, slotInterval: 30 } → ['08:00', '08:30', '09:00', ..., '19:30']
- */
-export function doesSessionFitWithinSchedule(config: SiteConfig, startTime: string, durationMinutes: number): boolean {
-    const normalizedConfig = normalizeSiteConfig(config);
-    const [h, min] = startTime.split(':').map(Number);
-    if (!Number.isFinite(h) || !Number.isFinite(min) || !Number.isFinite(durationMinutes)) return false;
-
-    const startMinutes = h * 60 + min;
-    const scheduleStart = normalizedConfig.startHour * 60;
-    const scheduleEnd = normalizedConfig.endHour * 60;
-
-    return startMinutes >= scheduleStart && startMinutes + durationMinutes <= scheduleEnd;
-}
-
-export function generateTimeSlots(config: SiteConfig, durationMinutes?: number): string[] {
-    const normalizedConfig = normalizeSiteConfig(config);
-    const interval = normalizedConfig.slotInterval;
-    const slots: string[] = [];
-    const startMinutes = normalizedConfig.startHour * 60;
-    const endMinutes = normalizedConfig.endHour * 60;
-    for (let m = startMinutes; m < endMinutes; m += interval) {
-        const h = Math.floor(m / 60);
-        const min = m % 60;
-        const time = `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
-        if (durationMinutes == null || doesSessionFitWithinSchedule(normalizedConfig, time, durationMinutes)) {
-            slots.push(time);
-        }
-    }
-    return slots;
-}
 
 export async function getSiteConfig(): Promise<SiteConfig> {
     const snap = await getDoc(doc(db, 'site_config', 'main'));

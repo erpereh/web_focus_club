@@ -92,4 +92,73 @@ describe('RecurringHastaSelect', () => {
         expect(screen.getByRole('button', { name: /Selecciona la última sesión/ })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /29\/09\/2026/ })).not.toBeInTheDocument();
     });
+
+    it('shows a loading status and does not treat options as available', () => {
+        const onChange = vi.fn();
+        render(
+            <RecurringHastaSelect
+                options={OPTIONS}
+                value=""
+                onChange={onChange}
+                emptyReason={null}
+                availabilityLoading
+            />,
+        );
+        fireEvent.click(screen.getByRole('button', { name: /Selecciona la última sesión/ }));
+        expect(screen.getByRole('status')).toHaveTextContent('Comprobando disponibilidad...');
+        fireEvent.click(screen.getByRole('option', { name: '15/09/2026 · 2 sesiones · 60 min' }));
+        expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('does not select a blocked option and selects an available one', () => {
+        const onChange = vi.fn();
+        render(
+            <RecurringHastaSelect
+                options={OPTIONS}
+                value=""
+                onChange={onChange}
+                emptyReason={null}
+                optionStatuses={[
+                    { option: OPTIONS[0], availability: 'available' },
+                    {
+                        option: OPTIONS[1],
+                        availability: 'blocked',
+                        problemDate: '2026-09-22',
+                        problemTime: '11:00',
+                        message: 'La sesión del 22/09 está bloqueada.',
+                    },
+                    {
+                        option: OPTIONS[2],
+                        availability: 'blocked',
+                        problemDate: '2026-09-22',
+                        problemTime: '11:00',
+                        message: 'La sesión del 22/09 está bloqueada.',
+                    },
+                ]}
+            />,
+        );
+        fireEvent.click(screen.getByRole('button', { name: /Selecciona la última sesión/ }));
+        fireEvent.click(screen.getByRole('option', { name: '22/09/2026 · 3 sesiones · 90 min' }));
+        expect(onChange).not.toHaveBeenCalled();
+        expect(screen.getAllByText('La sesión del 22/09 está bloqueada.').length).toBeGreaterThan(0);
+        fireEvent.click(screen.getByRole('option', { name: '15/09/2026 · 2 sesiones · 60 min' }));
+        expect(onChange).toHaveBeenCalledWith('2026-09-15');
+    });
+
+    it('allows selection during a preview error without showing available checks', () => {
+        const onChange = vi.fn();
+        render(
+            <RecurringHastaSelect
+                options={OPTIONS}
+                value=""
+                onChange={onChange}
+                emptyReason={null}
+                availabilityError
+            />,
+        );
+        fireEvent.click(screen.getByRole('button', { name: /Selecciona la última sesión/ }));
+        expect(screen.getAllByText('No se ha podido comprobar la disponibilidad.').length).toBeGreaterThan(0);
+        fireEvent.click(screen.getByRole('option', { name: '15/09/2026 · 2 sesiones · 60 min' }));
+        expect(onChange).toHaveBeenCalledWith('2026-09-15');
+    });
 });

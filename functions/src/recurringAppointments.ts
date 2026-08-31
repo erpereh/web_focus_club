@@ -494,6 +494,28 @@ export function planSeriesMinutesRefund(input: {
   };
 }
 
+/**
+ * Occurrence patch for finalizePendingSeries. Never includes undefined values:
+ * Firestore Admin SDK rejects them (INTERNAL on reject).
+ */
+export function buildPendingSeriesOccurrencePatch(input: {
+  status: "rejected" | "cancelled";
+  now: string;
+  refundPatch: Record<string, unknown>;
+}): Record<string, unknown> {
+  const patch: Record<string, unknown> = {
+    status: input.status,
+    updatedAt: input.now,
+    ...input.refundPatch,
+  };
+  if (input.status === "cancelled") {
+    patch.cancelledBy = "customer";
+    patch.cancelledAt = input.now;
+    patch.cancellationReason = "cancelled_by_customer";
+  }
+  return patch;
+}
+
 export function isRecurringBulkManagedTransition(
   before: { status?: string; recurrenceSeriesId?: string },
   after: { status?: string; recurrenceSeriesId?: string },

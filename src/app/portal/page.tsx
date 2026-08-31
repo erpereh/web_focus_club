@@ -48,10 +48,18 @@ import type { TimeSlot, Appointment, Bono, Trainer } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import {
   formatRecurringSeriesPreview,
+  generateRecurringOccurrenceDates,
   getRecurringHastaViewModel,
   sanitizeRecurringEndDate,
 } from '@/lib/recurring-appointments';
+import {
+  evaluateRecurringHastaOptions,
+  sanitizeRecurringEndDateByAvailability,
+  type RecurringHastaAvailabilityPhase,
+  type RecurringHastaOptionStatus,
+} from '@/lib/recurring-hasta-availability';
 import { RecurringHastaSelect } from '@/components/ui/recurring-hasta-select';
+import { getSlotBlocks } from '@/lib/appointment-slots';
 import {
   createAppointmentSecure,
   createRecurringAppointments,
@@ -66,6 +74,8 @@ import {
   subscribeActiveTrainers,
   subscribeAppointmentsByUser,
   subscribeBonosByUser,
+  getAvailabilityForDates,
+  getSiteConfig,
 } from '@/lib/firestore';
 import { updatePassword } from 'firebase/auth';
 import { cn } from '@/lib/utils';
@@ -181,6 +191,8 @@ export default function PortalPage() {
     startDate: '',
     endDate: '',
   });
+  const [hastaAvailabilityPhase, setHastaAvailabilityPhase] = useState<RecurringHastaAvailabilityPhase>('idle');
+  const [hastaOptionStatuses, setHastaOptionStatuses] = useState<RecurringHastaOptionStatus[]>([]);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -330,17 +342,9 @@ export default function PortalPage() {
         const slot = a.approvedSlot || a.preferredSlots?.[0];
         if (!slot) return;
         const dur = parseInt(a.duration || '60', 10);
-        const [h, m] = slot.time.split(':').map(Number);
-        const startTotal = h * 60 + m;
-        const numBlocks = Math.ceil(dur / 15);
-        for (let i = 0; i < numBlocks; i++) {
-          const total = startTotal + i * 15;
-          const legacyTotal = Math.floor(total / 30) * 30;
-          [total, legacyTotal].forEach((blockTotal) => {
-            const blockTime = `${String(Math.floor(blockTotal / 60)).padStart(2, '0')}:${String(blockTotal % 60).padStart(2, '0')}`;
-            keys.add(`${slot.date}_${blockTime}`);
-          });
-        }
+        getSlotBlocks(slot.time, dur).forEach((blockTime) => {
+          keys.add(`${slot.date}_${blockTime}`);
+        });
       });
     return keys;
   }, [userAppointments]);
@@ -355,10 +359,78 @@ export default function PortalPage() {
 
   useEffect(() => {
     setFormData((prev) => {
-      const nextEndDate = sanitizeRecurringEndDate(prev.endDate, recurringHasta.options);
+      const mathSanitized = sanitizeRecurringEndDate(prev.endDate, recurringHasta.options);
+      const nextEndDate = sanitizeRecurringEndDateByAvailability(
+        mathSanitized,
+        hastaOptionStatuses,
+        hastaAvailabilityPhase,
+      );
       return nextEndDate === prev.endDate ? prev : { ...prev, endDate: nextEndDate };
     });
-  }, [recurringHasta.options]);
+  }, [recurringHasta.options, hastaOptionStatuses, hastaAvailabilityPhase]);
+
+  useEffect(() => {
+    if (
+      formData.bookingType !== 'recurring'
+      || !formData.startDate
+      || !formData.preferredSlot?.time
+      || recurringHasta.options.length === 0
+    ) {
+      setHastaAvailabilityPhase('idle');
+      setHastaOptionStatuses([]);
+      return;
+    }
+
+    let cancelled = false;
+    setHastaAvailabilityPhase('loading');
+    const lastEndDate = recurringHasta.options[recurringHasta.options.length - 1].endDate;
+    const dates = generateRecurringOccurrenceDates(
+      formData.startDate,
+      formData.intervalDays,
+      lastEndDate,
+    );
+    const startTime = formData.preferredSlot.time;
+    const durationMinutes = parseInt(formData.duration, 10);
+    const bookedKeys = userBookedSlotKeys;
+
+    Promise.all([getAvailabilityForDates(dates), getSiteConfig()])
+      .then(([availability, config]) => {
+        if (cancelled) return;
+        const blockedKeys = new Set(
+          availability.blockedSlots.map((slot) => `${slot.date}_${slot.time}`),
+        );
+        setHastaOptionStatuses(evaluateRecurringHastaOptions({
+          startDate: formData.startDate,
+          startTime,
+          intervalDays: formData.intervalDays,
+          durationMinutes,
+          options: recurringHasta.options,
+          occupancy: availability.occupancy,
+          blockedKeys,
+          userBookedSlotKeys: bookedKeys,
+          siteConfig: config,
+          now: new Date(),
+        }));
+        setHastaAvailabilityPhase('ready');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setHastaOptionStatuses([]);
+        setHastaAvailabilityPhase('error');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    formData.bookingType,
+    formData.startDate,
+    formData.preferredSlot?.time,
+    formData.duration,
+    formData.intervalDays,
+    recurringHasta.options,
+    userBookedSlotKeys,
+  ]);
 
   // Al modificar una cita, su franja actual no debe bloquearse contra sí misma.
   const rescheduleBookedSlotKeys = useMemo(() => {
@@ -369,16 +441,9 @@ export default function PortalPage() {
         const slot = a.approvedSlot || a.preferredSlots?.[0];
         if (!slot) return;
         const duration = parseInt(a.duration || '60', 10);
-        const [hours, minutes] = slot.time.split(':').map(Number);
-        const start = hours * 60 + minutes;
-        for (let index = 0; index < Math.ceil(duration / 15); index++) {
-          const total = start + index * 15;
-          const legacyTotal = Math.floor(total / 30) * 30;
-          [total, legacyTotal].forEach((blockTotal) => {
-            const blockTime = `${String(Math.floor(blockTotal / 60)).padStart(2, '0')}:${String(blockTotal % 60).padStart(2, '0')}`;
-            keys.add(`${slot.date}_${blockTime}`);
-          });
-        }
+        getSlotBlocks(slot.time, duration).forEach((blockTime) => {
+          keys.add(`${slot.date}_${blockTime}`);
+        });
       });
     return keys;
   }, [selectedAppointment, userAppointments]);
@@ -1866,6 +1931,9 @@ export default function PortalPage() {
                               value={formData.endDate}
                               onChange={(endDate) => setFormData(prev => ({ ...prev, endDate }))}
                               emptyReason={recurringHasta.emptyReason}
+                              optionStatuses={hastaAvailabilityPhase === 'ready' ? hastaOptionStatuses : undefined}
+                              availabilityLoading={hastaAvailabilityPhase === 'loading'}
+                              availabilityError={hastaAvailabilityPhase === 'error'}
                             />
                           </div>
                           {formData.endDate && recurringHasta.options.some((option) => option.endDate === formData.endDate) && (

@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Clock, Users, Lock, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { doesSessionFitWithinSchedule, generateTimeSlots, subscribeMonthAvailability, subscribeSiteConfig } from '@/lib/firestore';
+import { getSlotBlocks } from '@/lib/appointment-slots';
 import { DEFAULT_SITE_CONFIG } from '@/lib/site-config';
 import type { BlockedSlot, TimeSlot, SiteConfig } from '@/types';
 
@@ -83,24 +84,6 @@ function isPastTime(year: number, month: number, day: number, time: string): boo
   const slotMinutes = hours * 60 + minutes;
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
   return slotMinutes <= nowMinutes;
-}
-
-/** Bloques de 30 min que cubre una sesión (helper local para validación de click) */
-function getCalendarSlotBlocks(startTime: string, durationMinutes: number): string[] {
-  const [h, m] = startTime.split(':').map(Number);
-  const startTotal = h * 60 + m;
-  const numBlocks = Math.ceil(durationMinutes / 15);
-  const blocks = new Set<string>();
-
-  for (let i = 0; i < numBlocks; i += 1) {
-    const total = startTotal + i * 15;
-    const legacyTotal = Math.floor(total / 30) * 30;
-    [total, legacyTotal].forEach((blockTotal) => {
-      blocks.add(`${String(Math.floor(blockTotal / 60)).padStart(2, '0')}:${String(blockTotal % 60).padStart(2, '0')}`);
-    });
-  }
-
-  return Array.from(blocks);
 }
 
 // ============================================
@@ -215,7 +198,7 @@ export function InteractiveCalendar({
   function getSlotStatus(day: number, time: string): SlotStatus {
     const dateKey = formatDateKey(currentYear, currentMonth, day);
     const slotKey = `${dateKey}_${time}`;
-    const coveredBlocks = getCalendarSlotBlocks(time, selectedDuration);
+    const coveredBlocks = getSlotBlocks(time, selectedDuration);
     const isBlockedExact = blockedSet.has(slotKey);
     const isBlockedByOverlap = coveredBlocks.some((blockTime) => blockedSet.has(`${dateKey}_${blockTime}`));
 
@@ -275,7 +258,7 @@ export function InteractiveCalendar({
     }
 
     // Validar todos los bloques de 30 min que cubrirá la sesión
-    const blocks = getCalendarSlotBlocks(time, selectedDuration);
+    const blocks = getSlotBlocks(time, selectedDuration);
     for (const blockTime of blocks) {
       const blockStatus = getSlotStatus(selectedDay, blockTime);
       if (blockStatus.isBlocked) return;
