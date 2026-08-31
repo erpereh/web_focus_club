@@ -3255,7 +3255,7 @@ export default function AdminPage() {
                                       {appointment.name.charAt(0)}
                                     </div>
                                   )}
-                                  <div>
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <h3 className="font-semibold text-[var(--color-text-primary)] text-lg inline-flex items-center gap-2">
                                       {appointment.name}
                                       {appointment.recurrenceSeriesId && (
