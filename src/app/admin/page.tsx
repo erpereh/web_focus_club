@@ -293,6 +293,8 @@ const durationLabels: Record<string, string> = {
   '90': '90 minutos', // legacy
 };
 
+const BONO_ACTION_BTN_CLASS = 'w-[150px] h-8 px-3 py-1.5 rounded-lg text-xs font-medium inline-flex items-center justify-center gap-1 transition-colors';
+
 function formatDateInputLocal(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -3700,9 +3702,9 @@ export default function AdminPage() {
                                       alert('Error al descontar minutos');
                                     }
                                   }}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
+                                  className={cn(BONO_ACTION_BTN_CLASS, 'bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20')}
                                 >
-                                  <Minus className="w-3 h-3" /> Descontar 30 min
+                                  <Minus className="w-3 h-3 shrink-0" /> Descontar 30 min
                                 </button>
                                 <button
                                   onClick={async () => {
@@ -3717,9 +3719,9 @@ export default function AdminPage() {
                                       alert(err instanceof Error ? err.message : 'Error al añadir minutos');
                                     }
                                   }}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)] transition-colors flex items-center gap-1"
+                                  className={cn(BONO_ACTION_BTN_CLASS, 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)]')}
                                 >
-                                  <Plus className="w-3 h-3" /> Añadir 30 min
+                                  <Plus className="w-3 h-3 shrink-0" /> Añadir 30 min
                                 </button>
                                 <button
                                   onClick={async () => {
@@ -3742,9 +3744,9 @@ export default function AdminPage() {
                                       alert('Error al descontar minutos');
                                     }
                                   }}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
+                                  className={cn(BONO_ACTION_BTN_CLASS, 'bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20')}
                                 >
-                                  <Minus className="w-3 h-3" /> Descontar 45 min
+                                  <Minus className="w-3 h-3 shrink-0" /> Descontar 45 min
                                 </button>
                                 <button
                                   onClick={async () => {
@@ -3759,9 +3761,9 @@ export default function AdminPage() {
                                       alert(err instanceof Error ? err.message : 'Error al añadir minutos');
                                     }
                                   }}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)] transition-colors flex items-center gap-1"
+                                  className={cn(BONO_ACTION_BTN_CLASS, 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)]')}
                                 >
-                                  <Plus className="w-3 h-3" /> Añadir 45 min
+                                  <Plus className="w-3 h-3 shrink-0" /> Añadir 45 min
                                 </button>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
@@ -3774,23 +3776,54 @@ export default function AdminPage() {
                                     setEditBonoDatesError('');
                                     setShowEditBonoDatesModal(true);
                                   }}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-muted/20 text-[var(--color-text-secondary)] border border-white/10 hover:text-[var(--color-text-primary)] hover:border-white/20 transition-colors flex items-center gap-1"
+                                  className={cn(BONO_ACTION_BTN_CLASS, 'bg-muted/20 text-[var(--color-text-secondary)] border border-white/10 hover:text-[var(--color-text-primary)] hover:border-white/20')}
                                 >
-                                  <Edit3 className="w-3 h-3" /> Editar fechas
+                                  <Edit3 className="w-3 h-3 shrink-0" /> Editar fechas
                                 </button>
                                 <button
                                   onClick={() => { setDeleteBonoClient(client); setShowDeleteBonoModal(true); }}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors flex items-center gap-1"
+                                  className={cn(BONO_ACTION_BTN_CLASS, 'bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20')}
                                 >
-                                  <Trash2 className="w-3 h-3" /> Eliminar Bono
+                                  <Trash2 className="w-3 h-3 shrink-0" /> Eliminar Bono
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const defaults = getDefaultBonoDateRange();
+                                    setAssignBonoClient(client);
+                                    setAssignBonoTamano(240);
+                                    setAssignBonoStartDate(defaults.startDate);
+                                    setAssignBonoEndDate(defaults.endDate);
+                                    setAssignBonoError('');
+                                    setShowAssignBonoModal(true);
+                                  }}
+                                  className={cn(BONO_ACTION_BTN_CLASS, 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)]')}
+                                >
+                                  <Plus className="w-3 h-3 shrink-0" /> Asignar Bono
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    const [bonos, appts] = await Promise.all([
+                                      getBonosByUser(client.uid),
+                                      getAppointmentsByUser(client.uid),
+                                    ]);
+                                    setBonoHistoryData(bonos);
+                                    setClientAppointmentsHistory(
+                                      appts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                                    );
+                                    setBonoHistoryClientName(client.name);
+                                    setShowBonoHistoryModal(true);
+                                  }}
+                                  className={cn(BONO_ACTION_BTN_CLASS, 'bg-muted/20 text-[var(--color-text-secondary)] border border-white/10 hover:text-[var(--color-text-primary)] hover:border-white/20')}
+                                >
+                                  <History className="w-3 h-3 shrink-0" /> Historial
                                 </button>
                                 </div>
                               </div>
                             </div>
                           ) : (
+                            <>
                             <p className="text-xs text-[var(--color-text-secondary)] mb-2">Sin bono activo</p>
-                          )}
-                          <div className="mt-2 flex flex-wrap gap-2">
+                            <div className="flex flex-wrap gap-2">
                             <button
                               onClick={() => {
                                 const defaults = getDefaultBonoDateRange();
@@ -3801,9 +3834,9 @@ export default function AdminPage() {
                                 setAssignBonoError('');
                                 setShowAssignBonoModal(true);
                               }}
-                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)] transition-colors flex items-center gap-1"
+                              className={cn(BONO_ACTION_BTN_CLASS, 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)]')}
                             >
-                              <Plus className="w-3 h-3" /> Asignar Bono
+                              <Plus className="w-3 h-3 shrink-0" /> Asignar Bono
                             </button>
                             <button
                               onClick={async () => {
@@ -3818,11 +3851,13 @@ export default function AdminPage() {
                                 setBonoHistoryClientName(client.name);
                                 setShowBonoHistoryModal(true);
                               }}
-                              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-muted/20 text-[var(--color-text-secondary)] border border-white/10 hover:text-[var(--color-text-primary)] hover:border-white/20 transition-colors flex items-center gap-1"
+                              className={cn(BONO_ACTION_BTN_CLASS, 'bg-muted/20 text-[var(--color-text-secondary)] border border-white/10 hover:text-[var(--color-text-primary)] hover:border-white/20')}
                             >
-                              <History className="w-3 h-3" /> Historial
+                              <History className="w-3 h-3 shrink-0" /> Historial
                             </button>
-                          </div>
+                            </div>
+                            </>
+                          )}
                         </div>
                       </GlassCard>
                     ))}
