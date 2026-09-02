@@ -3677,7 +3677,8 @@ export default function AdminPage() {
                                   }}
                                 />
                               </div>
-                              <div className="flex flex-wrap gap-2">
+                              <div className="space-y-2">
+                                <div className="flex flex-wrap gap-2">
                                 <button
                                   onClick={async () => {
                                     const bono = clientBonos[client.uid]!;
@@ -3721,6 +3722,50 @@ export default function AdminPage() {
                                   <Plus className="w-3 h-3" /> Añadir 30 min
                                 </button>
                                 <button
+                                  onClick={async () => {
+                                    const bono = clientBonos[client.uid]!;
+                                    if (getBonoMinutosRestantes(bono) < 45) {
+                                      alert('Este bono no tiene minutos suficientes para descontar.');
+                                      return;
+                                    }
+                                    if (!window.confirm(`¿Descontar 45 min manualmente del bono de ${client.name}?`)) return;
+                                    try {
+                                      await manualDeductBonoMinutes(bono.id, 45, user?.email || 'admin');
+                                      await addActivityLog({
+                                        action: 'bono_manual_deduct',
+                                        adminEmail: user?.email || 'unknown',
+                                        details: `Cliente: ${client.name}, Bono: ${bono.id}, 45 min`,
+                                      });
+                                      await refreshData();
+                                    } catch (err) {
+                                      console.error('Error deducting minutes:', err);
+                                      alert('Error al descontar minutos');
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors flex items-center gap-1"
+                                >
+                                  <Minus className="w-3 h-3" /> Descontar 45 min
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    const bono = clientBonos[client.uid]!;
+                                    if (!window.confirm(`¿Añadir 45 min al bono de ${client.name}?`)) return;
+                                    try {
+                                      await addBonoMinutes(bono.id, 45);
+                                      await addActivityLog({ action: 'bono_manual_add', adminEmail: user?.email || 'unknown', details: `Cliente: ${client.name}, Bono: ${bono.id}, 45 min` });
+                                      await refreshData();
+                                    } catch (err) {
+                                      console.error('Error adding minutes:', err);
+                                      alert(err instanceof Error ? err.message : 'Error al añadir minutos');
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)] transition-colors flex items-center gap-1"
+                                >
+                                  <Plus className="w-3 h-3" /> Añadir 45 min
+                                </button>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                <button
                                   onClick={() => {
                                     const bono = clientBonos[client.uid]!;
                                     setEditBonoDatesClient(client);
@@ -3739,6 +3784,7 @@ export default function AdminPage() {
                                 >
                                   <Trash2 className="w-3 h-3" /> Eliminar Bono
                                 </button>
+                                </div>
                               </div>
                             </div>
                           ) : (

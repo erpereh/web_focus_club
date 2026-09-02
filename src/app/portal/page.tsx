@@ -80,6 +80,10 @@ import {
 import { updatePassword } from 'firebase/auth';
 import { cn } from '@/lib/utils';
 import { validatePassword, validateSpanishPhone } from '@/lib/validation';
+import {
+  isSameDayAppointment,
+  pendingSeriesHasSameDayOccurrence,
+} from '@/lib/madrid-date';
 
 // ============================================
 // TIPOS
@@ -1590,10 +1594,22 @@ export default function PortalPage() {
                 const status = statusConfig[appointment.status];
                 const StatusIcon = status.icon;
                 const appointmentSlot = appointment.approvedSlot || appointment.preferredSlots[0];
+                const now = new Date();
+                const isPendingSeries = Boolean(appointment.recurrenceSeriesId && appointment.status === 'pending');
+                const isSameDay = isSameDayAppointment(appointment, now);
+                const seriesHasTodayOccurrence = isPendingSeries
+                  && pendingSeriesHasSameDayOccurrence(userAppointments, appointment.recurrenceSeriesId!, now);
                 const canManageAppointment = appointment.userId === user?.uid
                   && (appointment.status === 'pending' || appointment.status === 'approved')
                   && !!appointmentSlot
-                  && new Date(`${appointmentSlot.date}T${appointmentSlot.time}:00`) > new Date();
+                  && new Date(`${appointmentSlot.date}T${appointmentSlot.time}:00`) > now
+                  && !isSameDay
+                  && !seriesHasTodayOccurrence;
+                const sameDayNotice = seriesHasTodayOccurrence
+                  ? 'Esta serie incluye una cita de hoy y ya no puede cancelarse.'
+                  : isSameDay
+                    ? 'Las citas no se pueden modificar ni cancelar el mismo día.'
+                    : null;
 
                 return (
                   <>
@@ -1727,6 +1743,12 @@ export default function PortalPage() {
                                   : 'Cancelar cita'}
                             </PremiumButton>
                           </div>
+                        )}
+
+                        {sameDayNotice && (
+                          <p className="text-sm text-[var(--color-text-secondary)] pt-2">
+                            {sameDayNotice}
+                          </p>
                         )}
 
                         {appointmentActionError && (

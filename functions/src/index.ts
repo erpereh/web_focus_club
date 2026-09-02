@@ -15,11 +15,15 @@ import {
   onlyGoogleCalendarSyncFieldsChanged,
 } from "./googleCalendarSync";
 import {
+  clientOwnAppointmentMutationBlockedReason,
+  getAppointmentEffectiveSlot,
   getSlotBlocks,
   isRescheduleCapacityAvailable,
   isSlotAtCapacity,
   reconcileAppointmentMinutes,
   reconcileOwnAppointmentReschedule,
+  SAME_DAY_CHANGE_MESSAGE,
+  SAME_DAY_CHANGE_NOT_ALLOWED,
   selectExactlyOneActiveBono,
   shouldReconcileAppointmentTransition,
   slotOccupancyDocId,
@@ -450,8 +454,15 @@ function slotDateTime(slot: TimeSlot): Date {
 function toHttpsError(
   code: "invalid-argument" | "failed-precondition" | "permission-denied" | "resource-exhausted" | "internal",
   message: string,
+  details?: Record<string, unknown>,
 ): HttpsError {
-  return new HttpsError(code, message);
+  return details ? new HttpsError(code, message, details) : new HttpsError(code, message);
+}
+
+function throwSameDayChangeNotAllowed(): never {
+  throw toHttpsError("failed-precondition", SAME_DAY_CHANGE_MESSAGE, {
+    reason: SAME_DAY_CHANGE_NOT_ALLOWED,
+  });
 }
 
 function normalizeTextField(value: unknown, fieldName: string, maxLength: number, required = true): string {
@@ -794,9 +805,7 @@ async function sendAppointmentMakeNotificationSafely(
 }
 
 function notificationSlot(appointment: AppointmentDoc): TimeSlot | undefined {
-  return appointment.approvedSlot
-    ?? appointment.preferredSlots?.[0]
-    ?? (appointment.date && appointment.time ? { date: appointment.date, time: appointment.time } : undefined);
+  return getAppointmentEffectiveSlot(appointment);
 }
 
 function appointmentStatusNotification(status: "approved" | "rejected" | "cancelled", appointment: AppointmentDoc): { title: string; body: string } {
@@ -2164,13 +2173,24 @@ export const cancelOwnAppointment = onCall<CancelOwnAppointmentRequest>(
           "Las solicitudes recurrentes pendientes deben cancelarse como serie.",
         );
       }
+      const nowDate = getNowDate();
+      const blocked = clientOwnAppointmentMutationBlockedReason(appointment, requestUid, nowDate);
+      if (blocked === "not-owner") {
+        throw toHttpsError("permission-denied", "No puedes cancelar la cita de otro usuario.");
+      }
+      if (blocked === "invalid-status") {
+        throw toHttpsError("failed-precondition", "Esta cita ya no se puede cancelar.");
+      }
+      if (blocked === SAME_DAY_CHANGE_NOT_ALLOWED) {
+        throwSameDayChangeNotAllowed();
+      }
       const slot = notificationSlot(appointment);
       const validation = validateOwnFutureAppointment({
         userId: appointment.userId,
         status: appointment.status,
         date: slot?.date,
         time: slot?.time,
-      }, requestUid, getNowDate().getTime());
+      }, requestUid, nowDate.getTime());
       if (validation === "not-owner") {
         throw toHttpsError("permission-denied", "No puedes cancelar la cita de otro usuario.");
       }
@@ -2241,6 +2261,11 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
       }
       if (appointment.status !== "pending" && appointment.status !== "approved") {
         throw toHttpsError("failed-precondition", "Esta cita ya no se puede modificar.");
+      }
+      const nowDate = getNowDate();
+      const blocked = clientOwnAppointmentMutationBlockedReason(appointment, requestUid, nowDate);
+      if (blocked === SAME_DAY_CHANGE_NOT_ALLOWED) {
+        throwSameDayChangeNotAllowed();
       }
 
       const durationMinutes = appointmentDurationMinutes(appointment);

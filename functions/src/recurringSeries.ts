@@ -1,6 +1,6 @@
 import { FieldValue, Firestore, Transaction } from "firebase-admin/firestore";
 import { CallableRequest, HttpsError } from "firebase-functions/v2/https";
-import { slotOccupancyDocId } from "./appointmentLifecycle.js";
+import { slotOccupancyDocId, SAME_DAY_CHANGE_MESSAGE, SAME_DAY_CHANGE_NOT_ALLOWED, seriesHasSameDayOccurrence } from "./appointmentLifecycle.js";
 import {
   collectRecurringOccupancyKeys,
   MAX_RECURRING_OCCURRENCES,
@@ -109,8 +109,8 @@ export interface RecurringSeriesDeps {
   defaultServiceType: string;
 }
 
-function throwHttps(code: HttpsCode, message: string): never {
-  throw new HttpsError(code, message);
+function throwHttps(code: HttpsCode, message: string, details?: Record<string, unknown>): never {
+  throw new HttpsError(code, message, details);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -814,6 +814,11 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
       }));
       if (occurrences.length !== series.occurrenceCount || occurrences.some((occurrence) => occurrence.data.status !== "pending")) {
         throwHttps("failed-precondition", "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.");
+      }
+      if (input.requireOwner && seriesHasSameDayOccurrence(occurrences.map((occurrence) => occurrence.data), getNowDate())) {
+        throwHttps("failed-precondition", SAME_DAY_CHANGE_MESSAGE, {
+          reason: SAME_DAY_CHANGE_NOT_ALLOWED,
+        });
       }
 
       const reserved = validateReservedSeriesMinutes({

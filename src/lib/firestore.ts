@@ -21,6 +21,10 @@ import {
 import { httpsCallable } from 'firebase/functions';
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, storage, functions as firebaseFunctions } from './firebase';
+import {
+    calculateManualBonoAdjustment,
+    manualBonoAdjustmentErrorMessage,
+} from './bono-adjustments';
 import { v4 as uuidv4 } from 'uuid';
 import type {
     UserProfile,
@@ -1750,15 +1754,12 @@ export async function addBonoMinutes(bonoId: string, minutes: number): Promise<v
         const bonoRef = doc(db, 'bonos', bonoId);
         const snap = await transaction.get(bonoRef);
         if (!snap.exists()) throw new Error('Bono no encontrado');
-        const bono = snap.data() as BonoData;
-        const maxMinutes = getBonoMaxMinutes(bono);
-        const currentRemaining = getBonoRemainingMinutes(bono);
-        const newRemaining = Math.max(0, currentRemaining + minutes);
-        const newTotal = Math.max(maxMinutes, newRemaining);
+        const result = calculateManualBonoAdjustment(snap.data() as BonoData, minutes);
+        if (!result.ok) throw new Error(manualBonoAdjustmentErrorMessage(result.reason));
         transaction.update(bonoRef, {
-            minutosRestantes: newRemaining,
-            minutosTotales: newTotal,
-            estado: newRemaining > 0 ? 'activo' : bono.estado,
+            minutosRestantes: result.minutosRestantes,
+            minutosTotales: result.minutosTotales,
+            estado: result.estado,
         });
     });
 }
@@ -1818,13 +1819,20 @@ export async function returnBonoMinutes(bonoId: string, appointmentId: string): 
 
 /** Deducción manual de minutos por parte del admin */
 export async function manualDeductBonoMinutes(bonoId: string, minutes: number, adminEmail: string): Promise<void> {
-    const entry: BonoHistorialEntry = {
-        fecha: new Date().toISOString(),
-        tipo: 'Deducción manual',
-        duracion: String(minutes),
-        appointmentId: 'manual',
-    };
-    await deductBonoMinutes(bonoId, minutes, entry);
+    await runTransaction(db, async (transaction) => {
+        const bonoRef = doc(db, 'bonos', bonoId);
+        const snap = await transaction.get(bonoRef);
+        if (!snap.exists()) throw new Error('Bono no encontrado');
+        const result = calculateManualBonoAdjustment(snap.data() as BonoData, -minutes);
+        if (!result.ok) throw new Error(manualBonoAdjustmentErrorMessage(result.reason));
+        if (!result.historialEntry) throw new Error(manualBonoAdjustmentErrorMessage('invalid-argument'));
+        transaction.update(bonoRef, {
+            minutosRestantes: result.minutosRestantes,
+            minutosTotales: result.minutosTotales,
+            estado: result.estado,
+            historial: arrayUnion(result.historialEntry),
+        });
+    });
 }
 
 /** Recalcular la fecha de expiración de todos los bonos activos */

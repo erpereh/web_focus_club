@@ -406,6 +406,17 @@ assert.doesNotMatch(
 assert.match(seriesSource, /validateReservedSeriesMinutes/);
 assert.match(seriesSource, /planSeriesMinutesRefund/);
 assert.match(seriesSource, /buildPendingSeriesOccurrencePatch/);
+assert.match(seriesSource, /input\.requireOwner && seriesHasSameDayOccurrence/);
+const finalizePendingSource = seriesSource.slice(seriesSource.indexOf("async function finalizePendingSeries"));
+assert.ok(
+  finalizePendingSource.indexOf("input.requireOwner && seriesHasSameDayOccurrence")
+    < finalizePendingSource.indexOf("planSeriesMinutesRefund"),
+  "pending series same-day must reject before refund",
+);
+assert.doesNotMatch(
+  seriesSource.slice(seriesSource.indexOf("rejectRecurringAppointmentSeriesFromAdmin:"), seriesSource.indexOf("cancelOwnRecurringAppointmentSeries:")),
+  /seriesHasSameDayOccurrence/,
+);
 assert.doesNotMatch(seriesSource, /cancelledBy:\s*input\.appointmentStatus === "cancelled" \? "customer" : undefined/);
 assert.match(indexSource, /Los entrenamientos recurrentes no se pueden modificar individualmente/);
 assert.match(indexSource, /recurrenceSeriesId/);

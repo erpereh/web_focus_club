@@ -14,6 +14,13 @@ const {
   isRescheduleCapacityAvailable,
   isSlotAtCapacity,
   shouldReconcileAppointmentTransition,
+  getMadridDateKey,
+  isSameDayInMadrid,
+  getAppointmentEffectiveSlot,
+  isClientSameDayChange,
+  seriesHasSameDayOccurrence,
+  clientOwnAppointmentMutationBlockedReason,
+  SAME_DAY_CHANGE_NOT_ALLOWED,
 } = require("../lib/appointmentLifecycle.js");
 
 class MemoryTransaction {
@@ -160,6 +167,79 @@ assert.equal(shouldReconcileAppointmentTransition("approved", "approved"), true)
 assert.equal(shouldReconcileAppointmentTransition("approved", "cancelled"), false);
 assert.equal(shouldReconcileAppointmentTransition("cancelled", "cancelled"), true);
 
+assert.equal(getMadridDateKey(new Date("2026-07-15T22:30:00.000Z")), "2026-07-16");
+assert.equal(getMadridDateKey(new Date("2026-01-15T23:30:00.000Z")), "2026-01-16");
+assert.equal(getMadridDateKey(new Date("2026-07-15T21:30:00.000Z")), "2026-07-15");
+assert.equal(getMadridDateKey(new Date("2026-07-15T22:00:00.000Z")), "2026-07-16");
+assert.equal(getMadridDateKey(new Date("2026-01-15T22:30:00.000Z")), "2026-01-15");
+assert.equal(getMadridDateKey(new Date("2026-01-15T23:00:00.000Z")), "2026-01-16");
+
+const noonMadrid = new Date("2026-09-02T10:00:00.000Z");
+assert.equal(isSameDayInMadrid("2026-09-02", noonMadrid), true);
+assert.equal(isSameDayInMadrid("2026-09-03", noonMadrid), false);
+assert.equal(isSameDayInMadrid("2026-09-01", noonMadrid), false);
+
+assert.deepEqual(getAppointmentEffectiveSlot({
+  approvedSlot: { date: "2026-09-02", time: "20:00" },
+  preferredSlots: [{ date: "2026-09-03", time: "07:00" }],
+  date: "2026-08-01",
+  time: "10:00",
+}), { date: "2026-09-02", time: "20:00" });
+assert.deepEqual(getAppointmentEffectiveSlot({
+  preferredSlots: [{ date: "2026-09-03", time: "07:00" }],
+  date: "2026-08-01",
+  time: "10:00",
+}), { date: "2026-09-03", time: "07:00" });
+assert.deepEqual(getAppointmentEffectiveSlot({
+  date: "2026-08-01",
+  time: "10:00",
+}), { date: "2026-08-01", time: "10:00" });
+
+assert.equal(isClientSameDayChange({ date: "2026-09-02", time: "20:00" }, noonMadrid), true);
+assert.equal(isClientSameDayChange({ date: "2026-09-02", time: "09:00" }, noonMadrid), true);
+assert.equal(isClientSameDayChange({ date: "2026-09-03", time: "07:00" }, noonMadrid), false);
+assert.equal(isClientSameDayChange({ date: "2026-09-01", time: "20:00" }, noonMadrid), false);
+
+const todayFuture = { userId: "u1", status: "approved", date: "2026-09-02", time: "20:00" };
+const todayPast = { userId: "u1", status: "approved", date: "2026-09-02", time: "09:00" };
+const tomorrowAppt = { userId: "u1", status: "approved", date: "2026-09-03", time: "07:00" };
+const yesterdayAppt = { userId: "u1", status: "approved", date: "2026-09-01", time: "20:00" };
+
+assert.equal(clientOwnAppointmentMutationBlockedReason(todayFuture, "u1", noonMadrid), SAME_DAY_CHANGE_NOT_ALLOWED);
+assert.equal(clientOwnAppointmentMutationBlockedReason(todayPast, "u1", noonMadrid), SAME_DAY_CHANGE_NOT_ALLOWED);
+assert.equal(clientOwnAppointmentMutationBlockedReason(tomorrowAppt, "u1", noonMadrid), undefined);
+assert.equal(clientOwnAppointmentMutationBlockedReason(yesterdayAppt, "u1", noonMadrid), undefined);
+assert.equal(validateOwnFutureAppointment(yesterdayAppt, "u1", noonMadrid.getTime()), "not-future");
+assert.equal(validateOwnFutureAppointment(todayPast, "u1", noonMadrid.getTime()), "not-future");
+assert.equal(validateOwnFutureAppointment(todayFuture, "u1", noonMadrid.getTime()), undefined);
+assert.equal(clientOwnAppointmentMutationBlockedReason(todayFuture, "u2", noonMadrid), "not-owner");
+assert.equal(clientOwnAppointmentMutationBlockedReason({ ...todayFuture, status: "cancelled" }, "u1", noonMadrid), "invalid-status");
+
+assert.equal(seriesHasSameDayOccurrence([
+  { date: "2026-09-02", time: "20:00", status: "pending" },
+  { date: "2026-09-03", time: "07:00", status: "pending" },
+  { date: "2026-09-04", time: "07:00", status: "pending" },
+], noonMadrid), true);
+assert.equal(seriesHasSameDayOccurrence([
+  { date: "2026-09-03", time: "07:00", status: "pending" },
+  { date: "2026-09-04", time: "07:00", status: "pending" },
+], noonMadrid), false);
+assert.equal(seriesHasSameDayOccurrence([
+  { approvedSlot: { date: "2026-09-02", time: "09:00" }, status: "approved" },
+], noonMadrid), true);
+assert.equal(seriesHasSameDayOccurrence([
+  { approvedSlot: { date: "2026-09-03", time: "09:00" }, status: "approved" },
+], noonMadrid), false);
+
+const blockedRescheduleCalls = { released: 0, patches: 0 };
+assert.equal(clientOwnAppointmentMutationBlockedReason({
+  userId: "u1",
+  status: "approved",
+  date: "2026-09-02",
+  time: "20:00",
+}, "u1", noonMadrid), SAME_DAY_CHANGE_NOT_ALLOWED);
+assert.deepEqual(blockedRescheduleCalls, { released: 0, patches: 0 });
+
 // Transaction wiring: these assertions protect the Firestore lifecycle paths
 // that cannot be exercised without an emulator in this dependency-free suite.
 const indexSource = fs.readFileSync(path.join(__dirname, "../src/index.ts"), "utf8");
@@ -179,5 +259,57 @@ assert.doesNotMatch(indexSource, /const MAX_CAPACITY\s*=\s*2/);
 assert.match(indexSource, /shouldReconcileAppointmentTransition\("approved", appointment\.status\)/);
 assert.match(indexSource, /const expectedStatus = changedToRejected \? "rejected" : "cancelled"/);
 assert.match(indexSource, /if \(status === "rejected" \|\| status === "cancelled"\)/);
+
+const cancelOwnSource = indexSource.slice(
+  indexSource.indexOf("export const cancelOwnAppointment"),
+  indexSource.indexOf("export const updateOwnAppointmentSlot"),
+);
+assert.match(cancelOwnSource, /clientOwnAppointmentMutationBlockedReason/);
+assert.match(cancelOwnSource, /SAME_DAY_CHANGE_NOT_ALLOWED/);
+assert.match(cancelOwnSource, /throwSameDayChangeNotAllowed/);
+assert.ok(
+  cancelOwnSource.indexOf("clientOwnAppointmentMutationBlockedReason")
+    < cancelOwnSource.indexOf("validateOwnFutureAppointment"),
+  "same-day must run before not-future",
+);
+assert.ok(
+  cancelOwnSource.indexOf("throwSameDayChangeNotAllowed")
+    < cancelOwnSource.indexOf("refundAppointmentMinutesInTransaction"),
+  "same-day must reject before refund",
+);
+assert.ok(
+  cancelOwnSource.indexOf("throwSameDayChangeNotAllowed")
+    < cancelOwnSource.indexOf("releaseApprovedAppointmentOccupancyInTransaction"),
+  "same-day must reject before occupancy release",
+);
+assert.ok(
+  cancelOwnSource.indexOf("throwSameDayChangeNotAllowed")
+    < cancelOwnSource.indexOf('status: "cancelled"'),
+  "same-day must reject before status write",
+);
+
+const updateOwnSource = indexSource.slice(
+  indexSource.indexOf("export const updateOwnAppointmentSlot"),
+  indexSource.indexOf("export const onUserProfileCreatedWelcomeEmail"),
+);
+assert.match(updateOwnSource, /clientOwnAppointmentMutationBlockedReason/);
+assert.match(updateOwnSource, /throwSameDayChangeNotAllowed/);
+assert.ok(
+  updateOwnSource.indexOf("throwSameDayChangeNotAllowed")
+    < updateOwnSource.indexOf("reconcileOwnAppointmentReschedule"),
+  "same-day must reject before reschedule writes",
+);
+assert.ok(
+  updateOwnSource.indexOf("throwSameDayChangeNotAllowed")
+    < updateOwnSource.indexOf("transaction.get(occupancyQuery)"),
+  "same-day must reject before occupancy queries",
+);
+
+const adminCreateSource = indexSource.slice(
+  indexSource.indexOf("export const createAppointmentFromAdmin"),
+  indexSource.indexOf("export const createRecurringAppointmentsFromAdmin"),
+);
+assert.doesNotMatch(adminCreateSource, /clientOwnAppointmentMutationBlockedReason/);
+assert.doesNotMatch(adminCreateSource, /throwSameDayChangeNotAllowed/);
 
 console.log("appointment lifecycle tests passed");
