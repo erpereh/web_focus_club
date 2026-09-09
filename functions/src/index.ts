@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase-admin/app";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { getAuth } from "firebase-admin/auth";
 import { DocumentReference, DocumentSnapshot, FieldValue, getFirestore, QueryDocumentSnapshot, Transaction } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
@@ -41,6 +41,12 @@ import {
   type CustomerSuggestionMakeEvent,
 } from "./customerSuggestions";
 import { doesSessionFitWithinSchedule, generateTimeSlots, normalizeSiteConfig, type SiteConfig } from "./siteConfig.js";
+import {
+  createUserFromAdminCore,
+  getTrainerDocsByUid,
+  parseCreateUserFromAdminCommonData,
+  syncTrainerProfile,
+} from "./adminUsers";
 
 initializeApp();
 
@@ -111,7 +117,6 @@ interface UserProfile {
 }
 
 type AdminUserRole = "admin" | "trainer" | "user";
-type AdminUserAccessMethod = "password" | "email-reset";
 
 interface CreateUserFromAdminRequest {
   name?: unknown;
@@ -1040,53 +1045,6 @@ function getIsTrainerForRole(role: AdminUserRole): boolean {
   return role === "trainer";
 }
 
-function parseCreateUserFromAdminData(data: unknown): ParsedAdminUserData & {
-  accessMethod: AdminUserAccessMethod;
-  password?: string;
-} {
-  if (!isRecord(data)) {
-    throw toHttpsError("invalid-argument", "Los datos del cliente no son validos.");
-  }
-
-  const name = normalizeTextField(data.name, "nombre", 120);
-  const email = normalizeTextField(data.email, "email", 254).toLowerCase();
-  const phone = normalizeTextField(data.phone, "telefono", 40, false);
-  const role = parseAdminUserRole(data.role);
-  const accessMethod = data.accessMethod;
-
-  if (!isValidEmail(email)) {
-    throw toHttpsError("invalid-argument", "El email no tiene un formato valido.");
-  }
-  if (accessMethod !== "password" && accessMethod !== "email-reset") {
-    throw toHttpsError("invalid-argument", "El metodo de acceso no es valido.");
-  }
-
-  if (accessMethod === "password") {
-    const password = normalizeTextField(data.password, "contrasena temporal", 128);
-    if (password.length < 8) {
-      throw toHttpsError("invalid-argument", "La contrasena temporal debe tener al menos 8 caracteres.");
-    }
-    return {
-      name,
-      email,
-      phone,
-      role,
-      isTrainer: getIsTrainerForRole(role),
-      accessMethod,
-      password,
-    };
-  }
-
-  return {
-    name,
-    email,
-    phone,
-    role,
-    isTrainer: getIsTrainerForRole(role),
-    accessMethod,
-  };
-}
-
 function parseUpdateUserFromAdminData(data: unknown): ParsedAdminUserData & { targetUid: string } {
   if (!isRecord(data)) {
     throw toHttpsError("invalid-argument", "Los datos del cliente no son validos.");
@@ -1153,10 +1111,6 @@ function parseCreateAppointmentFromAdminData(data: unknown): ParsedAdminAppointm
   };
 }
 
-function generateTemporaryPassword(): string {
-  return `${randomBytes(24).toString("base64url")}Aa1!`;
-}
-
 async function requireAdmin(requestUid: string): Promise<UserProfile> {
   const adminSnap = await db.collection("users").doc(requestUid).get();
   const adminProfile = adminSnap.exists ? adminSnap.data() as UserProfile : undefined;
@@ -1166,43 +1120,10 @@ async function requireAdmin(requestUid: string): Promise<UserProfile> {
   return adminProfile;
 }
 
-async function getTrainerDocsByUid(uid: string) {
-  return db.collection("trainers").where("uid", "==", uid).get();
-}
-
-async function syncTrainerProfile(uid: string, name: string, role: AdminUserRole): Promise<void> {
-  const trainerSnap = await getTrainerDocsByUid(uid);
-
-  if (role === "trainer") {
-    if (trainerSnap.empty) {
-      await db.collection("trainers").add({
-        uid,
-        name,
-        active: true,
-        createdAt: new Date().toISOString(),
-      });
-      return;
-    }
-
-    const batch = db.batch();
-    trainerSnap.docs.forEach((docSnap) => {
-      batch.set(docSnap.ref, { name, active: true }, { merge: true });
-    });
-    await batch.commit();
-    return;
-  }
-
-  if (!trainerSnap.empty) {
-    const batch = db.batch();
-    trainerSnap.docs.forEach((docSnap) => batch.delete(docSnap.ref));
-    await batch.commit();
-  }
-}
-
 async function deleteTrainerProfile(uid: string): Promise<void> {
   const [trainerDocSnap, trainerQuerySnap] = await Promise.all([
     db.collection("trainers").doc(uid).get(),
-    getTrainerDocsByUid(uid),
+    getTrainerDocsByUid(db, uid),
   ]);
 
   const refs = new Map<string, DocumentReference>();
@@ -1412,62 +1333,16 @@ export const createUserFromAdmin = onCall<CreateUserFromAdminRequest>(
     }
 
     await requireAdmin(request.auth.uid);
-    const input = parseCreateUserFromAdminData(request.data);
-    const auth = getAuth();
+    const input = parseCreateUserFromAdminCommonData(request.data);
 
-    try {
-      await auth.getUserByEmail(input.email);
-      throw new HttpsError("already-exists", "Ya existe un usuario con este email.");
-    } catch (error) {
-      const code = isRecord(error) && typeof error.code === "string" ? error.code : "";
-      if (code !== "auth/user-not-found") {
-        throw error;
-      }
-    }
-
-    const password = input.accessMethod === "password" ? input.password : generateTemporaryPassword();
-    const createdUser = await auth.createUser({
-      email: input.email,
-      displayName: input.name,
-      password,
-      emailVerified: false,
-    });
-
-    const now = new Date().toISOString();
-    try {
-      await db.collection("users").doc(createdUser.uid).set({
-        uid: createdUser.uid,
-        name: input.name,
-        email: input.email,
-        phone: input.phone,
-        role: input.role,
-        isTrainer: input.isTrainer,
-        createdAt: now,
-        pushNotificationsEnabled: false,
-      });
-
-      await syncTrainerProfile(createdUser.uid, input.name, input.role);
-    } catch (error) {
-      await auth.deleteUser(createdUser.uid).catch((deleteError) => {
-        console.error("[AdminUsers] Failed to delete auth user after Firestore error", deleteError);
-      });
-      throw error;
-    }
-
-    await addAdminUserActivityLog({
-      action: "user_created_by_admin",
+    return createUserFromAdminCore({
+      db,
+      auth: getAuth(),
+      input,
+      rawData: request.data,
       adminUid: request.auth.uid,
       adminEmail: request.auth.token.email ?? "",
-      targetUid: createdUser.uid,
-      email: input.email,
-      role: input.role,
     });
-
-    return {
-      success: true,
-      uid: createdUser.uid,
-      email: input.email,
-    };
   },
 );
 
@@ -1505,7 +1380,7 @@ export const updateUserFromAdmin = onCall<UpdateUserFromAdminRequest>(
       updatedAt: new Date().toISOString(),
     }, { merge: true });
 
-    await syncTrainerProfile(input.targetUid, input.name, input.role);
+    await syncTrainerProfile(db, input.targetUid, input.name, input.role);
 
     const target = targetSnap.data() as UserProfile | undefined;
     await addAdminUserActivityLog({

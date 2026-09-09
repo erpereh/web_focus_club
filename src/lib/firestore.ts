@@ -576,6 +576,7 @@ export interface CreateUserFromAdminResult {
     success: boolean;
     uid: string;
     email: string;
+    repairedExistingAuth: boolean;
 }
 
 export interface UpdateUserFromAdminInput {

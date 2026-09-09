@@ -91,6 +91,10 @@ import {
 } from '@/lib/recurring-appointments';
 import { RecurringHastaSelect } from '@/components/ui/recurring-hasta-select';
 import {
+    getAdminCreateClientSuccessKind,
+    REPAIRED_EXISTING_AUTH_NOTICE,
+} from '@/lib/admin-create-client';
+import {
   getAppointments,
   getAppointmentsByUser,
   updateAppointmentStatus as updateAppointmentStatusFS,
@@ -1667,9 +1671,12 @@ export default function AdminPage() {
     if (!email) return 'El email es obligatorio.';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'El email no tiene un formato valido.';
     if (createClientForm.accessMethod === 'password') {
-      if (!createClientForm.password) return 'La contrasena temporal es obligatoria.';
-      if (createClientForm.password.length < 8) return 'La contrasena temporal debe tener al menos 8 caracteres.';
-      if (createClientForm.password !== createClientForm.confirmPassword) return 'Las contrasenas no coinciden.';
+      const hasPasswordInput = Boolean(createClientForm.password || createClientForm.confirmPassword);
+      if (hasPasswordInput) {
+        if (!createClientForm.password) return 'La contrasena temporal es obligatoria.';
+        if (createClientForm.password.length < 8) return 'La contrasena temporal debe tener al menos 8 caracteres.';
+        if (createClientForm.password !== createClientForm.confirmPassword) return 'Las contrasenas no coinciden.';
+      }
     }
     return '';
   };
@@ -1698,7 +1705,22 @@ export default function AdminPage() {
 
       await refreshData();
 
-      if (createClientForm.accessMethod === 'email-reset') {
+      const successKind = getAdminCreateClientSuccessKind(
+        result.repairedExistingAuth,
+        createClientForm.accessMethod,
+      );
+
+      if (successKind === 'repaired') {
+        closeCreateClientModal();
+        const t = toast({
+          title: 'Usuario recuperado',
+          description: REPAIRED_EXISTING_AUTH_NOTICE,
+        });
+        setTimeout(() => t.dismiss(), 3500);
+        return;
+      }
+
+      if (successKind === 'created-with-reset') {
         try {
           await sendPasswordResetEmail(auth, result.email);
           setClientFormNotice({
