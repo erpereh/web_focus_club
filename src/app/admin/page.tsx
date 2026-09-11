@@ -70,6 +70,12 @@ import { GalleryManager } from '@/components/admin/GalleryManager';
 import { MediaPicker } from '@/components/admin/MediaPicker';
 import { IconPicker } from '@/components/admin/IconPicker';
 import { AppointmentsCalendar } from '@/components/admin/appointments/AppointmentsCalendar';
+import {
+  filterAppointments,
+  getTrainerIdFromFilter,
+  toTrainerFilter,
+  type TrainerFilter,
+} from '@/lib/admin-appointment-filters';
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { VideoFramePreview } from '@/components/ui/VideoFramePreview';
 import { DynamicIcon } from '@/components/ui/DynamicIcon';
@@ -1027,6 +1033,7 @@ export default function AdminPage() {
   const [unreadSupportMessages, setUnreadSupportMessages] = useState(0);
   const switchTab = (tab: TabType) => { setActiveTab(tab); setSidebarOpen(false); };
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [trainerFilter, setTrainerFilter] = useState<TrainerFilter>('all');
   const [appointmentsView, setAppointmentsView] = useState<AppointmentsView>('list');
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<string | null>(null);
 
@@ -1358,15 +1365,26 @@ export default function AdminPage() {
     testimonials: testimonials.filter(t => t.approved).length,
   };
 
-  // Filtrar citas
-  const filteredAppointments = (statusFilter === 'all'
-    ? appointments
-    : appointments.filter((a) => a.status === statusFilter)
-  ).filter((a) => {
-    const q = appointmentSearch.trim().toLowerCase();
-    if (!q) return true;
-    return a.name.toLowerCase().includes(q) || a.email.toLowerCase().includes(q);
-  });
+  const filteredAppointments = useMemo(
+    () => filterAppointments(appointments, {
+      statusFilter,
+      trainerFilter,
+      search: appointmentSearch,
+    }),
+    [appointments, statusFilter, trainerFilter, appointmentSearch],
+  );
+  const trainersForFilter = useMemo(
+    () => [...trainers].sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })),
+    [trainers],
+  );
+  const selectedTrainerFilterLabel = useMemo(() => {
+    if (trainerFilter === 'all') return 'Todos los entrenadores';
+    if (trainerFilter === 'unassigned') return 'Sin entrenador';
+    const trainerId = getTrainerIdFromFilter(trainerFilter);
+    const trainer = trainers.find((item) => item.id === trainerId);
+    if (!trainer) return 'Entrenador';
+    return trainer.active === false ? `${trainer.name} (inactivo)` : trainer.name;
+  }, [trainerFilter, trainers]);
   const clientsByUid = useMemo(() => new Map(clients.map((client) => [client.uid, client])), [clients]);
   const clientsByEmail = useMemo(() => new Map(clients.map((client) => [client.email, client])), [clients]);
   const activeTrainers = useMemo(() => trainers.filter((trainer) => trainer.active !== false), [trainers]);
@@ -3204,6 +3222,47 @@ export default function AdminPage() {
                           )}
                         </PopoverContent>
                       </Popover>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-muted text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                          >
+                            <User className="w-4 h-4 shrink-0" />
+                            {selectedTrainerFilterLabel}
+                            <ChevronDown className="w-4 h-4 shrink-0" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          align="end"
+                          sideOffset={6}
+                          className="z-[200] w-56 max-h-64 overflow-y-auto p-1 bg-[#1a1a1a] border border-[var(--color-border-base)] rounded-xl shadow-2xl"
+                        >
+                          {([
+                            { value: 'all' as const, label: 'Todos los entrenadores' },
+                            { value: 'unassigned' as const, label: 'Sin entrenador' },
+                            ...trainersForFilter.map((trainer) => ({
+                              value: toTrainerFilter(trainer.id),
+                              label: trainer.active === false ? `${trainer.name} (inactivo)` : trainer.name,
+                            })),
+                          ]).map((option) => (
+                            <PopoverClose asChild key={option.value}>
+                              <button
+                                type="button"
+                                onClick={() => setTrainerFilter(option.value)}
+                                className={cn(
+                                  'w-full text-left px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                                  trainerFilter === option.value
+                                    ? 'bg-accent text-[var(--color-bg-base)]'
+                                    : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
+                                )}
+                              >
+                                {option.label}
+                              </button>
+                            </PopoverClose>
+                          ))}
+                        </PopoverContent>
+                      </Popover>
                       <button
                         type="button"
                         onClick={() => setAppointmentsView((view) => (view === 'list' ? 'calendar' : 'list'))}
@@ -3537,6 +3596,8 @@ export default function AdminPage() {
                         <p className="text-[var(--color-text-secondary)]">
                           {appointmentSearch.trim()
                             ? 'No hay coincidencias para esa búsqueda'
+                            : trainerFilter !== 'all'
+                            ? 'No hay citas para este entrenador con los filtros actuales.'
                             : statusFilter === 'all'
                             ? 'Aún no se han recibido solicitudes de cita'
                             : `No hay citas ${statusConfig[statusFilter as keyof typeof statusConfig]?.label.toLowerCase()}`}
