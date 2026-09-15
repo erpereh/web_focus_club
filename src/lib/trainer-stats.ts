@@ -199,7 +199,6 @@ export function calculateTrainerStats(
     now: Date,
 ): TrainerStats {
     const nowTimestamp = now.getTime();
-    const upcomingEndTimestamp = nowTimestamp + (7 * 24 * 60 * 60 * 1000);
     const completedPeriod = getCompletedPeriodRange(period, now);
     const completedClients = new Set<string>();
     const result: TrainerStats = {
@@ -228,7 +227,7 @@ export function calculateTrainerStats(
             result.completedSessions += 1;
             result.durationDistribution[duration] += 1;
             if (appointment.userId) completedClients.add(appointment.userId);
-        } else if (appointmentTimestamp <= upcomingEndTimestamp) {
+        } else if (appointmentTimestamp >= nowTimestamp) {
             result.upcomingSessions += 1;
         }
     }

@@ -29,6 +29,7 @@ describe('TrainerStatsModal', () => {
         expect(screen.getByText('5 sesiones')).toBeInTheDocument();
         expect(screen.getByText('8 sesiones')).toBeInTheDocument();
         expect(screen.getByText('13 sesiones')).toBeInTheDocument();
+        expect(screen.queryByText(/siguientes 7 días/i)).not.toBeInTheDocument();
     });
 
     it('closes from the close button and the Escape key', () => {

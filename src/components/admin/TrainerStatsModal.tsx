@@ -102,9 +102,6 @@ export function TrainerStatsModal({
                         </div>
                     </div>
 
-                    <p className="text-xs text-[var(--color-text-muted)]">
-                        Las próximas sesiones siempre corresponden a los siguientes 7 días.
-                    </p>
                 </div>
             </motion.div>
         </motion.div>

@@ -74,16 +74,55 @@ describe('calculateTrainerStats', () => {
         expect(stats.completedSessions).toBe(1);
     });
 
-    it('keeps upcoming appointments independent from the selected period and uses an inclusive 168-hour window', () => {
-        const now = new Date('2026-10-20T10:00:00.000Z'); // 12:00 CEST; DST ends inside the window
+    it('counts every approved future appointment without a maximum date', () => {
+        const now = new Date('2026-09-15T10:00:00.000Z'); // 12:00 CEST
+        const appointments = [
+            appointment({ approvedSlot: { date: '2026-09-15', time: '12:00' } }),
+            appointment({ approvedSlot: { date: '2026-10-20', time: '12:00' } }),
+            appointment({ approvedSlot: { date: '2026-12-15', time: '12:00' } }),
+        ];
+
+        expect(calculateTrainerStats(appointments, 'trainer-1', 'all', now).upcomingSessions).toBe(3);
+    });
+
+    it('never counts past appointments as upcoming when they are outside the selected completed period', () => {
+        const now = new Date('2026-09-15T10:00:00.000Z');
 
         const stats = calculateTrainerStats([
-            appointment({ approvedSlot: { date: '2026-10-27', time: '11:00' } }), // exactly +168 h, now CET
-            appointment({ approvedSlot: { date: '2026-10-27', time: '11:01' } }),
-        ], 'trainer-1', 'previous-month', now);
+            appointment({ approvedSlot: { date: '2026-08-20', time: '12:00' } }),
+        ], 'trainer-1', 'current-month', now);
 
         expect(stats.completedSessions).toBe(0);
+        expect(stats.upcomingSessions).toBe(0);
+    });
+
+    it('excludes future pending, cancelled, and rejected appointments', () => {
+        const now = new Date('2026-09-15T10:00:00.000Z');
+        const futureSlot = { date: '2026-11-15', time: '12:00' };
+
+        const stats = calculateTrainerStats([
+            appointment({ approvedSlot: futureSlot }),
+            appointment({ approvedSlot: futureSlot, status: 'pending' }),
+            appointment({ approvedSlot: futureSlot, status: 'cancelled' }),
+            appointment({ approvedSlot: futureSlot, status: 'rejected' }),
+        ], 'trainer-1', 'all', now);
+
         expect(stats.upcomingSessions).toBe(1);
+    });
+
+    it('keeps the number of upcoming appointments independent from every completed-stats period', () => {
+        const now = new Date('2026-09-15T10:00:00.000Z');
+        const appointments = [
+            appointment({ approvedSlot: { date: '2026-10-20', time: '12:00' } }),
+            appointment({ approvedSlot: { date: '2027-02-15', time: '12:00' } }),
+        ];
+
+        expect([
+            calculateTrainerStats(appointments, 'trainer-1', 'current-month', now).upcomingSessions,
+            calculateTrainerStats(appointments, 'trainer-1', 'previous-month', now).upcomingSessions,
+            calculateTrainerStats(appointments, 'trainer-1', 'current-year', now).upcomingSessions,
+            calculateTrainerStats(appointments, 'trainer-1', 'all', now).upcomingSessions,
+        ]).toEqual([2, 2, 2, 2]);
     });
 
     it('counts unique clients and the completed-session duration distribution', () => {
