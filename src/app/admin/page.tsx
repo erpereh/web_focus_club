@@ -70,12 +70,18 @@ import { GalleryManager } from '@/components/admin/GalleryManager';
 import { MediaPicker } from '@/components/admin/MediaPicker';
 import { IconPicker } from '@/components/admin/IconPicker';
 import { AppointmentsCalendar } from '@/components/admin/appointments/AppointmentsCalendar';
+import { TrainerStatsModal } from '@/components/admin/TrainerStatsModal';
 import {
   filterAppointments,
   getTrainerIdFromFilter,
   toTrainerFilter,
   type TrainerFilter,
 } from '@/lib/admin-appointment-filters';
+import {
+  calculateTrainerStats,
+  formatTrainerDuration,
+  type TrainerStatsPeriod,
+} from '@/lib/trainer-stats';
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { VideoFramePreview } from '@/components/ui/VideoFramePreview';
 import { DynamicIcon } from '@/components/ui/DynamicIcon';
@@ -195,6 +201,13 @@ const DEFAULT_HERO_STATS: HeroStat[] = [
 type TabType = 'Inicio' | 'appointments' | 'availability' | 'clients' | 'team' | 'testimonials' | 'Hero' | 'Sandra' | 'Centro' | 'Servicios' | 'Galeria' | 'Contacto' | 'Footer' | 'config';
 type StatusFilter = 'all' | Appointment['status'];
 type AppointmentsView = 'list' | 'calendar';
+
+const TRAINER_STATS_PERIOD_OPTIONS: ReadonlyArray<{ value: TrainerStatsPeriod; label: string }> = [
+  { value: 'current-month', label: 'Este mes' },
+  { value: 'previous-month', label: 'Mes anterior' },
+  { value: 'current-year', label: 'Este año' },
+  { value: 'all', label: 'Todo' },
+];
 
 interface CreateClientFormState {
   name: string;
@@ -1031,7 +1044,15 @@ export default function AdminPage() {
   const appointmentsSnapshotReadyRef = useRef(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [unreadSupportMessages, setUnreadSupportMessages] = useState(0);
-  const switchTab = (tab: TabType) => { setActiveTab(tab); setSidebarOpen(false); };
+  const [trainerStatsPeriod, setTrainerStatsPeriod] = useState<TrainerStatsPeriod>('current-month');
+  const [trainerStatsNow, setTrainerStatsNow] = useState(() => new Date());
+  const [selectedTrainerStatsId, setSelectedTrainerStatsId] = useState<string | null>(null);
+  const switchTab = (tab: TabType) => {
+    if (tab === 'team') setTrainerStatsNow(new Date());
+    if (tab !== 'team') setSelectedTrainerStatsId(null);
+    setActiveTab(tab);
+    setSidebarOpen(false);
+  };
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [trainerFilter, setTrainerFilter] = useState<TrainerFilter>('all');
   const [appointmentsView, setAppointmentsView] = useState<AppointmentsView>('list');
@@ -1172,6 +1193,12 @@ export default function AdminPage() {
 
   useEffect(() => {
     activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'team') return;
+    const intervalId = window.setInterval(() => setTrainerStatsNow(new Date()), 60_000);
+    return () => window.clearInterval(intervalId);
   }, [activeTab]);
 
   // Cargar datos desde Firestore
@@ -1389,6 +1416,29 @@ export default function AdminPage() {
   const clientsByEmail = useMemo(() => new Map(clients.map((client) => [client.email, client])), [clients]);
   const activeTrainers = useMemo(() => trainers.filter((trainer) => trainer.active !== false), [trainers]);
   const appointmentServices = useMemo(() => services.filter((service) => service.active !== false), [services]);
+  const trainerStatsById = useMemo(
+    () => new Map(trainers.map((trainer) => [
+      trainer.id,
+      calculateTrainerStats(appointments, trainer.id, trainerStatsPeriod, trainerStatsNow),
+    ])),
+    [appointments, trainers, trainerStatsPeriod, trainerStatsNow],
+  );
+  const selectedTrainerForStats = selectedTrainerStatsId
+    ? trainers.find((trainer) => trainer.id === selectedTrainerStatsId)
+    : undefined;
+  const selectedTrainerStats = selectedTrainerStatsId
+    ? trainerStatsById.get(selectedTrainerStatsId)
+    : undefined;
+  const trainerStatsPeriodLabel = TRAINER_STATS_PERIOD_OPTIONS.find(
+    (option) => option.value === trainerStatsPeriod,
+  )?.label ?? 'Este mes';
+
+  const handleViewTrainerAppointments = (trainerId: string) => {
+    setTrainerFilter(toTrainerFilter(trainerId));
+    setStatusFilter('all');
+    setAppointmentSearch('');
+    switchTab('appointments');
+  };
 
   const getClientForAppointment = (appointment: Appointment): UserProfile | undefined =>
     clientsByUid.get(appointment.userId) ?? clientsByEmail.get(appointment.email);
@@ -3964,11 +4014,34 @@ export default function AdminPage() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -20 }}
                 >
-                  <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center justify-between gap-4 mb-4">
                     <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Equipo de Entrenadores</h1>
                     <div className="flex gap-2 text-sm text-[var(--color-text-secondary)]">
                       Total: <span className="text-[var(--color-text-primary)] font-semibold">{trainers.length}</span>
                     </div>
+                  </div>
+
+                  <div
+                    role="group"
+                    aria-label="Periodo de estadísticas"
+                    className="mb-6 flex w-full gap-1 overflow-x-auto rounded-xl border border-[var(--color-border-base)] bg-muted/20 p-1 sm:w-fit"
+                  >
+                    {TRAINER_STATS_PERIOD_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        aria-pressed={trainerStatsPeriod === option.value}
+                        onClick={() => setTrainerStatsPeriod(option.value)}
+                        className={cn(
+                          'shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                          trainerStatsPeriod === option.value
+                            ? 'bg-[var(--color-accent-val)] text-[var(--color-bg-base)] shadow-sm'
+                            : 'text-[var(--color-text-secondary)] hover:bg-muted/40 hover:text-[var(--color-text-primary)]',
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
                   </div>
 
                   {/* Admin self-toggle: añadirse/quitarse como entrenadora */}
@@ -4037,49 +4110,85 @@ export default function AdminPage() {
                   )}
 
                   <div className="grid gap-4">
-                    {trainers.map((trainer) => (
-                      <GlassCard key={trainer.id} className="p-6">
-                        <div className="flex items-center justify-between gap-4">
-                          <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 rounded-full bg-[var(--color-accent-dim)] flex items-center justify-center">
-                              <Dumbbell className="w-6 h-6 text-[var(--color-accent-val)]" />
+                    {trainers.map((trainer) => {
+                      const trainerStats = trainerStatsById.get(trainer.id);
+                      if (!trainerStats) return null;
+
+                      return (
+                        <GlassCard key={trainer.id} className="p-5 sm:p-6">
+                          <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+                            <div className="flex min-w-0 items-start gap-4">
+                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-dim)] ring-1 ring-[var(--color-accent-border)]">
+                                <Dumbbell className="h-6 w-6 text-[var(--color-accent-val)]" />
+                              </div>
+                              <div className="min-w-0 pt-0.5">
+                                <h3 className="truncate font-semibold uppercase tracking-wide text-[var(--color-text-primary)]">
+                                  {trainer.name}
+                                </h3>
+                                <p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">
+                                  <span className="font-semibold text-[var(--color-text-primary)]">
+                                    {formatTrainerDuration(trainerStats.completedMinutes)}
+                                  </span>
+                                  {' · '}{trainerStats.completedSessions} sesiones
+                                  {' · '}{trainerStats.uniqueClients} clientes
+                                  {' · '}{trainerStats.upcomingSessions} próximas
+                                </p>
+                              </div>
                             </div>
-                            <h3 className="font-semibold text-[var(--color-text-primary)]">{trainer.name}</h3>
-                          </div>
-                          <PremiumButton
-                            variant="ghost"
-                            size="sm"
-                            icon={<Trash2 className="w-4 h-4" />}
-                            onClick={async () => {
-                              if (confirm(`¿Eliminar a ${trainer.name} del equipo?`)) {
-                                try {
-                                  // Obtener el perfil del usuario para evaluar su rol
-                                  const trainerUser = await getUserProfile(trainer.uid);
-                                  
-                                  if (trainerUser?.role === 'admin') {
-                                    // Admin: solo quitar isTrainer, mantener role admin
-                                    await updateUserProfile(trainer.uid, { isTrainer: false });
-                                  } else {
-                                    // Trainer u otro: quitar isTrainer + degradar a user
-                                    await updateUserProfile(trainer.uid, { isTrainer: false, role: 'user' });
+
+                            <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                              <PremiumButton
+                                variant="outline"
+                                size="sm"
+                                icon={<Calendar className="h-4 w-4" />}
+                                onClick={() => handleViewTrainerAppointments(trainer.id)}
+                              >
+                                Ver citas
+                              </PremiumButton>
+                              <PremiumButton
+                                variant="outline"
+                                size="sm"
+                                icon={<BarChart3 className="h-4 w-4" />}
+                                onClick={() => setSelectedTrainerStatsId(trainer.id)}
+                              >
+                                Estadísticas
+                              </PremiumButton>
+                              <PremiumButton
+                                variant="ghost"
+                                size="sm"
+                                icon={<Trash2 className="w-4 h-4" />}
+                                onClick={async () => {
+                                  if (confirm(`¿Eliminar a ${trainer.name} del equipo?`)) {
+                                    try {
+                                      // Obtener el perfil del usuario para evaluar su rol
+                                      const trainerUser = await getUserProfile(trainer.uid);
+
+                                      if (trainerUser?.role === 'admin') {
+                                        // Admin: solo quitar isTrainer, mantener role admin
+                                        await updateUserProfile(trainer.uid, { isTrainer: false });
+                                      } else {
+                                        // Trainer u otro: quitar isTrainer + degradar a user
+                                        await updateUserProfile(trainer.uid, { isTrainer: false, role: 'user' });
+                                      }
+
+                                      // Eliminar el doc de la colección trainers
+                                      await deleteTrainerFS(trainer.id);
+                                      await refreshData();
+                                    } catch (err) {
+                                      console.error('Error removing trainer:', err);
+                                      alert('Error al eliminar del equipo.');
+                                    }
                                   }
-                                  
-                                  // Eliminar el doc de la colección trainers
-                                  await deleteTrainerFS(trainer.id);
-                                  await refreshData();
-                                } catch (err) {
-                                  console.error('Error removing trainer:', err);
-                                  alert('Error al eliminar del equipo.');
-                                }
-                              }
-                            }}
-                            className="text-destructive hover:bg-destructive/10"
-                          >
-                            Eliminar
-                          </PremiumButton>
-                        </div>
-                      </GlassCard>
-                    ))}
+                                }}
+                                className="text-destructive hover:bg-destructive/10"
+                              >
+                                Eliminar
+                              </PremiumButton>
+                            </div>
+                          </div>
+                        </GlassCard>
+                      );
+                    })}
                     {trainers.length === 0 && (
                       <GlassCard className="p-12 text-center">
                         <Dumbbell className="w-12 h-12 mx-auto mb-4 text-[var(--color-text-secondary)] opacity-30" />
@@ -4092,6 +4201,17 @@ export default function AdminPage() {
                   </div>
                 </motion.div>
               )}
+
+              <AnimatePresence>
+                {activeTab === 'team' && selectedTrainerForStats && selectedTrainerStats && (
+                  <TrainerStatsModal
+                    trainerName={selectedTrainerForStats.name}
+                    periodLabel={trainerStatsPeriodLabel}
+                    stats={selectedTrainerStats}
+                    onClose={() => setSelectedTrainerStatsId(null)}
+                  />
+                )}
+              </AnimatePresence>
 
               {/* ============================================
                   TESTIMONIALS
