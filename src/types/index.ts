@@ -148,7 +148,7 @@ export interface AppointmentRecurrence {
     updatedAt?: string;
     lastRescheduledAt?: string;
     lastRescheduledByUid?: string;
-    lastRescheduleScope?: 'single' | 'following';
+    lastRescheduleScope?: 'single' | 'series' | 'following';
     lastRescheduleFromIndex?: number;
     lastRescheduleAnchorSlot?: TimeSlot;
 }

@@ -3,6 +3,7 @@ import { HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import {
   classifyMadridCivilSlot,
   getAppointmentEffectiveSlot,
+  getMadridDateKey,
   getSlotBlocks,
   isSameDayInMadrid,
   slotOccupancyDocId,
@@ -15,7 +16,7 @@ import {
   type SiteConfig,
 } from "./siteConfig.js";
 
-export type RecurringRescheduleScope = "single" | "following";
+export type RecurringRescheduleScope = "single" | "series" | "following";
 export type RecurringRescheduleActorType = "admin" | "customer";
 export type RecurringRescheduleReason =
   | "same_day_change_not_allowed"
@@ -138,7 +139,7 @@ export function parseRecurringRescheduleRequest(value: unknown): RecurringResche
   if (!isRecord(value) || typeof value.appointmentId !== "string") return undefined;
   const appointmentId = value.appointmentId.trim();
   if (!appointmentId || appointmentId.length > 256 || !isSlot(value.preferredSlot)) return undefined;
-  if (value.scope !== "single" && value.scope !== "following") return undefined;
+  if (value.scope !== "single" && value.scope !== "series" && value.scope !== "following") return undefined;
   return { appointmentId, preferredSlot: value.preferredSlot, scope: value.scope };
 }
 
@@ -169,6 +170,15 @@ function durationMinutes(appointment: RecurringAppointmentData): number {
 function effectiveSlot(appointment: RecurringAppointmentData): RecurringRescheduleSlot | undefined {
   const slot = getAppointmentEffectiveSlot(appointment);
   return slot && isSlot(slot) ? slot : undefined;
+}
+
+function effectiveCivilDateKey(appointment: RecurringAppointmentData): string | undefined {
+  const candidates = [
+    appointment.approvedSlot?.date,
+    appointment.preferredSlots?.[0]?.date,
+    appointment.date,
+  ];
+  return candidates.find((date): date is string => typeof date === "string" && isValidDateKey(date));
 }
 
 function slotKeys(slot: RecurringRescheduleSlot, duration: number): string[] {
@@ -245,6 +255,49 @@ export function prepareRecurringReschedule(input: {
   const ordered = [...input.occurrences].sort((left, right) =>
     (left.data.recurrenceIndex ?? Number.MAX_SAFE_INTEGER) - (right.data.recurrenceIndex ?? Number.MAX_SAFE_INTEGER));
 
+  const seriesFutureApprovedIds = new Set<string>();
+  if (input.scope === "series") {
+    const today = getMadridDateKey(input.now);
+    for (const item of ordered) {
+      if (item.data.status !== "approved" || item.data.recurrenceSeriesId !== input.series.id) continue;
+      const slot = effectiveSlot(item.data);
+      if (!slot) {
+        const date = effectiveCivilDateKey(item.data);
+        if (date && date < today) continue;
+        return planError(
+          input.scope,
+          "recurring_occurrence_unavailable",
+          "Una cita aprobada de la serie no tiene una franja valida.",
+          undefined,
+          item.id,
+        );
+      }
+      if (!classifyMadridCivilSlot(slot, input.now).isFuture) continue;
+      if (item.data.userId !== input.series.userId) {
+        return planError(
+          input.scope,
+          "recurring_occurrence_unavailable",
+          "Una cita futura no coincide con los datos de la serie.",
+          slot,
+          item.id,
+        );
+      }
+      const index = item.data.recurrenceIndex;
+      if (!Number.isInteger(index) || (index as number) < 0 || !durationMinutes(item.data)) {
+        return planError(
+          input.scope,
+          "recurring_occurrence_unavailable",
+          "Una cita futura de la serie contiene datos no validos.",
+          slot,
+          item.id,
+        );
+      }
+      seriesFutureApprovedIds.add(item.id);
+    }
+  }
+
+  // Legacy deployment compatibility: old browser bundles still send "following".
+  // Keep its selected-and-higher-index semantics until those clients are retired.
   if (input.scope === "following") {
     for (const item of ordered) {
       if (item.data.status !== "approved" || item.data.recurrenceSeriesId !== input.series.id) continue;
@@ -286,8 +339,10 @@ export function prepareRecurringReschedule(input: {
   const candidates: RecurringAppointmentRecord[] = [];
   for (const item of ordered) {
     const index = item.data.recurrenceIndex;
-    if (!Number.isInteger(index) || (index as number) < (selectedIndex as number)) continue;
     if (input.scope === "single" && item.id !== selected.id) continue;
+    if (input.scope === "following"
+      && (!Number.isInteger(index) || (index as number) < (selectedIndex as number))) continue;
+    if (input.scope === "series" && !seriesFutureApprovedIds.has(item.id)) continue;
     if (item.data.status !== "approved") continue;
     if (item.data.userId !== input.series.userId || item.data.recurrenceSeriesId !== input.series.id) {
       return planError(

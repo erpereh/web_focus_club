@@ -110,6 +110,20 @@ assert.deepEqual(parseRecurringRescheduleRequest({
   preferredSlot: { date: "2026-09-20", time: "19:00" },
   scope: "single",
 });
+assert.deepEqual(parseRecurringRescheduleRequest({
+  appointmentId: "a1",
+  preferredSlot: { date: "2026-09-20", time: "19:00" },
+  scope: "series",
+}), {
+  appointmentId: "a1",
+  preferredSlot: { date: "2026-09-20", time: "19:00" },
+  scope: "series",
+});
+assert.equal(parseRecurringRescheduleRequest({
+  appointmentId: "a1",
+  preferredSlot: { date: "2026-09-20", time: "19:00" },
+  scope: "following",
+}).scope, "following");
 assert.equal(parseRecurringRescheduleRequest({ appointmentId: "a1", preferredSlot: {}, scope: "single" }), undefined);
 assert.equal(parseRecurringRescheduleRequest({ appointmentId: "a1", preferredSlot: { date: "2026-09-20", time: "19:00" }, scope: "all" }), undefined);
 
@@ -126,6 +140,224 @@ assert.deepEqual(following.draft.affected.map((item) => item.newSlot), [
   { date: "2026-10-04", time: "19:00" },
 ]);
 assert.equal(following.draft.seriesEndDate, "2026-10-05", "pending occurrence remains part of the effective series end");
+
+const seriesNow = new Date("2026-09-16T08:00:00.000Z"); // 10:00 Europe/Madrid
+const fullSeriesOccurrences = [
+  occurrence("s0", 0, "2026-09-10"),
+  occurrence("s1", 1, "2026-09-17"),
+  occurrence("s2", 2, "2026-09-24"),
+  occurrence("s3", 3, "2026-10-01"),
+  occurrence("s4", 4, "2026-10-08"),
+  occurrence("s5", 5, "2026-10-15", "cancelled"),
+  occurrence("s6", 6, "2026-10-22", "rejected"),
+  occurrence("s7", 7, "2026-10-29", "pending"),
+];
+
+function prepareSeries(overrides = {}) {
+  return prepare({
+    selectedAppointmentId: "s3",
+    preferredSlot: { date: "2026-10-02", time: "19:00" },
+    scope: "series",
+    now: seriesNow,
+    occurrences: fullSeriesOccurrences,
+    series: { ...series, endDate: "2026-10-29" },
+    ...overrides,
+  });
+}
+
+const wholeSeries = prepareSeries();
+assert.equal(wholeSeries.ok, true);
+assert.deepEqual(wholeSeries.draft.affected.map((item) => item.appointment.id), ["s1", "s2", "s3", "s4"]);
+assert.deepEqual(wholeSeries.draft.affected.map((item) => item.newSlot), [
+  { date: "2026-09-18", time: "19:00" },
+  { date: "2026-09-25", time: "19:00" },
+  { date: "2026-10-02", time: "19:00" },
+  { date: "2026-10-09", time: "19:00" },
+]);
+assert.equal(wholeSeries.draft.affected.some((item) => item.appointment.id === "s0"), false);
+assert.equal(wholeSeries.draft.affected.some((item) => ["s5", "s6", "s7"].includes(item.appointment.id)), false);
+assert.equal(wholeSeries.draft.seriesEndDate, "2026-10-29");
+wholeSeries.draft.affected.forEach((item) => {
+  assert.ok(item.oldKeys.length > 0);
+  assert.ok(item.newKeys.length > 0);
+  item.oldKeys.forEach((key) => assert.equal(wholeSeries.draft.occupancyDelta.get(key), -1));
+  item.newKeys.forEach((key) => assert.equal(wholeSeries.draft.occupancyDelta.get(key), 1));
+});
+
+const fortnightlySeries = prepareSeries({
+  preferredSlot: { date: "2026-10-30", time: "19:00" },
+  series: { ...series, intervalDays: 14, endDate: "2026-10-29" },
+});
+assert.equal(fortnightlySeries.ok, true);
+assert.deepEqual(fortnightlySeries.draft.affected.map((item) => item.newSlot.date), [
+  "2026-10-02", "2026-10-16", "2026-10-30", "2026-11-13",
+]);
+assert.equal(fortnightlySeries.draft.seriesEndDate, "2026-11-13");
+
+const seriesWithGapsOccurrences = [
+  occurrence("g0", 0, "2026-09-10"),
+  occurrence("g1", 1, "2026-09-17"),
+  occurrence("g2", 2, "2026-09-24", "cancelled"),
+  occurrence("g3", 3, "2026-10-01"),
+  occurrence("g4", 4, "2026-10-08"),
+  occurrence("g5", 5, "2026-10-15", "rejected"),
+  occurrence("g6", 6, "2026-10-22", "pending"),
+];
+const seriesWithGaps = prepareSeries({
+  selectedAppointmentId: "g3",
+  occurrences: seriesWithGapsOccurrences,
+  series: { ...series, endDate: "2026-10-22" },
+});
+assert.equal(seriesWithGaps.ok, true);
+assert.deepEqual(seriesWithGaps.draft.affected.map((item) => item.appointment.id), ["g1", "g3", "g4"]);
+assert.deepEqual(seriesWithGaps.draft.affected.map((item) => item.newSlot.date), [
+  "2026-09-18", "2026-10-02", "2026-10-09",
+]);
+
+const legacyFromLaterIndex = prepare({
+  selectedAppointmentId: "s3",
+  preferredSlot: { date: "2026-10-02", time: "19:00" },
+  scope: "following",
+  now: seriesNow,
+  occurrences: fullSeriesOccurrences,
+  series: { ...series, endDate: "2026-10-29" },
+});
+assert.equal(legacyFromLaterIndex.ok, true);
+assert.deepEqual(legacyFromLaterIndex.draft.affected.map((item) => item.appointment.id), ["s3", "s4"]);
+
+const lowerDestinationInPast = prepareSeries({
+  preferredSlot: { date: "2026-09-23", time: "19:00" },
+});
+assert.equal(lowerDestinationInPast.ok, false);
+assert.equal(lowerDestinationInPast.error.reason, "slot_not_future");
+assert.equal(lowerDestinationInPast.error.problematicAppointmentId, "s1");
+
+const lowerDestinationTodayForCustomer = prepareSeries({
+  actorType: "customer",
+  actorUid: "user-1",
+  preferredSlot: { date: "2026-09-30", time: "19:00" },
+});
+assert.equal(lowerDestinationTodayForCustomer.ok, false);
+assert.equal(lowerDestinationTodayForCustomer.error.reason, "same_day_change_not_allowed");
+assert.equal(lowerDestinationTodayForCustomer.error.problematicAppointmentId, "s1");
+
+const selectedTodayForSeriesCustomer = prepareSeries({
+  actorType: "customer",
+  actorUid: "user-1",
+  occurrences: fullSeriesOccurrences.map((item) => item.id === "s3"
+    ? occurrence("s3", 3, "2026-09-16", "approved", "19:00")
+    : item),
+});
+assert.equal(selectedTodayForSeriesCustomer.ok, false);
+assert.equal(selectedTodayForSeriesCustomer.error.reason, "same_day_change_not_allowed");
+
+const anchorTodayForSeriesCustomer = prepareSeries({
+  actorType: "customer",
+  actorUid: "user-1",
+  preferredSlot: { date: "2026-09-16", time: "19:00" },
+});
+assert.equal(anchorTodayForSeriesCustomer.ok, false);
+assert.equal(anchorTodayForSeriesCustomer.error.reason, "same_day_change_not_allowed");
+
+const invalidSlot = (id, recurrenceIndex, date, time = "invalid") => ({
+  ...occurrence(id, recurrenceIndex, date),
+  data: {
+    ...occurrence(id, recurrenceIndex, date).data,
+    approvedSlot: { date, time },
+    preferredSlots: [{ date: "2026-12-31", time: "10:00" }],
+    date: "2026-12-31",
+    time: "10:00",
+  },
+});
+
+const invalidUnknownSlot = invalidSlot("invalid-unknown", 8, "not-a-date");
+invalidUnknownSlot.data.preferredSlots = [{ date: "also-invalid", time: "10:00" }];
+invalidUnknownSlot.data.date = "still-invalid";
+
+const invalidPastSlot = prepareSeries({
+  occurrences: [...fullSeriesOccurrences, invalidSlot("invalid-past", 8, "2026-09-15")],
+});
+assert.equal(invalidPastSlot.ok, true);
+assert.equal(invalidPastSlot.draft.affected.some((item) => item.appointment.id === "invalid-past"), false);
+
+for (const [label, brokenOccurrence] of [
+  ["today", invalidSlot("invalid-today", 8, "2026-09-16")],
+  ["future", invalidSlot("invalid-future", 8, "2026-11-01")],
+  ["unknown", invalidUnknownSlot],
+]) {
+  const result = prepareSeries({ occurrences: [...fullSeriesOccurrences, brokenOccurrence] });
+  assert.equal(result.ok, false, label);
+  assert.equal(result.error.reason, "recurring_occurrence_unavailable", label);
+  assert.equal(result.error.problematicAppointmentId, brokenOccurrence.id, label);
+}
+
+const invalidLowerIndex = prepareSeries({
+  occurrences: fullSeriesOccurrences.map((item) => item.id === "s1"
+    ? { ...item, data: { ...item.data, recurrenceIndex: undefined } }
+    : item),
+});
+assert.equal(invalidLowerIndex.ok, false);
+assert.equal(invalidLowerIndex.error.reason, "recurring_occurrence_unavailable");
+
+const invalidLowerDuration = prepareSeries({
+  occurrences: fullSeriesOccurrences.map((item) => item.id === "s1"
+    ? { ...item, data: { ...item.data, duration: "15" } }
+    : item),
+});
+assert.equal(invalidLowerDuration.ok, false);
+assert.equal(invalidLowerDuration.error.reason, "recurring_occurrence_unavailable");
+
+function validateSeriesDraft(overrides = {}) {
+  return validateRecurringRescheduleAvailability({
+    draft: wholeSeries.draft,
+    siteConfig,
+    blockedKeys: new Set(),
+    occupancyByKey: emptyOccupancy(wholeSeries.draft),
+    userAppointments: fullSeriesOccurrences,
+    ...overrides,
+  });
+}
+
+const firstSeriesNewKey = wholeSeries.draft.affected[0].newKeys[0];
+const blockedLowerSeriesOccurrence = validateSeriesDraft({ blockedKeys: new Set([firstSeriesNewKey]) });
+assert.equal(blockedLowerSeriesOccurrence.ok, false);
+assert.equal(blockedLowerSeriesOccurrence.error.reason, "slot_blocked");
+assert.equal(blockedLowerSeriesOccurrence.error.problematicAppointmentId, "s1");
+
+const fullSeriesOccupancy = emptyOccupancy(wholeSeries.draft);
+fullSeriesOccupancy.set(firstSeriesNewKey, siteConfig.maxCapacity);
+const fullLowerSeriesOccurrence = validateSeriesDraft({ occupancyByKey: fullSeriesOccupancy });
+assert.equal(fullLowerSeriesOccurrence.ok, false);
+assert.equal(fullLowerSeriesOccurrence.error.reason, "slot_full");
+assert.equal(fullLowerSeriesOccurrence.error.problematicAppointmentId, "s1");
+
+const externalSeriesConflict = occurrence("external-series-conflict", 99, "2026-09-18", "pending", "19:00");
+externalSeriesConflict.data.recurrenceSeriesId = "other-series";
+const conflictingLowerSeriesOccurrence = validateSeriesDraft({
+  userAppointments: [...fullSeriesOccurrences, externalSeriesConflict],
+});
+assert.equal(conflictingLowerSeriesOccurrence.ok, false);
+assert.equal(conflictingLowerSeriesOccurrence.error.reason, "appointment_conflict");
+assert.equal(conflictingLowerSeriesOccurrence.error.problematicAppointmentId, "s1");
+
+const invalidLowerSeriesOccupancy = emptyOccupancy(wholeSeries.draft);
+invalidLowerSeriesOccupancy.set(firstSeriesNewKey, -1);
+const invalidLowerSeriesOccupancyResult = validateSeriesDraft({ occupancyByKey: invalidLowerSeriesOccupancy });
+assert.equal(invalidLowerSeriesOccupancyResult.ok, false);
+assert.equal(invalidLowerSeriesOccupancyResult.error.reason, "invalid_occupancy");
+
+const outsideScheduleSeries = prepareSeries({ preferredSlot: { date: "2026-10-02", time: "20:00" } });
+assert.equal(outsideScheduleSeries.ok, true);
+const outsideScheduleSeriesResult = validateRecurringRescheduleAvailability({
+  draft: outsideScheduleSeries.draft,
+  siteConfig,
+  blockedKeys: new Set(),
+  occupancyByKey: emptyOccupancy(outsideScheduleSeries.draft),
+  userAppointments: fullSeriesOccurrences,
+});
+assert.equal(outsideScheduleSeriesResult.ok, false);
+assert.equal(outsideScheduleSeriesResult.error.reason, "outside_schedule");
+assert.equal(outsideScheduleSeriesResult.error.problematicAppointmentId, "s1");
 
 const missingFutureIndex = occurrence("missing-index", undefined, "2026-10-12");
 const missingFutureIndexResult = prepare({ occurrences: [...occurrences, missingFutureIndex] });
@@ -427,25 +659,28 @@ class FakeFirestore {
   }
 }
 
-function transactionDocuments() {
+function transactionDocuments({
+  records = occurrences,
+  recurrenceSeries = series,
+  draft = following.draft,
+} = {}) {
   const docs = {
-    "appointments/a1": occurrences[1].data,
     "appointment_recurrences/series-1": {
-      ...series,
-      occurrenceCount: 5,
-      totalMinutes: 300,
+      ...recurrenceSeries,
+      occurrenceCount: records.length,
+      totalMinutes: records.length * 60,
       bonoId: "bono-1",
       startDate: "2026-09-07",
       startTime: "10:00",
     },
     "site_config/main": siteConfig,
   };
-  occurrences.forEach((item) => { docs[`appointments/${item.id}`] = item.data; });
-  following.draft.occupancyKeys.forEach((key) => {
+  records.forEach((item) => { docs[`appointments/${item.id}`] = item.data; });
+  draft.occupancyKeys.forEach((key) => {
     docs[`slot_occupancy/${key}`] = {
       date: key.slice(0, 10),
       time: key.slice(11),
-      count: Math.max(0, -(following.draft.occupancyDelta.get(key) ?? 0)),
+      count: Math.max(0, -(draft.occupancyDelta.get(key) ?? 0)),
     };
   });
   return docs;
@@ -511,6 +746,97 @@ async function runHandlerTests() {
     (error) => error.code === "failed-precondition" && error.details.reason === "slot_full",
   );
   assert.deepEqual(failingDb.documents, new Map(Object.entries(failingDocs)), "failed transaction must not persist writes");
+
+  const seriesDocuments = () => transactionDocuments({
+    records: fullSeriesOccurrences,
+    recurrenceSeries: { ...series, endDate: "2026-10-29" },
+    draft: wholeSeries.draft,
+  });
+  const seriesDb = new FakeFirestore(seriesDocuments());
+  const seriesHandlers = createRecurringRescheduleHandlers({
+    db: seriesDb,
+    requireAdmin: async () => { throw new Error("customer handler must not require admin"); },
+    getNowDate: () => seriesNow,
+  });
+  const seriesResponse = await seriesHandlers.rescheduleOwnRecurringAppointment({
+    auth: { uid: "user-1", token: {} },
+    data: {
+      appointmentId: "s3",
+      preferredSlot: { date: "2026-10-02", time: "19:00" },
+      scope: "series",
+    },
+  });
+  assert.equal(seriesResponse.success, true);
+  assert.equal(seriesResponse.scope, "series");
+  assert.deepEqual(seriesResponse.affectedAppointmentIds, ["s1", "s2", "s3", "s4"]);
+  wholeSeries.draft.affected.forEach((item) => {
+    const updatedOccurrence = seriesDb.documents.get(`appointments/${item.appointment.id}`);
+    assert.equal(updatedOccurrence.status, "approved");
+    protectedFields.forEach((field) => assert.deepEqual(
+      updatedOccurrence[field],
+      item.appointment.data[field],
+      `series handler changed ${field} on ${item.appointment.id}`,
+    ));
+  });
+  assert.deepEqual(seriesDb.documents.get("appointments/s0").approvedSlot, { date: "2026-09-10", time: "10:00" });
+  assert.deepEqual(seriesDb.documents.get("appointments/s5").approvedSlot, { date: "2026-10-15", time: "10:00" });
+  const recurringSeriesAfter = seriesDb.documents.get("appointment_recurrences/series-1");
+  assert.equal(recurringSeriesAfter.lastRescheduleScope, "series");
+  assert.equal(recurringSeriesAfter.lastRescheduleFromIndex, 3);
+  assert.equal(recurringSeriesAfter.endDate, "2026-10-29");
+  assert.equal(recurringSeriesAfter.bonoId, "bono-1");
+  const seriesLog = [...seriesDb.documents.entries()]
+    .find(([path, value]) => path.startsWith("activity_logs/") && value.scope === "series")[1];
+  assert.deepEqual(seriesLog.affectedAppointmentIds, ["s1", "s2", "s3", "s4"]);
+  assert.equal(seriesLog.affectedCount, 4);
+
+  const foreignSeriesDocs = seriesDocuments();
+  const foreignSeriesDb = new FakeFirestore(foreignSeriesDocs);
+  const foreignSeriesHandlers = createRecurringRescheduleHandlers({
+    db: foreignSeriesDb,
+    requireAdmin: async () => ({}),
+    getNowDate: () => seriesNow,
+  });
+  await assert.rejects(
+    foreignSeriesHandlers.rescheduleOwnRecurringAppointment({
+      auth: { uid: "user-2", token: {} },
+      data: {
+        appointmentId: "s3",
+        preferredSlot: { date: "2026-10-02", time: "19:00" },
+        scope: "series",
+      },
+    }),
+    (error) => error.code === "permission-denied",
+  );
+  assert.deepEqual(foreignSeriesDb.documents, new Map(Object.entries(foreignSeriesDocs)));
+
+  const failingSeriesDocs = seriesDocuments();
+  failingSeriesDocs[`slot_occupancy/${firstSeriesNewKey}`] = {
+    date: firstSeriesNewKey.slice(0, 10),
+    time: firstSeriesNewKey.slice(11),
+    count: siteConfig.maxCapacity,
+  };
+  const failingSeriesDb = new FakeFirestore(failingSeriesDocs);
+  const failingSeriesHandlers = createRecurringRescheduleHandlers({
+    db: failingSeriesDb,
+    requireAdmin: async () => ({}),
+    getNowDate: () => seriesNow,
+  });
+  await assert.rejects(
+    failingSeriesHandlers.rescheduleRecurringAppointmentFromAdmin({
+      auth: { uid: "admin-1", token: {} },
+      data: {
+        appointmentId: "s3",
+        preferredSlot: { date: "2026-10-02", time: "19:00" },
+        scope: "series",
+      },
+    }),
+    (error) => error.code === "failed-precondition"
+      && error.details.reason === "slot_full"
+      && error.details.problematicAppointmentId === "s1",
+  );
+  assert.equal(failingSeriesDb.operations.some((operation) => operation.type === "write"), false);
+  assert.deepEqual(failingSeriesDb.documents, new Map(Object.entries(failingSeriesDocs)));
 
   const customerDb = new FakeFirestore(transactionDocuments());
   const customerHandlers = createRecurringRescheduleHandlers({

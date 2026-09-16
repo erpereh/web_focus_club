@@ -21,6 +21,7 @@ import {
 import { httpsCallable } from 'firebase/functions';
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, storage, functions as firebaseFunctions } from './firebase';
+import type { RecurringRescheduleBackendScope, RecurringRescheduleScope } from './recurring-reschedule';
 import {
     calculateManualBonoAdjustment,
     manualBonoAdjustmentErrorMessage,
@@ -748,14 +749,14 @@ export async function updateOwnAppointmentSlot(input: {
 export interface RecurringRescheduleInput {
     appointmentId: string;
     preferredSlot: TimeSlot;
-    scope: 'single' | 'following';
+    scope: RecurringRescheduleScope;
 }
 
 export interface RecurringRescheduleResult {
     success: true;
     appointmentId: string;
     seriesId: string;
-    scope: 'single' | 'following';
+    scope: RecurringRescheduleBackendScope;
     affectedAppointmentIds: string[];
     affectedCount: number;
 }

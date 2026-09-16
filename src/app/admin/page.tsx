@@ -191,6 +191,7 @@ import {
   getRecurringRescheduleSlotAvailability,
   getRecurringRescheduleErrorMessage,
   getRecurringRescheduleExcludedAppointmentIds,
+  RECURRING_RESCHEDULE_SCOPE_OPTIONS,
   type RecurringRescheduleScope,
 } from '@/lib/recurring-reschedule';
 import { getMadridDateKey } from '@/lib/madrid-date';
@@ -8450,44 +8451,27 @@ export default function AdminPage() {
                             {isRecurringApproved && (
                               <div className="space-y-3 mb-6">
                                 <p className="text-sm font-semibold text-[var(--color-text-primary)]">¿Qué quieres modificar?</p>
-                                <button
-                                  type="button"
-                                  disabled={editSlotBusy}
-                                  onClick={() => {
-                                    setEditRecurringScope('single');
-                                    setEditSlotData({ date: '', time: '' });
-                                    setEditSlotError('');
-                                  }}
-                                  className={cn(
-                                    'w-full text-left rounded-xl border p-4 transition-colors',
-                                    editRecurringScope === 'single'
-                                      ? 'border-[var(--color-accent-val)] bg-[var(--color-accent-dim)]'
-                                      : 'border-border bg-input hover:border-[var(--color-accent-border)]',
-                                  )}
-                                >
-                                  <span className="block font-semibold text-[var(--color-text-primary)]">Solo esta cita</span>
-                                  <span className="block text-sm text-[var(--color-text-secondary)] mt-1">Únicamente esta sesión.</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={editSlotBusy}
-                                  onClick={() => {
-                                    setEditRecurringScope('following');
-                                    setEditSlotData({ date: '', time: '' });
-                                    setEditSlotError('');
-                                  }}
-                                  className={cn(
-                                    'w-full text-left rounded-xl border p-4 transition-colors',
-                                    editRecurringScope === 'following'
-                                      ? 'border-[var(--color-accent-val)] bg-[var(--color-accent-dim)]'
-                                      : 'border-border bg-input hover:border-[var(--color-accent-border)]',
-                                  )}
-                                >
-                                  <span className="block font-semibold text-[var(--color-text-primary)]">Esta y las siguientes</span>
-                                  <span className="block text-sm text-[var(--color-text-secondary)] mt-1">
-                                    Esta sesión y las posteriores de la serie. Las sesiones anteriores no cambiarán.
-                                  </span>
-                                </button>
+                                {RECURRING_RESCHEDULE_SCOPE_OPTIONS.map((option) => (
+                                  <button
+                                    key={option.scope}
+                                    type="button"
+                                    disabled={editSlotBusy}
+                                    onClick={() => {
+                                      setEditRecurringScope(option.scope);
+                                      setEditSlotData({ date: '', time: '' });
+                                      setEditSlotError('');
+                                    }}
+                                    className={cn(
+                                      'w-full text-left rounded-xl border p-4 transition-colors',
+                                      editRecurringScope === option.scope
+                                        ? 'border-[var(--color-accent-val)] bg-[var(--color-accent-dim)]'
+                                        : 'border-border bg-input hover:border-[var(--color-accent-border)]',
+                                    )}
+                                  >
+                                    <span className="block font-semibold text-[var(--color-text-primary)]">{option.title}</span>
+                                    <span className="block text-sm text-[var(--color-text-secondary)] mt-1">{option.description}</span>
+                                  </button>
+                                ))}
                               </div>
                             )}
 

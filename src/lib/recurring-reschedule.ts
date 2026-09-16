@@ -2,7 +2,25 @@ import type { Appointment, TimeSlot } from '@/types';
 import { classifyMadridCivilSlot, getAppointmentEffectiveSlot } from './madrid-date';
 import { getSlotBlocks, slotOccupancyKey } from './appointment-slots';
 
-export type RecurringRescheduleScope = 'single' | 'following';
+export type RecurringRescheduleScope = 'single' | 'series';
+export type RecurringRescheduleBackendScope = RecurringRescheduleScope | 'following';
+
+export const RECURRING_RESCHEDULE_SCOPE_OPTIONS: ReadonlyArray<{
+    scope: RecurringRescheduleScope;
+    title: string;
+    description: string;
+}> = [
+    {
+        scope: 'single',
+        title: 'Solo esta cita',
+        description: 'Únicamente esta sesión.',
+    },
+    {
+        scope: 'series',
+        title: 'Toda la serie',
+        description: 'Se modificarán todas las sesiones futuras de esta serie. Las sesiones anteriores o canceladas no cambiarán.',
+    },
+];
 
 export interface RecurringRescheduleRequest {
     appointmentId: string;
@@ -25,15 +43,13 @@ export function getRecurringRescheduleExcludedAppointmentIds(
     now: Date,
 ): Set<string> {
     if (scope === 'single') return new Set([selected.id]);
-    const selectedIndex = selected.recurrenceIndex;
-    if (!selected.recurrenceSeriesId || !Number.isInteger(selectedIndex)) return new Set([selected.id]);
+    if (!selected.recurrenceSeriesId) return new Set([selected.id]);
 
     return new Set(appointments
         .filter((appointment) => {
             if (appointment.recurrenceSeriesId !== selected.recurrenceSeriesId
                 || appointment.status !== 'approved'
-                || !Number.isInteger(appointment.recurrenceIndex)
-                || (appointment.recurrenceIndex as number) < (selectedIndex as number)) {
+            ) {
                 return false;
             }
             const slot = getAppointmentEffectiveSlot(appointment);
@@ -151,16 +167,18 @@ export function getRecurringRescheduleErrorMessage(error: unknown, fallback: str
     const details = errorDetails(error);
     const reason = typeof details.reason === 'string' ? details.reason : '';
     const slot = formatProblematicSlot(details.problematicSlot);
-    const followingPrefix = details.scope === 'following' ? 'No se pudo modificar toda la serie: ' : '';
+    const multiAppointmentPrefix = details.scope === 'series' || details.scope === 'following'
+        ? 'No se pudo modificar toda la serie: '
+        : '';
     const messages: Record<string, string> = {
         same_day_change_not_allowed: 'Las citas no se pueden modificar ni cancelar el mismo día.',
-        slot_blocked: `${followingPrefix}la franja${slot} está bloqueada.`,
-        slot_full: `${followingPrefix}la franja${slot} está completa.`,
-        appointment_conflict: `${followingPrefix}ya existe otra cita que se solapa con la franja${slot}.`,
-        outside_schedule: `${followingPrefix}la franja${slot} queda fuera del horario del centro.`,
-        slot_not_future: `${followingPrefix}la franja${slot} ya no está en el futuro.`,
+        slot_blocked: `${multiAppointmentPrefix}la franja${slot} está bloqueada.`,
+        slot_full: `${multiAppointmentPrefix}la franja${slot} está completa.`,
+        appointment_conflict: `${multiAppointmentPrefix}ya existe otra cita que se solapa con la franja${slot}.`,
+        outside_schedule: `${multiAppointmentPrefix}la franja${slot} queda fuera del horario del centro.`,
+        slot_not_future: `${multiAppointmentPrefix}la franja${slot} ya no está en el futuro.`,
         invalid_occupancy: 'La ocupación registrada no es válida. Contacta con el centro.',
-        recurring_occurrence_unavailable: `${followingPrefix}una sesión futura de la serie ya no está disponible.`,
+        recurring_occurrence_unavailable: `${multiAppointmentPrefix}una sesión futura de la serie ya no está disponible.`,
     };
     if (messages[reason]) return messages[reason];
     return error instanceof Error && error.message ? error.message : fallback;

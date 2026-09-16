@@ -93,6 +93,7 @@ import {
   canCustomerRescheduleRecurringAppointment,
   getRecurringRescheduleErrorMessage,
   getRecurringRescheduleExcludedAppointmentIds,
+  RECURRING_RESCHEDULE_SCOPE_OPTIONS,
   type RecurringRescheduleScope,
 } from '@/lib/recurring-reschedule';
 
@@ -2136,44 +2137,27 @@ export default function PortalPage() {
                   {appointment.recurrenceSeriesId && (
                     <div className="space-y-3">
                       <p className="text-sm font-semibold text-[var(--color-text-primary)]">¿Qué quieres modificar?</p>
-                      <button
-                        type="button"
-                        disabled={appointmentActionBusy}
-                        onClick={() => {
-                          setRescheduleScope('single');
-                          setRescheduleSlot(null);
-                          setAppointmentActionError('');
-                        }}
-                        className={cn(
-                          'w-full rounded-xl border p-4 text-left transition-colors',
-                          rescheduleScope === 'single'
-                            ? 'border-[var(--color-accent-val)] bg-[var(--color-accent-dim)]'
-                            : 'border-border bg-input hover:border-[var(--color-accent-border)]',
-                        )}
-                      >
-                        <span className="block font-semibold text-[var(--color-text-primary)]">Solo esta cita</span>
-                        <span className="block text-sm text-[var(--color-text-secondary)] mt-1">Únicamente esta sesión.</span>
-                      </button>
-                      <button
-                        type="button"
-                        disabled={appointmentActionBusy}
-                        onClick={() => {
-                          setRescheduleScope('following');
-                          setRescheduleSlot(null);
-                          setAppointmentActionError('');
-                        }}
-                        className={cn(
-                          'w-full rounded-xl border p-4 text-left transition-colors',
-                          rescheduleScope === 'following'
-                            ? 'border-[var(--color-accent-val)] bg-[var(--color-accent-dim)]'
-                            : 'border-border bg-input hover:border-[var(--color-accent-border)]',
-                        )}
-                      >
-                        <span className="block font-semibold text-[var(--color-text-primary)]">Esta y las siguientes</span>
-                        <span className="block text-sm text-[var(--color-text-secondary)] mt-1">
-                          Esta sesión y las posteriores de la serie. Las sesiones anteriores no cambiarán.
-                        </span>
-                      </button>
+                      {RECURRING_RESCHEDULE_SCOPE_OPTIONS.map((option) => (
+                        <button
+                          key={option.scope}
+                          type="button"
+                          disabled={appointmentActionBusy}
+                          onClick={() => {
+                            setRescheduleScope(option.scope);
+                            setRescheduleSlot(null);
+                            setAppointmentActionError('');
+                          }}
+                          className={cn(
+                            'w-full rounded-xl border p-4 text-left transition-colors',
+                            rescheduleScope === option.scope
+                              ? 'border-[var(--color-accent-val)] bg-[var(--color-accent-dim)]'
+                              : 'border-border bg-input hover:border-[var(--color-accent-border)]',
+                          )}
+                        >
+                          <span className="block font-semibold text-[var(--color-text-primary)]">{option.title}</span>
+                          <span className="block text-sm text-[var(--color-text-secondary)] mt-1">{option.description}</span>
+                        </button>
+                      ))}
                     </div>
                   )}
 

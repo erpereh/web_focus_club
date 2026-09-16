@@ -6,6 +6,7 @@ import {
     getRecurringRescheduleSlotAvailability,
     getRecurringRescheduleErrorMessage,
     getRecurringRescheduleExcludedAppointmentIds,
+    RECURRING_RESCHEDULE_SCOPE_OPTIONS,
 } from './recurring-reschedule';
 
 function appointment(
@@ -49,19 +50,33 @@ describe('recurring reschedule UI helpers', () => {
             .toEqual(['a1']);
     });
 
-    it('excludes exactly future approved occurrences at or above the selected index for following', () => {
-        expect([...getRecurringRescheduleExcludedAppointmentIds(appointments, selected, 'following', now)])
-            .toEqual(['a1', 'a3']);
+    it('excludes every future approved occurrence for series, including lower indexes', () => {
+        const laterSelected = appointments.find((appointment) => appointment.id === 'a3')!;
+        expect([...getRecurringRescheduleExcludedAppointmentIds(appointments, laterSelected, 'series', now)])
+            .toEqual(['a0', 'a1', 'a3']);
     });
 
-    it('builds both callable scopes without changing the slot', () => {
+    it('builds only the new UI scopes without changing the slot', () => {
         const slot = { date: '2026-09-20', time: '19:00' };
         expect(buildRecurringRescheduleRequest('a1', slot, 'single')).toEqual({
             appointmentId: 'a1', preferredSlot: slot, scope: 'single',
         });
-        expect(buildRecurringRescheduleRequest('a1', slot, 'following')).toEqual({
-            appointmentId: 'a1', preferredSlot: slot, scope: 'following',
+        expect(buildRecurringRescheduleRequest('a1', slot, 'series')).toEqual({
+            appointmentId: 'a1', preferredSlot: slot, scope: 'series',
         });
+    });
+
+    it('exposes the new shared scope copy without the legacy following label', () => {
+        expect(RECURRING_RESCHEDULE_SCOPE_OPTIONS).toEqual([
+            { scope: 'single', title: 'Solo esta cita', description: 'Únicamente esta sesión.' },
+            {
+                scope: 'series',
+                title: 'Toda la serie',
+                description: 'Se modificarán todas las sesiones futuras de esta serie. Las sesiones anteriores o canceladas no cambiarán.',
+            },
+        ]);
+        expect(JSON.stringify(RECURRING_RESCHEDULE_SCOPE_OPTIONS)).not.toContain('Esta y las siguientes');
+        expect(JSON.stringify(RECURRING_RESCHEDULE_SCOPE_OPTIONS)).not.toContain('following');
     });
 
     it('allows a customer to modify only their future non-today approved recurrence', () => {
@@ -78,7 +93,7 @@ describe('recurring reschedule UI helpers', () => {
         expect(getRecurringRescheduleErrorMessage({
             details: {
                 reason: 'slot_full',
-                scope: 'following',
+                scope: 'series',
                 problematicSlot: { date: '2026-10-04', time: '19:00' },
             },
         }, 'fallback')).toMatch(/04\/10\/2026.*19:00.*completa/i);
@@ -172,9 +187,11 @@ describe('recurring reschedule UI helpers', () => {
         },
     );
 
-    it('credits exactly the approved occurrences excluded by single and following', () => {
+    it('credits exactly the approved occurrences excluded by single and series', () => {
         const singleExcluded = getRecurringRescheduleExcludedAppointmentIds(appointments, selected, 'single', now);
-        const followingExcluded = getRecurringRescheduleExcludedAppointmentIds(appointments, selected, 'following', now);
+        const seriesExcluded = getRecurringRescheduleExcludedAppointmentIds(appointments, selected, 'series', now);
+        const laterSelected = appointments.find((appointment) => appointment.id === 'a3')!;
+        const laterSeriesExcluded = getRecurringRescheduleExcludedAppointmentIds(appointments, laterSelected, 'series', now);
         const base = {
             appointments,
             selected,
@@ -192,9 +209,17 @@ describe('recurring reschedule UI helpers', () => {
 
         expect(getRecurringRescheduleSlotAvailability({
             ...base,
-            excludedAppointmentIds: followingExcluded,
+            excludedAppointmentIds: seriesExcluded,
             slot: { date: '2026-09-28', time: '10:00' },
             occupancy: { '2026-09-28_10:00': 1, '2026-09-28_10:15': 1, '2026-09-28_10:30': 1, '2026-09-28_10:45': 1 },
+        }).disabled).toBe(false);
+
+        expect(getRecurringRescheduleSlotAvailability({
+            ...base,
+            selected: laterSelected,
+            excludedAppointmentIds: laterSeriesExcluded,
+            slot: { date: '2026-09-14', time: '10:00' },
+            occupancy: { '2026-09-14_10:00': 1, '2026-09-14_10:15': 1, '2026-09-14_10:30': 1, '2026-09-14_10:45': 1 },
         }).disabled).toBe(false);
 
         expect(getRecurringRescheduleSlotAvailability({
