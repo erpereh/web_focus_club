@@ -34,6 +34,10 @@ interface InteractiveCalendarProps {
   selectedDuration?: 30 | 45 | 60;
   /** Claves "YYYY-MM-DD_HH:MM" de los bloques ya reservados por este usuario (pending o approved). */
   userBookedSlotKeys?: Set<string>;
+  /** Fecha civil mínima seleccionable, inclusive. */
+  minDate?: string;
+  /** Ocupación propia que se liberaría al confirmar un cambio recurrente. */
+  occupancyCreditsByKey?: Map<string, number>;
 }
 
 // ============================================
@@ -98,6 +102,8 @@ export function InteractiveCalendar({
   onSelectDate,
   selectedDuration = 60,
   userBookedSlotKeys,
+  minDate,
+  occupancyCreditsByKey,
 }: InteractiveCalendarProps) {
   const now = new Date();
   const [currentYear, setCurrentYear] = useState(now.getFullYear());
@@ -203,7 +209,7 @@ export function InteractiveCalendar({
     const isBlockedByOverlap = coveredBlocks.some((blockTime) => blockedSet.has(`${dateKey}_${blockTime}`));
 
     return {
-      occupancy: occupancy[slotKey] || 0,
+      occupancy: Math.max(0, (occupancy[slotKey] || 0) - (occupancyCreditsByKey?.get(slotKey) ?? 0)),
       isBlocked: isBlockedExact || isBlockedByOverlap,
       isBlockedExact,
       isBlockedByOverlap: !isBlockedExact && isBlockedByOverlap,
@@ -212,7 +218,8 @@ export function InteractiveCalendar({
 
   // Verificar si un día tiene al menos una franja disponible
   function dayHasAvailability(day: number): boolean {
-    if (isPastDay(currentYear, currentMonth, day)) return false;
+    const dateKey = formatDateKey(currentYear, currentMonth, day);
+    if (isPastDay(currentYear, currentMonth, day) || (minDate && dateKey < minDate)) return false;
     return timeSlots.some((time) => {
       if (isPastTime(currentYear, currentMonth, day, time)) return false;
       const status = getSlotStatus(day, time);
@@ -227,7 +234,7 @@ export function InteractiveCalendar({
     let hasFull = false;
     timeSlots.forEach((time) => {
       const key = `${dateKey}_${time}`;
-      const count = occupancy[key] || 0;
+      const count = Math.max(0, (occupancy[key] || 0) - (occupancyCreditsByKey?.get(key) ?? 0));
       if (count > 0 && count < siteConfig.maxCapacity) hasPartial = true;
       if (count >= siteConfig.maxCapacity) hasFull = true;
     });
@@ -326,9 +333,9 @@ export function InteractiveCalendar({
           {/* Días del mes */}
           {Array.from({ length: daysInMonth }).map((_, i) => {
             const day = i + 1;
-            const past = isPastDay(currentYear, currentMonth, day);
-            const today = isToday(currentYear, currentMonth, day);
             const dateKey = formatDateKey(currentYear, currentMonth, day);
+            const past = isPastDay(currentYear, currentMonth, day) || Boolean(minDate && dateKey < minDate);
+            const today = isToday(currentYear, currentMonth, day);
             const isSelected = selectedDate
               ? selectedDate === dateKey
               : selectedDay === day;

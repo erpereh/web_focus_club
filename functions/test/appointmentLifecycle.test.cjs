@@ -20,6 +20,7 @@ const {
   isClientSameDayChange,
   seriesHasSameDayOccurrence,
   clientOwnAppointmentMutationBlockedReason,
+  classifyMadridCivilSlot,
   SAME_DAY_CHANGE_NOT_ALLOWED,
 } = require("../lib/appointmentLifecycle.js");
 
@@ -134,6 +135,35 @@ assert.equal(rescheduleResult.ok, true);
 assert.equal(rescheduleCalls.released, 1);
 assert.deepEqual(rescheduleCalls.cleared, approvalOnlyAppointmentFields());
 assert.equal(rescheduleCalls.patches[0].status, "pending");
+
+assert.deepEqual(
+  classifyMadridCivilSlot({ date: "2026-01-15", time: "12:00" }, new Date("2026-01-15T10:30:00.000Z")),
+  { isValid: true, isToday: true, isPast: false, isFuture: true },
+  "winter CET converts 10:30Z to 11:30 in Madrid",
+);
+assert.deepEqual(
+  classifyMadridCivilSlot({ date: "2026-07-15", time: "12:00" }, new Date("2026-07-15T10:30:00.000Z")),
+  { isValid: true, isToday: true, isPast: true, isFuture: false },
+  "summer CEST converts 10:30Z to 12:30 in Madrid",
+);
+assert.deepEqual(
+  classifyMadridCivilSlot({ date: "2026-03-29", time: "03:30" }, new Date("2026-03-29T00:30:00.000Z")),
+  { isValid: true, isToday: true, isPast: false, isFuture: true },
+  "DST start uses the Madrid wall clock",
+);
+assert.deepEqual(
+  classifyMadridCivilSlot({ date: "2026-09-02", time: "09:00" }, new Date("2026-09-02T08:00:00.000Z")),
+  { isValid: true, isToday: true, isPast: true, isFuture: false },
+);
+assert.deepEqual(
+  classifyMadridCivilSlot({ date: "2026-09-02", time: "18:00" }, new Date("2026-09-02T08:00:00.000Z")),
+  { isValid: true, isToday: true, isPast: false, isFuture: true },
+);
+assert.deepEqual(
+  classifyMadridCivilSlot({ date: "2026-09-03", time: "00:00" }, new Date("2026-09-02T21:59:00.000Z")),
+  { isValid: true, isToday: false, isPast: false, isFuture: true },
+  "tomorrow remains future across the Madrid day boundary",
+);
 
 const rejectedRescheduleCalls = { released: 0, patches: 0 };
 assert.deepEqual(reconcileOwnAppointmentReschedule({

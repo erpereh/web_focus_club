@@ -40,6 +40,44 @@ export function isSameDayInMadrid(dateKey: string, now: Date): boolean {
     return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) && dateKey === getMadridDateKey(now);
 }
 
+export interface MadridCivilSlotState {
+    isValid: boolean;
+    isToday: boolean;
+    isPast: boolean;
+    isFuture: boolean;
+}
+
+function getMadridTimeKey(now: Date): string {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: MADRID_TIME_ZONE,
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(now);
+    const hour = parts.find((part) => part.type === 'hour')?.value;
+    const minute = parts.find((part) => part.type === 'minute')?.value;
+    if (!hour || !minute) throw new Error('No se ha podido calcular la hora en Europe/Madrid.');
+    return `${hour}:${minute}`;
+}
+
+export function classifyMadridCivilSlot(slot: AppointmentSlotLike, now: Date): MadridCivilSlotState {
+    const date = slot.date ?? '';
+    const time = slot.time ?? '';
+    const [year, month, day] = date.split('-').map(Number);
+    const parsedDate = new Date(Date.UTC(year, month - 1, day));
+    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(date)
+        && parsedDate.getUTCFullYear() === year
+        && parsedDate.getUTCMonth() === month - 1
+        && parsedDate.getUTCDate() === day;
+    if (!validDate || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+        return { isValid: false, isToday: false, isPast: false, isFuture: false };
+    }
+    const today = getMadridDateKey(now);
+    const isToday = isSameDayInMadrid(date, now);
+    const isFuture = date > today || (isToday && time > getMadridTimeKey(now));
+    return { isValid: true, isToday, isPast: !isFuture, isFuture };
+}
+
 function isEffectiveSlot(value: AppointmentSlotLike | null | undefined): value is EffectiveAppointmentSlot {
     return Boolean(
         value

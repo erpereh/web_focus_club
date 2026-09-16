@@ -146,6 +146,11 @@ export interface AppointmentRecurrence {
     origin: 'admin' | 'client';
     createdAt: string;
     updatedAt?: string;
+    lastRescheduledAt?: string;
+    lastRescheduledByUid?: string;
+    lastRescheduleScope?: 'single' | 'following';
+    lastRescheduleFromIndex?: number;
+    lastRescheduleAnchorSlot?: TimeSlot;
 }
 
 export interface BlockedSlot {

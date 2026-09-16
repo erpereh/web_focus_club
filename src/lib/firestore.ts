@@ -745,6 +745,43 @@ export async function updateOwnAppointmentSlot(input: {
     await callable(input);
 }
 
+export interface RecurringRescheduleInput {
+    appointmentId: string;
+    preferredSlot: TimeSlot;
+    scope: 'single' | 'following';
+}
+
+export interface RecurringRescheduleResult {
+    success: true;
+    appointmentId: string;
+    seriesId: string;
+    scope: 'single' | 'following';
+    affectedAppointmentIds: string[];
+    affectedCount: number;
+}
+
+export async function rescheduleRecurringAppointmentFromAdmin(
+    input: RecurringRescheduleInput
+): Promise<RecurringRescheduleResult> {
+    const callable = httpsCallable<RecurringRescheduleInput, RecurringRescheduleResult>(
+        firebaseFunctions,
+        'rescheduleRecurringAppointmentFromAdmin'
+    );
+    const result = await callable(input);
+    return result.data;
+}
+
+export async function rescheduleOwnRecurringAppointment(
+    input: RecurringRescheduleInput
+): Promise<RecurringRescheduleResult> {
+    const callable = httpsCallable<RecurringRescheduleInput, RecurringRescheduleResult>(
+        firebaseFunctions,
+        'rescheduleOwnRecurringAppointment'
+    );
+    const result = await callable(input);
+    return result.data;
+}
+
 export async function createAppointmentFromAdmin(
     input: CreateAppointmentFromAdminInput
 ): Promise<{ success: boolean; appointmentId: string; bonoWarning?: string }> {

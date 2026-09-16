@@ -34,6 +34,7 @@ import {
   shouldSkipRecurringStatusNotification,
 } from "./recurringAppointments.js";
 import { createRecurringSeriesHandlers } from "./recurringSeries.js";
+import { createRecurringRescheduleHandlers } from "./recurringReschedule.js";
 import { createSupportChatHandlers, type SupportChatNotificationInput } from "./supportChat";
 import {
   createCustomerSuggestionHandlers,
@@ -1661,6 +1662,12 @@ const recurringSeries = createRecurringSeriesHandlers({
   defaultServiceType: APPOINTMENT_SERVICE_TYPE,
 });
 
+const recurringReschedule = createRecurringRescheduleHandlers({
+  db,
+  requireAdmin,
+  getNowDate,
+});
+
 export const createRecurringAppointmentsFromAdmin = onCall(
   { region: REGION },
   recurringSeries.createRecurringAppointmentsFromAdmin,
@@ -1684,6 +1691,16 @@ export const rejectRecurringAppointmentSeriesFromAdmin = onCall(
 export const cancelOwnRecurringAppointmentSeries = onCall(
   { region: REGION },
   recurringSeries.cancelOwnRecurringAppointmentSeries,
+);
+
+export const rescheduleRecurringAppointmentFromAdmin = onCall(
+  { region: REGION },
+  recurringReschedule.rescheduleRecurringAppointmentFromAdmin,
+);
+
+export const rescheduleOwnRecurringAppointment = onCall(
+  { region: REGION },
+  recurringReschedule.rescheduleOwnRecurringAppointment,
 );
 
 export const sendContactMessage = onCall<ContactMessageRequest>(

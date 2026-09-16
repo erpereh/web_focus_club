@@ -48,6 +48,7 @@ import type { TimeSlot, Appointment, Bono, Trainer } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
 import {
   formatRecurringSeriesPreview,
+  addUtcDays,
   generateRecurringOccurrenceDates,
   getRecurringHastaViewModel,
   sanitizeRecurringEndDate,
@@ -66,6 +67,7 @@ import {
   cancelOwnAppointment,
   cancelOwnRecurringAppointmentSeries,
   updateOwnAppointmentSlot,
+  rescheduleOwnRecurringAppointment,
   getAppointmentsByUser,
   getActiveBonoByUser,
   updateUserProfile,
@@ -81,9 +83,18 @@ import { updatePassword } from 'firebase/auth';
 import { cn } from '@/lib/utils';
 import { validatePassword, validateSpanishPhone } from '@/lib/validation';
 import {
+  classifyMadridCivilSlot,
+  getMadridDateKey,
   isSameDayAppointment,
   pendingSeriesHasSameDayOccurrence,
 } from '@/lib/madrid-date';
+import {
+  buildRecurringRescheduleRequest,
+  canCustomerRescheduleRecurringAppointment,
+  getRecurringRescheduleErrorMessage,
+  getRecurringRescheduleExcludedAppointmentIds,
+  type RecurringRescheduleScope,
+} from '@/lib/recurring-reschedule';
 
 // ============================================
 // TIPOS
@@ -213,6 +224,7 @@ export default function PortalPage() {
   const [showReservaDrawer, setShowReservaDrawer] = useState(false);
   const [showRescheduleDrawer, setShowRescheduleDrawer] = useState(false);
   const [rescheduleSlot, setRescheduleSlot] = useState<TimeSlot | null>(null);
+  const [rescheduleScope, setRescheduleScope] = useState<RecurringRescheduleScope | null>(null);
   const [appointmentActionBusy, setAppointmentActionBusy] = useState(false);
   const [appointmentActionError, setAppointmentActionError] = useState('');
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -436,11 +448,28 @@ export default function PortalPage() {
     userBookedSlotKeys,
   ]);
 
-  // Al modificar una cita, su franja actual no debe bloquearse contra sí misma.
+  const rescheduleAppointment = useMemo(
+    () => userAppointments.find((appointment) => appointment.id === selectedAppointment),
+    [selectedAppointment, userAppointments],
+  );
+
+  const rescheduleExcludedAppointmentIds = useMemo(() => {
+    if (!rescheduleAppointment) return new Set<string>();
+    if (!rescheduleAppointment.recurrenceSeriesId) return new Set([rescheduleAppointment.id]);
+    if (!rescheduleScope) return new Set<string>();
+    return getRecurringRescheduleExcludedAppointmentIds(
+      userAppointments,
+      rescheduleAppointment,
+      rescheduleScope,
+      new Date(),
+    );
+  }, [rescheduleAppointment, rescheduleScope, userAppointments]);
+
+  // Las citas que se moverían con el scope elegido no bloquean visualmente el calendario.
   const rescheduleBookedSlotKeys = useMemo(() => {
     const keys = new Set<string>();
     userAppointments
-      .filter(a => a.id !== selectedAppointment && (a.status === 'pending' || a.status === 'approved'))
+      .filter(a => !rescheduleExcludedAppointmentIds.has(a.id) && (a.status === 'pending' || a.status === 'approved'))
       .forEach(a => {
         const slot = a.approvedSlot || a.preferredSlots?.[0];
         if (!slot) return;
@@ -450,7 +479,22 @@ export default function PortalPage() {
         });
       });
     return keys;
-  }, [selectedAppointment, userAppointments]);
+  }, [rescheduleExcludedAppointmentIds, userAppointments]);
+
+  const rescheduleOccupancyCredits = useMemo(() => {
+    const credits = new Map<string, number>();
+    userAppointments
+      .filter((appointment) => rescheduleExcludedAppointmentIds.has(appointment.id) && appointment.status === 'approved')
+      .forEach((appointment) => {
+        const slot = appointment.approvedSlot || appointment.preferredSlots?.[0];
+        if (!slot) return;
+        getSlotBlocks(slot.time, parseInt(appointment.duration, 10)).forEach((blockTime) => {
+          const key = `${slot.date}_${blockTime}`;
+          credits.set(key, (credits.get(key) ?? 0) + 1);
+        });
+      });
+    return credits;
+  }, [rescheduleExcludedAppointmentIds, userAppointments]);
 
   // ============================================
   // MANEJADORES DE AUTENTICACIÓN
@@ -699,7 +743,10 @@ export default function PortalPage() {
 
   const openRescheduleDrawer = (appointment: Appointment) => {
     setAppointmentActionError('');
-    setRescheduleSlot(appointment.approvedSlot || appointment.preferredSlots[0] || null);
+    setRescheduleScope(null);
+    setRescheduleSlot(appointment.recurrenceSeriesId
+      ? null
+      : appointment.approvedSlot || appointment.preferredSlots[0] || null);
     setShowRescheduleDrawer(true);
   };
 
@@ -728,18 +775,32 @@ export default function PortalPage() {
 
   const handleRescheduleAppointment = async () => {
     if (!selectedAppointment || !rescheduleSlot) return;
+    const appointment = userAppointments.find((item) => item.id === selectedAppointment);
+    if (!appointment) return;
+    if (appointment.recurrenceSeriesId && !rescheduleScope) {
+      setAppointmentActionError('Elige qué citas quieres modificar.');
+      return;
+    }
     setAppointmentActionBusy(true);
     setAppointmentActionError('');
     try {
-      await updateOwnAppointmentSlot({ appointmentId: selectedAppointment, preferredSlot: rescheduleSlot });
-      await refreshUserAppointments();
+      if (appointment.recurrenceSeriesId && rescheduleScope) {
+        await rescheduleOwnRecurringAppointment(
+          buildRecurringRescheduleRequest(selectedAppointment, rescheduleSlot, rescheduleScope),
+        );
+      } else {
+        await updateOwnAppointmentSlot({ appointmentId: selectedAppointment, preferredSlot: rescheduleSlot });
+        await refreshUserAppointments();
+      }
       setShowRescheduleDrawer(false);
       setRescheduleSlot(null);
+      setRescheduleScope(null);
     } catch (error) {
       console.error('Error al modificar cita:', error);
-      setAppointmentActionError(error instanceof Error && error.message
-        ? error.message
-        : 'No se pudo modificar la cita. Inténtalo de nuevo.');
+      setAppointmentActionError(getRecurringRescheduleErrorMessage(
+        error,
+        'No se pudo modificar la cita. Inténtalo de nuevo.',
+      ));
     } finally {
       setAppointmentActionBusy(false);
     }
@@ -1602,9 +1663,14 @@ export default function PortalPage() {
                 const canManageAppointment = appointment.userId === user?.uid
                   && (appointment.status === 'pending' || appointment.status === 'approved')
                   && !!appointmentSlot
-                  && new Date(`${appointmentSlot.date}T${appointmentSlot.time}:00`) > now
+                  && classifyMadridCivilSlot(appointmentSlot, now).isFuture
                   && !isSameDay
                   && !seriesHasTodayOccurrence;
+                const canModifyRecurring = canCustomerRescheduleRecurringAppointment(
+                  appointment,
+                  user?.uid,
+                  now,
+                );
                 const sameDayNotice = seriesHasTodayOccurrence
                   ? 'Esta serie incluye una cita de hoy y ya no puede cancelarse.'
                   : isSameDay
@@ -1718,7 +1784,7 @@ export default function PortalPage() {
 
                         {canManageAppointment && (
                           <div className="flex flex-col sm:flex-row gap-3 pt-2">
-                            {!appointment.recurrenceSeriesId && (
+                            {(!appointment.recurrenceSeriesId || canModifyRecurring) && (
                             <PremiumButton
                               variant="outline"
                               onClick={() => openRescheduleDrawer(appointment)}
@@ -2028,7 +2094,12 @@ export default function PortalPage() {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
-                onClick={() => !appointmentActionBusy && setShowRescheduleDrawer(false)}
+                onClick={() => {
+                  if (appointmentActionBusy) return;
+                  setShowRescheduleDrawer(false);
+                  setRescheduleScope(null);
+                  setRescheduleSlot(null);
+                }}
               />
               <motion.div
                 initial={{ opacity: 0, x: '100%' }}
@@ -2040,10 +2111,19 @@ export default function PortalPage() {
                 <div className="flex items-center justify-between p-6 border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm z-10">
                   <div>
                     <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Modificar cita</h2>
-                    <p className="text-sm text-[var(--color-text-secondary)]">Elige una nueva franja para tu sesión.</p>
+                    <p className="text-sm text-[var(--color-text-secondary)]">
+                      {appointment.recurrenceSeriesId
+                        ? 'Elige el alcance y después una nueva franja.'
+                        : 'Elige una nueva franja para tu sesión.'}
+                    </p>
                   </div>
                   <button
-                    onClick={() => !appointmentActionBusy && setShowRescheduleDrawer(false)}
+                    onClick={() => {
+                      if (appointmentActionBusy) return;
+                      setShowRescheduleDrawer(false);
+                      setRescheduleScope(null);
+                      setRescheduleSlot(null);
+                    }}
                     disabled={appointmentActionBusy}
                     className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted/30 transition-colors disabled:opacity-50"
                     aria-label="Cerrar modificación de cita"
@@ -2053,6 +2133,51 @@ export default function PortalPage() {
                 </div>
 
                 <div className="p-6 space-y-6">
+                  {appointment.recurrenceSeriesId && (
+                    <div className="space-y-3">
+                      <p className="text-sm font-semibold text-[var(--color-text-primary)]">¿Qué quieres modificar?</p>
+                      <button
+                        type="button"
+                        disabled={appointmentActionBusy}
+                        onClick={() => {
+                          setRescheduleScope('single');
+                          setRescheduleSlot(null);
+                          setAppointmentActionError('');
+                        }}
+                        className={cn(
+                          'w-full rounded-xl border p-4 text-left transition-colors',
+                          rescheduleScope === 'single'
+                            ? 'border-[var(--color-accent-val)] bg-[var(--color-accent-dim)]'
+                            : 'border-border bg-input hover:border-[var(--color-accent-border)]',
+                        )}
+                      >
+                        <span className="block font-semibold text-[var(--color-text-primary)]">Solo esta cita</span>
+                        <span className="block text-sm text-[var(--color-text-secondary)] mt-1">Únicamente esta sesión.</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={appointmentActionBusy}
+                        onClick={() => {
+                          setRescheduleScope('following');
+                          setRescheduleSlot(null);
+                          setAppointmentActionError('');
+                        }}
+                        className={cn(
+                          'w-full rounded-xl border p-4 text-left transition-colors',
+                          rescheduleScope === 'following'
+                            ? 'border-[var(--color-accent-val)] bg-[var(--color-accent-dim)]'
+                            : 'border-border bg-input hover:border-[var(--color-accent-border)]',
+                        )}
+                      >
+                        <span className="block font-semibold text-[var(--color-text-primary)]">Esta y las siguientes</span>
+                        <span className="block text-sm text-[var(--color-text-secondary)] mt-1">
+                          Esta sesión y las posteriores de la serie. Las sesiones anteriores no cambiarán.
+                        </span>
+                      </button>
+                    </div>
+                  )}
+
+                  {(!appointment.recurrenceSeriesId || rescheduleScope) && (
                   <GlassCard className="p-5">
                     <InteractiveCalendar
                       selectedSlot={rescheduleSlot}
@@ -2060,8 +2185,13 @@ export default function PortalPage() {
                       onClearSlot={() => setRescheduleSlot(null)}
                       selectedDuration={parseInt(appointment.duration, 10) as 30 | 45 | 60}
                       userBookedSlotKeys={rescheduleBookedSlotKeys}
+                      occupancyCreditsByKey={rescheduleOccupancyCredits}
+                      minDate={appointment.recurrenceSeriesId
+                        ? addUtcDays(getMadridDateKey(new Date()), 1)
+                        : undefined}
                     />
                   </GlassCard>
+                  )}
 
                   {appointmentActionError && (
                     <p className="text-sm text-red-400">{appointmentActionError}</p>
@@ -2070,7 +2200,11 @@ export default function PortalPage() {
                   <div className="flex gap-3">
                     <PremiumButton
                       variant="ghost"
-                      onClick={() => setShowRescheduleDrawer(false)}
+                      onClick={() => {
+                        setShowRescheduleDrawer(false);
+                        setRescheduleScope(null);
+                        setRescheduleSlot(null);
+                      }}
                       disabled={appointmentActionBusy}
                       className="flex-1"
                     >
@@ -2079,7 +2213,7 @@ export default function PortalPage() {
                     <PremiumButton
                       variant="cta"
                       onClick={handleRescheduleAppointment}
-                      disabled={!rescheduleSlot || appointmentActionBusy}
+                      disabled={!rescheduleSlot || appointmentActionBusy || Boolean(appointment.recurrenceSeriesId && !rescheduleScope)}
                       icon={<CheckCircle className="w-4 h-4" />}
                       className="flex-1"
                     >

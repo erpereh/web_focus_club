@@ -5,6 +5,7 @@ import {
     isSameDayAppointment,
     isSameDayInMadrid,
     pendingSeriesHasSameDayOccurrence,
+    classifyMadridCivilSlot,
 } from './madrid-date';
 
 describe('getMadridDateKey', () => {
@@ -76,5 +77,18 @@ describe('same-day appointment and pending series', () => {
             { recurrenceSeriesId: 's1', status: 'pending', date: '2026-09-03', time: '07:00' },
             { recurrenceSeriesId: 's1', status: 'pending', date: '2026-09-04', time: '07:00' },
         ], 's1', now)).toBe(false);
+    });
+});
+
+describe('classifyMadridCivilSlot', () => {
+    it('compares the civil slot with the CET/CEST Madrid wall clock', () => {
+        expect(classifyMadridCivilSlot(
+            { date: '2026-01-15', time: '12:00' },
+            new Date('2026-01-15T10:30:00.000Z'),
+        )).toEqual({ isValid: true, isToday: true, isPast: false, isFuture: true });
+        expect(classifyMadridCivilSlot(
+            { date: '2026-07-15', time: '12:00' },
+            new Date('2026-07-15T10:30:00.000Z'),
+        )).toEqual({ isValid: true, isToday: true, isPast: true, isFuture: false });
     });
 });
