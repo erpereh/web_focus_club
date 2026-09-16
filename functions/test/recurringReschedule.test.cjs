@@ -127,6 +127,46 @@ assert.deepEqual(following.draft.affected.map((item) => item.newSlot), [
 ]);
 assert.equal(following.draft.seriesEndDate, "2026-10-05", "pending occurrence remains part of the effective series end");
 
+const missingFutureIndex = occurrence("missing-index", undefined, "2026-10-12");
+const missingFutureIndexResult = prepare({ occurrences: [...occurrences, missingFutureIndex] });
+assert.equal(missingFutureIndexResult.ok, false);
+assert.equal(missingFutureIndexResult.error.reason, "recurring_occurrence_unavailable");
+assert.equal(missingFutureIndexResult.error.problematicAppointmentId, "missing-index");
+assert.deepEqual(missingFutureIndexResult.error.problematicSlot, { date: "2026-10-12", time: "10:00" });
+
+const fractionalFutureIndex = occurrence("fractional-index", 5.5, "2026-10-12");
+const fractionalFutureIndexResult = prepare({ occurrences: [...occurrences, fractionalFutureIndex] });
+assert.equal(fractionalFutureIndexResult.ok, false);
+assert.equal(fractionalFutureIndexResult.error.reason, "recurring_occurrence_unavailable");
+
+const ignoredInvalidIndexes = prepare({
+  occurrences: [
+    ...occurrences,
+    occurrence("past-invalid-index", undefined, "2026-08-31"),
+    occurrence("pending-invalid-index", undefined, "2026-10-12", "pending"),
+    occurrence("cancelled-invalid-index", undefined, "2026-10-19", "cancelled"),
+    occurrence("rejected-invalid-index", undefined, "2026-10-26", "rejected"),
+  ],
+});
+assert.equal(ignoredInvalidIndexes.ok, true);
+
+const invalidLaterDurationOccurrences = occurrences.map((item) => item.id === "a3"
+  ? { ...item, data: { ...item.data, duration: "0" } }
+  : item);
+const invalidLaterDuration = prepare({ occurrences: invalidLaterDurationOccurrences });
+assert.equal(invalidLaterDuration.ok, false);
+assert.equal(invalidLaterDuration.error.reason, "recurring_occurrence_unavailable");
+assert.equal(invalidLaterDuration.error.problematicAppointmentId, "a3");
+
+const partialDuration = prepare({
+  scope: "single",
+  occurrences: occurrences.map((item) => item.id === "a1"
+    ? { ...item, data: { ...item.data, duration: "30minutes" } }
+    : item),
+});
+assert.equal(partialDuration.ok, false);
+assert.equal(partialDuration.error.reason, "recurring_occurrence_unavailable");
+
 const inconsistentOwner = prepare({ series: { ...series, userId: "other-user" } });
 assert.equal(inconsistentOwner.ok, false);
 assert.equal(inconsistentOwner.error.reason, "recurring_occurrence_unavailable");
@@ -471,6 +511,154 @@ async function runHandlerTests() {
     (error) => error.code === "failed-precondition" && error.details.reason === "slot_full",
   );
   assert.deepEqual(failingDb.documents, new Map(Object.entries(failingDocs)), "failed transaction must not persist writes");
+
+  const customerDb = new FakeFirestore(transactionDocuments());
+  const customerHandlers = createRecurringRescheduleHandlers({
+    db: customerDb,
+    requireAdmin: async () => { throw new Error("customer handler must not require admin"); },
+    getNowDate: () => fixedNow,
+  });
+  const customerResponse = await customerHandlers.rescheduleOwnRecurringAppointment({
+    auth: { uid: "user-1", token: {} },
+    data: {
+      appointmentId: "a1",
+      preferredSlot: { date: "2026-09-20", time: "19:00" },
+      scope: "following",
+    },
+  });
+  assert.equal(customerResponse.success, true);
+  const customerUpdated = customerDb.documents.get("appointments/a1");
+  assert.equal(customerUpdated.status, "approved");
+  protectedFields.forEach((field) => assert.deepEqual(
+    customerUpdated[field],
+    occurrences[1].data[field],
+    `customer handler changed ${field}`,
+  ));
+
+  const foreignDocs = transactionDocuments();
+  const foreignDb = new FakeFirestore(foreignDocs);
+  const foreignHandlers = createRecurringRescheduleHandlers({
+    db: foreignDb,
+    requireAdmin: async () => ({}),
+    getNowDate: () => fixedNow,
+  });
+  await assert.rejects(
+    foreignHandlers.rescheduleOwnRecurringAppointment({
+      auth: { uid: "user-2", token: {} },
+      data: {
+        appointmentId: "a1",
+        preferredSlot: { date: "2026-09-20", time: "19:00" },
+        scope: "single",
+      },
+    }),
+    (error) => error.code === "permission-denied",
+  );
+  assert.deepEqual(foreignDb.documents, new Map(Object.entries(foreignDocs)));
+
+  const selectedTodayDocs = transactionDocuments();
+  selectedTodayDocs["appointments/a1"] = {
+    ...selectedTodayDocs["appointments/a1"],
+    approvedSlot: { date: "2026-09-01", time: "19:00" },
+    preferredSlots: [{ date: "2026-09-01", time: "19:00" }],
+    date: "2026-09-01",
+    time: "19:00",
+  };
+  const selectedTodayDb = new FakeFirestore(selectedTodayDocs);
+  const selectedTodayHandlers = createRecurringRescheduleHandlers({
+    db: selectedTodayDb,
+    requireAdmin: async () => ({}),
+    getNowDate: () => fixedNow,
+  });
+  await assert.rejects(
+    selectedTodayHandlers.rescheduleOwnRecurringAppointment({
+      auth: { uid: "user-1", token: {} },
+      data: {
+        appointmentId: "a1",
+        preferredSlot: { date: "2026-09-02", time: "19:00" },
+        scope: "single",
+      },
+    }),
+    (error) => error.code === "failed-precondition"
+      && error.details.reason === "same_day_change_not_allowed",
+  );
+  assert.equal(selectedTodayDb.operations.some((operation) => operation.type === "write"), false);
+
+  const targetTodayDocs = transactionDocuments();
+  const targetTodayDb = new FakeFirestore(targetTodayDocs);
+  const targetTodayHandlers = createRecurringRescheduleHandlers({
+    db: targetTodayDb,
+    requireAdmin: async () => ({}),
+    getNowDate: () => fixedNow,
+  });
+  await assert.rejects(
+    targetTodayHandlers.rescheduleOwnRecurringAppointment({
+      auth: { uid: "user-1", token: {} },
+      data: {
+        appointmentId: "a1",
+        preferredSlot: { date: "2026-09-01", time: "19:00" },
+        scope: "single",
+      },
+    }),
+    (error) => error.code === "failed-precondition"
+      && error.details.reason === "same_day_change_not_allowed",
+  );
+  assert.equal(targetTodayDb.operations.some((operation) => operation.type === "write"), false);
+
+  const customerFailingDocs = transactionDocuments();
+  customerFailingDocs[`slot_occupancy/${fullKey}`] = {
+    date: fullKey.slice(0, 10), time: fullKey.slice(11), count: 2,
+  };
+  const customerFailingDb = new FakeFirestore(customerFailingDocs);
+  const customerFailingHandlers = createRecurringRescheduleHandlers({
+    db: customerFailingDb,
+    requireAdmin: async () => ({}),
+    getNowDate: () => fixedNow,
+  });
+  await assert.rejects(
+    customerFailingHandlers.rescheduleOwnRecurringAppointment({
+      auth: { uid: "user-1", token: {} },
+      data: {
+        appointmentId: "a1",
+        preferredSlot: { date: "2026-09-20", time: "19:00" },
+        scope: "following",
+      },
+    }),
+    (error) => error.code === "failed-precondition" && error.details.reason === "slot_full",
+  );
+  assert.deepEqual(
+    customerFailingDb.documents,
+    new Map(Object.entries(customerFailingDocs)),
+    "customer failure must not persist writes",
+  );
+
+  for (const [label, mutate] of [
+    ["invalid recurrence index", (docs) => { docs["appointments/a3"] = { ...docs["appointments/a3"], recurrenceIndex: undefined }; }],
+    ["invalid duration", (docs) => { docs["appointments/a3"] = { ...docs["appointments/a3"], duration: "15" }; }],
+  ]) {
+    const corruptDocs = transactionDocuments();
+    mutate(corruptDocs);
+    const corruptDb = new FakeFirestore(corruptDocs);
+    const corruptHandlers = createRecurringRescheduleHandlers({
+      db: corruptDb,
+      requireAdmin: async () => ({}),
+      getNowDate: () => fixedNow,
+    });
+    await assert.rejects(
+      corruptHandlers.rescheduleRecurringAppointmentFromAdmin({
+        auth: { uid: "admin-1", token: {} },
+        data: {
+          appointmentId: "a1",
+          preferredSlot: { date: "2026-09-20", time: "19:00" },
+          scope: "following",
+        },
+      }),
+      (error) => error.code === "failed-precondition"
+        && error.details.reason === "recurring_occurrence_unavailable",
+      label,
+    );
+    assert.equal(corruptDb.operations.some((operation) => operation.type === "write"), false, label);
+    assert.deepEqual(corruptDb.documents, new Map(Object.entries(corruptDocs)), label);
+  }
 }
 
 runHandlerTests()

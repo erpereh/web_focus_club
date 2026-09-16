@@ -175,6 +175,7 @@ import {
   subscribeAppointments,
   subscribeAppointmentsByTrainer,
   subscribeBlockedSlots,
+  subscribeMonthAvailability,
   subscribeBrandingConfig,
   subscribeServices,
   subscribeSiteConfig,
@@ -187,6 +188,7 @@ import {
 } from '@/lib/firestore';
 import {
   buildRecurringRescheduleRequest,
+  getRecurringRescheduleSlotAvailability,
   getRecurringRescheduleErrorMessage,
   getRecurringRescheduleExcludedAppointmentIds,
   type RecurringRescheduleScope,
@@ -1079,6 +1081,13 @@ export default function AdminPage() {
   const [editRecurringScope, setEditRecurringScope] = useState<RecurringRescheduleScope | null>(null);
   const [editSlotBusy, setEditSlotBusy] = useState(false);
   const [editSlotError, setEditSlotError] = useState('');
+  const [editRecurringAvailability, setEditRecurringAvailability] = useState<{
+    monthKey: string;
+    occupancy: Record<string, number>;
+    blockedSlotKeys: Set<string>;
+  } | null>(null);
+  const [editRecurringAvailabilityLoading, setEditRecurringAvailabilityLoading] = useState(false);
+  const [editRecurringAvailabilityError, setEditRecurringAvailabilityError] = useState('');
   const [showSeriesApprovalModal, setShowSeriesApprovalModal] = useState(false);
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
   const [seriesApprovalTrainer, setSeriesApprovalTrainer] = useState('');
@@ -1392,6 +1401,57 @@ export default function AdminPage() {
     }
     return subscribeAppointmentsByTrainer(trainerProfile.id, setTrainerAppointments, console.error);
   }, [isTrainerRole, trainerProfile]);
+
+  useEffect(() => {
+    const appointment = appointments.find((item) => item.id === selectedAppointmentId);
+    const date = editSlotData.date;
+    const isRecurringApproved = appointment?.status === 'approved' && Boolean(appointment.recurrenceSeriesId);
+    if (!showEditSlotModal || !isRecurringApproved || !editRecurringScope || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setEditRecurringAvailability(null);
+      setEditRecurringAvailabilityLoading(false);
+      setEditRecurringAvailabilityError('');
+      return;
+    }
+
+    const year = Number(date.slice(0, 4));
+    const month = Number(date.slice(5, 7));
+    const monthKey = date.slice(0, 7);
+    let active = true;
+    setEditRecurringAvailability(null);
+    setEditRecurringAvailabilityLoading(true);
+    setEditRecurringAvailabilityError('');
+
+    const unsubscribe = subscribeMonthAvailability(
+      year,
+      month,
+      ({ occupancy, blockedSlots: monthBlockedSlots }) => {
+        if (!active) return;
+        setEditRecurringAvailability({
+          monthKey,
+          occupancy,
+          blockedSlotKeys: new Set(monthBlockedSlots.map((slot) => `${slot.date}_${slot.time}`)),
+        });
+        setEditRecurringAvailabilityLoading(false);
+      },
+      () => {
+        if (!active) return;
+        setEditRecurringAvailability(null);
+        setEditRecurringAvailabilityLoading(false);
+        setEditRecurringAvailabilityError('No se pudo cargar la disponibilidad. Inténtalo de nuevo.');
+      },
+    );
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [
+    appointments,
+    editRecurringScope,
+    editSlotData.date,
+    selectedAppointmentId,
+    showEditSlotModal,
+  ]);
 
   // Stats
   const stats = {
@@ -8372,9 +8432,7 @@ export default function AdminPage() {
                           appointments
                             .filter(a =>
                               !visuallyExcludedIds.has(a.id) &&
-                              (isRecurringApproved
-                                ? a.status === 'approved' || a.status === 'pending'
-                                : a.status === 'approved')
+                              a.status === 'approved'
                             )
                             .map(a => a.approvedSlot || a.preferredSlots?.[0])
                             .filter((slot): slot is TimeSlot => Boolean(slot && slot.date === selectedDate))
@@ -8451,7 +8509,12 @@ export default function AdminPage() {
                                 <select
                                   value={editSlotData.time}
                                   onChange={(e) => setEditSlotData(prev => ({ ...prev, time: e.target.value }))}
-                                  disabled={editSlotBusy}
+                                  disabled={editSlotBusy || Boolean(isRecurringApproved && (
+                                    !selectedDate
+                                    || editRecurringAvailabilityLoading
+                                    || editRecurringAvailabilityError
+                                    || editRecurringAvailability?.monthKey !== selectedDate.slice(0, 7)
+                                  ))}
                                   className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
                                 >
                                   <option value="">Seleccionar hora</option>
@@ -8459,8 +8522,38 @@ export default function AdminPage() {
                                     const appointmentDuration = parseInt(appt?.duration || String(siteConfig.slotInterval ?? 30), 10);
                                     const isBlocked = getCoveredSlotBlocks(t, appointmentDuration).some((blockTime) => blockedTimes.has(blockTime));
                                     const isOccupied = occupiedTimes.has(t);
-                                    const isUnavailable = isBlocked || isOccupied;
-                                    const label = isBlocked ? `${t} — Bloqueada` : isOccupied ? `${t} — Ocupada` : t;
+                                    const validRecurringDuration = [30, 45, 60].includes(appointmentDuration);
+                                    const recurringAvailability = isRecurringApproved
+                                      && appt
+                                      && selectedDate
+                                      && validRecurringDuration
+                                      && editRecurringAvailability?.monthKey === selectedDate.slice(0, 7)
+                                      ? getRecurringRescheduleSlotAvailability({
+                                          appointments,
+                                          selected: appt,
+                                          excludedAppointmentIds: visuallyExcludedIds,
+                                          slot: { date: selectedDate, time: t },
+                                          durationMinutes: appointmentDuration as 30 | 45 | 60,
+                                          occupancy: editRecurringAvailability.occupancy,
+                                          blockedSlotKeys: editRecurringAvailability.blockedSlotKeys,
+                                          maxCapacity: siteConfig.maxCapacity,
+                                        })
+                                      : null;
+                                    const isUnavailable = isRecurringApproved
+                                      ? !recurringAvailability || recurringAvailability.disabled
+                                      : isBlocked || isOccupied;
+                                    const recurringLabel = recurringAvailability?.reason === 'slot_blocked'
+                                      ? `${t} — Bloqueada`
+                                      : recurringAvailability?.reason === 'slot_full'
+                                        ? `${t} — Completa`
+                                        : recurringAvailability?.reason === 'appointment_conflict'
+                                          ? `${t} — Conflicto cliente`
+                                          : recurringAvailability && recurringAvailability.occupancy > 0
+                                            ? `${t} — ${recurringAvailability.occupancy}/${siteConfig.maxCapacity}`
+                                            : t;
+                                    const label = isRecurringApproved
+                                      ? (validRecurringDuration ? recurringLabel : `${t} — Duración no válida`)
+                                      : isBlocked ? `${t} — Bloqueada` : isOccupied ? `${t} — Ocupada` : t;
                                     return (
                                       <option key={t} value={t} disabled={isUnavailable} style={isUnavailable ? { color: '#555' } : undefined}>
                                         {label}
@@ -8468,6 +8561,12 @@ export default function AdminPage() {
                                     );
                                   })}
                                 </select>
+                                {isRecurringApproved && selectedDate && editRecurringAvailabilityLoading && (
+                                  <p className="text-xs text-[var(--color-text-secondary)] mt-2">Cargando disponibilidad...</p>
+                                )}
+                                {isRecurringApproved && editRecurringAvailabilityError && (
+                                  <p className="text-xs text-red-400 mt-2">{editRecurringAvailabilityError}</p>
+                                )}
                               </div>
                             </div>
                             )}
@@ -8493,7 +8592,11 @@ export default function AdminPage() {
                               <PremiumButton
                                 variant="cta"
                                 icon={<CalendarClock className="w-4 h-4" />}
-                                disabled={editSlotBusy || (isRecurringApproved && !editRecurringScope)}
+                                disabled={editSlotBusy
+                                  || (isRecurringApproved && !editRecurringScope)
+                                  || Boolean(isRecurringApproved && (
+                                    editRecurringAvailabilityLoading || editRecurringAvailabilityError
+                                  ))}
                                 onClick={async () => {
                                   if (isRecurringApproved && !editRecurringScope) {
                                     setEditSlotError('Elige qué citas quieres modificar.');

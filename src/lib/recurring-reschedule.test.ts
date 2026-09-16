@@ -3,6 +3,7 @@ import type { Appointment } from '@/types';
 import {
     buildRecurringRescheduleRequest,
     canCustomerRescheduleRecurringAppointment,
+    getRecurringRescheduleSlotAvailability,
     getRecurringRescheduleErrorMessage,
     getRecurringRescheduleExcludedAppointmentIds,
 } from './recurring-reschedule';
@@ -84,5 +85,123 @@ describe('recurring reschedule UI helpers', () => {
         expect(getRecurringRescheduleErrorMessage({
             details: { reason: 'slot_blocked', problematicSlot: { date: '2026-09-20', time: '19:00' } },
         }, 'fallback')).toMatch(/bloqueada/i);
+    });
+
+    it('keeps a partially occupied recurring slot selectable across all duration blocks', () => {
+        const result = getRecurringRescheduleSlotAvailability({
+            appointments,
+            selected,
+            excludedAppointmentIds: new Set([selected.id]),
+            slot: { date: '2026-09-20', time: '18:00' },
+            durationMinutes: 60,
+            occupancy: {
+                '2026-09-20_18:00': 1,
+                '2026-09-20_18:15': 1,
+                '2026-09-20_18:30': 1,
+                '2026-09-20_18:45': 1,
+            },
+            blockedSlotKeys: new Set(),
+            maxCapacity: 3,
+        });
+
+        expect(result).toEqual({ disabled: false, reason: null, occupancy: 1 });
+    });
+
+    it('disables a recurring slot when any covered duration block is full', () => {
+        const result = getRecurringRescheduleSlotAvailability({
+            appointments,
+            selected,
+            excludedAppointmentIds: new Set([selected.id]),
+            slot: { date: '2026-09-20', time: '18:00' },
+            durationMinutes: 45,
+            occupancy: {
+                '2026-09-20_18:00': 1,
+                '2026-09-20_18:15': 1,
+                '2026-09-20_18:30': 3,
+            },
+            blockedSlotKeys: new Set(),
+            maxCapacity: 3,
+        });
+
+        expect(result).toEqual({ disabled: true, reason: 'slot_full', occupancy: 3 });
+    });
+
+    it('ignores another customer pending appointment for recurring capacity and conflicts', () => {
+        const otherPending = {
+            ...appointment('other-pending', 9, '2026-09-20', 'pending'),
+            userId: 'user-2',
+            recurrenceSeriesId: 'series-2',
+            approvedSlot: undefined,
+            preferredSlots: [{ date: '2026-09-20', time: '18:00' }],
+        };
+        const result = getRecurringRescheduleSlotAvailability({
+            appointments: [...appointments, otherPending],
+            selected,
+            excludedAppointmentIds: new Set([selected.id]),
+            slot: { date: '2026-09-20', time: '18:00' },
+            durationMinutes: 30,
+            occupancy: {},
+            blockedSlotKeys: new Set(),
+            maxCapacity: 3,
+        });
+
+        expect(result.disabled).toBe(false);
+    });
+
+    it.each(['pending', 'approved'] as const)(
+        'blocks a recurring slot that overlaps the same customer %s appointment',
+        (status) => {
+            const ownAppointment = {
+                ...appointment(`own-${status}`, 9, '2026-09-20', status),
+                recurrenceSeriesId: 'series-2',
+                approvedSlot: status === 'approved' ? { date: '2026-09-20', time: '18:00' } : undefined,
+                preferredSlots: [{ date: '2026-09-20', time: '18:00' }],
+            };
+            const result = getRecurringRescheduleSlotAvailability({
+                appointments: [...appointments, ownAppointment],
+                selected,
+                excludedAppointmentIds: new Set([selected.id]),
+                slot: { date: '2026-09-20', time: '18:00' },
+                durationMinutes: 30,
+                occupancy: status === 'approved' ? { '2026-09-20_18:00': 1 } : {},
+                blockedSlotKeys: new Set(),
+                maxCapacity: 3,
+            });
+
+            expect(result.reason).toBe('appointment_conflict');
+        },
+    );
+
+    it('credits exactly the approved occurrences excluded by single and following', () => {
+        const singleExcluded = getRecurringRescheduleExcludedAppointmentIds(appointments, selected, 'single', now);
+        const followingExcluded = getRecurringRescheduleExcludedAppointmentIds(appointments, selected, 'following', now);
+        const base = {
+            appointments,
+            selected,
+            durationMinutes: 60 as const,
+            blockedSlotKeys: new Set<string>(),
+            maxCapacity: 1,
+        };
+
+        expect(getRecurringRescheduleSlotAvailability({
+            ...base,
+            excludedAppointmentIds: singleExcluded,
+            slot: { date: '2026-09-14', time: '10:00' },
+            occupancy: { '2026-09-14_10:00': 1, '2026-09-14_10:15': 1, '2026-09-14_10:30': 1, '2026-09-14_10:45': 1 },
+        }).disabled).toBe(false);
+
+        expect(getRecurringRescheduleSlotAvailability({
+            ...base,
+            excludedAppointmentIds: followingExcluded,
+            slot: { date: '2026-09-28', time: '10:00' },
+            occupancy: { '2026-09-28_10:00': 1, '2026-09-28_10:15': 1, '2026-09-28_10:30': 1, '2026-09-28_10:45': 1 },
+        }).disabled).toBe(false);
+
+        expect(getRecurringRescheduleSlotAvailability({
+            ...base,
+            excludedAppointmentIds: singleExcluded,
+            slot: { date: '2026-09-28', time: '10:00' },
+            occupancy: { '2026-09-28_10:00': 1, '2026-09-28_10:15': 1, '2026-09-28_10:30': 1, '2026-09-28_10:45': 1 },
+        }).reason).toBe('appointment_conflict');
     });
 });

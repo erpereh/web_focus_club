@@ -162,7 +162,7 @@ function planError(
 }
 
 function durationMinutes(appointment: RecurringAppointmentData): number {
-  const duration = Number.parseInt(appointment.duration, 10);
+  const duration = Number(appointment.duration);
   return [30, 45, 60].includes(duration) ? duration : 0;
 }
 
@@ -244,6 +244,34 @@ export function prepareRecurringReschedule(input: {
 
   const ordered = [...input.occurrences].sort((left, right) =>
     (left.data.recurrenceIndex ?? Number.MAX_SAFE_INTEGER) - (right.data.recurrenceIndex ?? Number.MAX_SAFE_INTEGER));
+
+  if (input.scope === "following") {
+    for (const item of ordered) {
+      if (item.data.status !== "approved" || item.data.recurrenceSeriesId !== input.series.id) continue;
+      const slot = effectiveSlot(item.data);
+      if (!slot) {
+        return planError(
+          input.scope,
+          "recurring_occurrence_unavailable",
+          "Una cita aprobada de la serie no tiene una franja valida.",
+          undefined,
+          item.id,
+        );
+      }
+      if (!classifyMadridCivilSlot(slot, input.now).isFuture) continue;
+      const index = item.data.recurrenceIndex;
+      if (!Number.isInteger(index) || (index as number) < 0) {
+        return planError(
+          input.scope,
+          "recurring_occurrence_unavailable",
+          "Una cita futura de la serie no tiene un indice de recurrencia valido.",
+          slot,
+          item.id,
+        );
+      }
+    }
+  }
+
   const seenIndexes = new Set<number>();
   for (const item of ordered) {
     const index = item.data.recurrenceIndex;
@@ -289,20 +317,39 @@ export function prepareRecurringReschedule(input: {
   }
 
   const occupancyDelta = new Map<string, number>();
-  const affected: AffectedRecurringAppointment[] = candidates.map((appointment) => {
+  const affected: AffectedRecurringAppointment[] = [];
+  for (const appointment of candidates) {
     const index = appointment.data.recurrenceIndex as number;
     const oldSlot = effectiveSlot(appointment.data) as RecurringRescheduleSlot;
     const duration = durationMinutes(appointment.data);
+    if (!duration) {
+      return planError(
+        input.scope,
+        "recurring_occurrence_unavailable",
+        "Una cita futura de la serie no tiene una duracion valida.",
+        oldSlot,
+        appointment.id,
+      );
+    }
     const newSlot = {
       date: addUtcDays(input.preferredSlot.date, (index - (selectedIndex as number)) * input.series.intervalDays),
       time: input.preferredSlot.time,
     };
     const oldKeys = slotKeys(oldSlot, duration);
     const newKeys = slotKeys(newSlot, duration);
+    if (oldKeys.length === 0 || newKeys.length === 0) {
+      return planError(
+        input.scope,
+        "recurring_occurrence_unavailable",
+        "Una cita futura de la serie no tiene bloques de ocupacion validos.",
+        oldSlot,
+        appointment.id,
+      );
+    }
     oldKeys.forEach((key) => occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) - 1));
     newKeys.forEach((key) => occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) + 1));
-    return { appointment, oldSlot, newSlot, oldKeys, newKeys };
-  });
+    affected.push({ appointment, oldSlot, newSlot, oldKeys, newKeys });
+  }
 
   for (const item of affected) {
     const state = classifyMadridCivilSlot(item.newSlot, input.now);

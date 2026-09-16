@@ -1,5 +1,6 @@
 import type { Appointment, TimeSlot } from '@/types';
 import { classifyMadridCivilSlot, getAppointmentEffectiveSlot } from './madrid-date';
+import { getSlotBlocks, slotOccupancyKey } from './appointment-slots';
 
 export type RecurringRescheduleScope = 'single' | 'following';
 
@@ -57,6 +58,73 @@ export function canCustomerRescheduleRecurringAppointment(
     if (!slot) return false;
     const state = classifyMadridCivilSlot(slot, now);
     return state.isFuture && !state.isToday;
+}
+
+export type RecurringRescheduleSlotUnavailableReason =
+    | 'slot_blocked'
+    | 'slot_full'
+    | 'appointment_conflict';
+
+export interface RecurringRescheduleSlotAvailability {
+    disabled: boolean;
+    reason: RecurringRescheduleSlotUnavailableReason | null;
+    occupancy: number;
+}
+
+export function getRecurringRescheduleSlotAvailability(input: {
+    appointments: Appointment[];
+    selected: Appointment;
+    excludedAppointmentIds: Set<string>;
+    slot: TimeSlot;
+    durationMinutes: 30 | 45 | 60;
+    occupancy: Record<string, number>;
+    blockedSlotKeys: Set<string>;
+    maxCapacity: number;
+}): RecurringRescheduleSlotAvailability {
+    const coveredBlocks = getSlotBlocks(input.slot.time, input.durationMinutes);
+    const targetKeys = new Set(coveredBlocks.map((time) => slotOccupancyKey(input.slot.date, time)));
+    if (coveredBlocks.some((time) => input.blockedSlotKeys.has(slotOccupancyKey(input.slot.date, time)))) {
+        return { disabled: true, reason: 'slot_blocked', occupancy: 0 };
+    }
+
+    const conflictsWithCustomerAppointment = input.appointments.some((appointment) => {
+        if (appointment.userId !== input.selected.userId
+            || input.excludedAppointmentIds.has(appointment.id)
+            || (appointment.status !== 'pending' && appointment.status !== 'approved')) {
+            return false;
+        }
+        const slot = getAppointmentEffectiveSlot(appointment);
+        const duration = Number(appointment.duration);
+        if (!slot || ![30, 45, 60].includes(duration)) return false;
+        return getSlotBlocks(slot.time, duration)
+            .some((time) => targetKeys.has(slotOccupancyKey(slot.date, time)));
+    });
+    if (conflictsWithCustomerAppointment) {
+        return { disabled: true, reason: 'appointment_conflict', occupancy: 0 };
+    }
+
+    const occupancyCredits = new Map<string, number>();
+    input.appointments
+        .filter((appointment) => input.excludedAppointmentIds.has(appointment.id) && appointment.status === 'approved')
+        .forEach((appointment) => {
+            const slot = getAppointmentEffectiveSlot(appointment);
+            const duration = Number(appointment.duration);
+            if (!slot || ![30, 45, 60].includes(duration)) return;
+            getSlotBlocks(slot.time, duration).forEach((time) => {
+                const key = slotOccupancyKey(slot.date, time);
+                occupancyCredits.set(key, (occupancyCredits.get(key) ?? 0) + 1);
+            });
+        });
+
+    const effectiveCounts = coveredBlocks.map((time) => {
+        const key = slotOccupancyKey(input.slot.date, time);
+        return Math.max(0, (input.occupancy[key] ?? 0) - (occupancyCredits.get(key) ?? 0));
+    });
+    const occupancy = Math.max(0, ...effectiveCounts);
+    if (effectiveCounts.some((count) => count >= input.maxCapacity)) {
+        return { disabled: true, reason: 'slot_full', occupancy };
+    }
+    return { disabled: false, reason: null, occupancy };
 }
 
 interface CallableErrorShape {
