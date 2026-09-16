@@ -26,6 +26,51 @@ export function slotOccupancyKey(date: string, time: string): string {
     return `${date}_${time}`;
 }
 
+export type SlotAvailabilityReason = 'slot_blocked' | 'slot_full' | 'appointment_conflict';
+
+export interface SlotAvailabilityResult {
+    disabled: boolean;
+    reason: SlotAvailabilityReason | null;
+    occupancy: number;
+}
+
+/**
+ * Evaluates the complete set of occupancy blocks covered by a session.
+ * Credits are visual only: persistence remains authoritative when saving.
+ */
+export function getSlotAvailability(input: {
+    slot: { date: string; time: string };
+    durationMinutes: 30 | 45 | 60;
+    occupancy: Record<string, number>;
+    blockedSlotKeys: Set<string>;
+    userBookedSlotKeys?: Set<string>;
+    occupancyCreditsByKey?: Map<string, number>;
+    maxCapacity: number;
+}): SlotAvailabilityResult {
+    const coveredKeys = getSlotBlocks(input.slot.time, input.durationMinutes)
+        .map((time) => slotOccupancyKey(input.slot.date, time));
+
+    if (coveredKeys.some((key) => input.blockedSlotKeys.has(key))) {
+        return { disabled: true, reason: 'slot_blocked', occupancy: 0 };
+    }
+
+    if (coveredKeys.some((key) => input.userBookedSlotKeys?.has(key))) {
+        return { disabled: true, reason: 'appointment_conflict', occupancy: 0 };
+    }
+
+    const effectiveCounts = coveredKeys.map((key) => Math.max(
+        0,
+        (input.occupancy[key] ?? 0) - (input.occupancyCreditsByKey?.get(key) ?? 0),
+    ));
+    const occupancy = Math.max(0, ...effectiveCounts);
+
+    if (effectiveCounts.some((count) => count >= input.maxCapacity)) {
+        return { disabled: true, reason: 'slot_full', occupancy };
+    }
+
+    return { disabled: false, reason: null, occupancy };
+}
+
 export function doesSessionFitWithinSchedule(config: SiteConfig, startTime: string, durationMinutes: number): boolean {
     const normalizedConfig = normalizeSiteConfig(config);
     const [h, min] = startTime.split(':').map(Number);

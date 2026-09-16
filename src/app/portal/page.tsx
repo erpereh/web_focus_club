@@ -89,6 +89,7 @@ import {
   pendingSeriesHasSameDayOccurrence,
 } from '@/lib/madrid-date';
 import {
+  buildRescheduleCalendarContext,
   buildRecurringRescheduleRequest,
   canCustomerRescheduleRecurringAppointment,
   getRecurringRescheduleErrorMessage,
@@ -466,36 +467,11 @@ export default function PortalPage() {
     );
   }, [rescheduleAppointment, rescheduleScope, userAppointments]);
 
-  // Las citas que se moverían con el scope elegido no bloquean visualmente el calendario.
-  const rescheduleBookedSlotKeys = useMemo(() => {
-    const keys = new Set<string>();
-    userAppointments
-      .filter(a => !rescheduleExcludedAppointmentIds.has(a.id) && (a.status === 'pending' || a.status === 'approved'))
-      .forEach(a => {
-        const slot = a.approvedSlot || a.preferredSlots?.[0];
-        if (!slot) return;
-        const duration = parseInt(a.duration || '60', 10);
-        getSlotBlocks(slot.time, duration).forEach((blockTime) => {
-          keys.add(`${slot.date}_${blockTime}`);
-        });
-      });
-    return keys;
-  }, [rescheduleExcludedAppointmentIds, userAppointments]);
-
-  const rescheduleOccupancyCredits = useMemo(() => {
-    const credits = new Map<string, number>();
-    userAppointments
-      .filter((appointment) => rescheduleExcludedAppointmentIds.has(appointment.id) && appointment.status === 'approved')
-      .forEach((appointment) => {
-        const slot = appointment.approvedSlot || appointment.preferredSlots?.[0];
-        if (!slot) return;
-        getSlotBlocks(slot.time, parseInt(appointment.duration, 10)).forEach((blockTime) => {
-          const key = `${slot.date}_${blockTime}`;
-          credits.set(key, (credits.get(key) ?? 0) + 1);
-        });
-      });
-    return credits;
-  }, [rescheduleExcludedAppointmentIds, userAppointments]);
+  const rescheduleCalendarContext = useMemo(() => buildRescheduleCalendarContext(
+    userAppointments,
+    rescheduleAppointment?.userId ?? '',
+    rescheduleExcludedAppointmentIds,
+  ), [rescheduleAppointment?.userId, rescheduleExcludedAppointmentIds, userAppointments]);
 
   // ============================================
   // MANEJADORES DE AUTENTICACIÓN
@@ -2168,8 +2144,8 @@ export default function PortalPage() {
                       onSelectSlot={setRescheduleSlot}
                       onClearSlot={() => setRescheduleSlot(null)}
                       selectedDuration={parseInt(appointment.duration, 10) as 30 | 45 | 60}
-                      userBookedSlotKeys={rescheduleBookedSlotKeys}
-                      occupancyCreditsByKey={rescheduleOccupancyCredits}
+                      userBookedSlotKeys={rescheduleCalendarContext.userBookedSlotKeys}
+                      occupancyCreditsByKey={rescheduleCalendarContext.occupancyCreditsByKey}
                       minDate={appointment.recurrenceSeriesId
                         ? addUtcDays(getMadridDateKey(new Date()), 1)
                         : undefined}

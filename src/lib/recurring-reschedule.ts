@@ -1,6 +1,6 @@
 import type { Appointment, TimeSlot } from '@/types';
 import { classifyMadridCivilSlot, getAppointmentEffectiveSlot } from './madrid-date';
-import { getSlotBlocks, slotOccupancyKey } from './appointment-slots';
+import { getSlotAvailability, getSlotBlocks, slotOccupancyKey } from './appointment-slots';
 
 export type RecurringRescheduleScope = 'single' | 'series';
 export type RecurringRescheduleBackendScope = RecurringRescheduleScope | 'following';
@@ -87,6 +87,48 @@ export interface RecurringRescheduleSlotAvailability {
     occupancy: number;
 }
 
+export interface RescheduleCalendarContext {
+    userBookedSlotKeys: Set<string>;
+    occupancyCreditsByKey: Map<string, number>;
+}
+
+/**
+ * Builds the purely visual adjustments used while an appointment is being moved.
+ * Excluded pending appointments stop conflicting with themselves but never receive
+ * occupancy credit because pending appointments do not consume global capacity.
+ */
+export function buildRescheduleCalendarContext(
+    appointments: Appointment[],
+    userId: string,
+    excludedAppointmentIds: Set<string>,
+): RescheduleCalendarContext {
+    const userBookedSlotKeys = new Set<string>();
+    const occupancyCreditsByKey = new Map<string, number>();
+
+    appointments.forEach((appointment) => {
+        const slot = getAppointmentEffectiveSlot(appointment);
+        const duration = Number(appointment.duration);
+        if (!slot || ![30, 45, 60].includes(duration)) return;
+
+        if (appointment.userId === userId
+            && !excludedAppointmentIds.has(appointment.id)
+            && (appointment.status === 'pending' || appointment.status === 'approved')) {
+            getSlotBlocks(slot.time, duration).forEach((time) => {
+                userBookedSlotKeys.add(slotOccupancyKey(slot.date, time));
+            });
+        }
+
+        if (excludedAppointmentIds.has(appointment.id) && appointment.status === 'approved') {
+            getSlotBlocks(slot.time, duration).forEach((time) => {
+                const key = slotOccupancyKey(slot.date, time);
+                occupancyCreditsByKey.set(key, (occupancyCreditsByKey.get(key) ?? 0) + 1);
+            });
+        }
+    });
+
+    return { userBookedSlotKeys, occupancyCreditsByKey };
+}
+
 export function getRecurringRescheduleSlotAvailability(input: {
     appointments: Appointment[];
     selected: Appointment;
@@ -97,50 +139,20 @@ export function getRecurringRescheduleSlotAvailability(input: {
     blockedSlotKeys: Set<string>;
     maxCapacity: number;
 }): RecurringRescheduleSlotAvailability {
-    const coveredBlocks = getSlotBlocks(input.slot.time, input.durationMinutes);
-    const targetKeys = new Set(coveredBlocks.map((time) => slotOccupancyKey(input.slot.date, time)));
-    if (coveredBlocks.some((time) => input.blockedSlotKeys.has(slotOccupancyKey(input.slot.date, time)))) {
-        return { disabled: true, reason: 'slot_blocked', occupancy: 0 };
-    }
-
-    const conflictsWithCustomerAppointment = input.appointments.some((appointment) => {
-        if (appointment.userId !== input.selected.userId
-            || input.excludedAppointmentIds.has(appointment.id)
-            || (appointment.status !== 'pending' && appointment.status !== 'approved')) {
-            return false;
-        }
-        const slot = getAppointmentEffectiveSlot(appointment);
-        const duration = Number(appointment.duration);
-        if (!slot || ![30, 45, 60].includes(duration)) return false;
-        return getSlotBlocks(slot.time, duration)
-            .some((time) => targetKeys.has(slotOccupancyKey(slot.date, time)));
+    const context = buildRescheduleCalendarContext(
+        input.appointments,
+        input.selected.userId,
+        input.excludedAppointmentIds,
+    );
+    return getSlotAvailability({
+        slot: input.slot,
+        durationMinutes: input.durationMinutes,
+        occupancy: input.occupancy,
+        blockedSlotKeys: input.blockedSlotKeys,
+        userBookedSlotKeys: context.userBookedSlotKeys,
+        occupancyCreditsByKey: context.occupancyCreditsByKey,
+        maxCapacity: input.maxCapacity,
     });
-    if (conflictsWithCustomerAppointment) {
-        return { disabled: true, reason: 'appointment_conflict', occupancy: 0 };
-    }
-
-    const occupancyCredits = new Map<string, number>();
-    input.appointments
-        .filter((appointment) => input.excludedAppointmentIds.has(appointment.id) && appointment.status === 'approved')
-        .forEach((appointment) => {
-            const slot = getAppointmentEffectiveSlot(appointment);
-            const duration = Number(appointment.duration);
-            if (!slot || ![30, 45, 60].includes(duration)) return;
-            getSlotBlocks(slot.time, duration).forEach((time) => {
-                const key = slotOccupancyKey(slot.date, time);
-                occupancyCredits.set(key, (occupancyCredits.get(key) ?? 0) + 1);
-            });
-        });
-
-    const effectiveCounts = coveredBlocks.map((time) => {
-        const key = slotOccupancyKey(input.slot.date, time);
-        return Math.max(0, (input.occupancy[key] ?? 0) - (occupancyCredits.get(key) ?? 0));
-    });
-    const occupancy = Math.max(0, ...effectiveCounts);
-    if (effectiveCounts.some((count) => count >= input.maxCapacity)) {
-        return { disabled: true, reason: 'slot_full', occupancy };
-    }
-    return { disabled: false, reason: null, occupancy };
 }
 
 interface CallableErrorShape {

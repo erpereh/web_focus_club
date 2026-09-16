@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Appointment } from '@/types';
 import {
+    buildRescheduleCalendarContext,
     buildRecurringRescheduleRequest,
     canCustomerRescheduleRecurringAppointment,
     getRecurringRescheduleSlotAvailability,
@@ -100,6 +101,66 @@ describe('recurring reschedule UI helpers', () => {
         expect(getRecurringRescheduleErrorMessage({
             details: { reason: 'slot_blocked', problematicSlot: { date: '2026-09-20', time: '19:00' } },
         }, 'fallback')).toMatch(/bloqueada/i);
+    });
+
+    it('excludes a pending appointment from its own conflict without granting occupancy credit', () => {
+        const pending = {
+            ...appointment('pending-self', 0, '2026-09-20', 'pending'),
+            recurrenceSeriesId: undefined,
+            approvedSlot: undefined,
+            preferredSlots: [{ date: '2026-09-20', time: '18:00' }],
+        };
+        const context = buildRescheduleCalendarContext([pending], pending.userId, new Set([pending.id]));
+
+        expect(context.userBookedSlotKeys.size).toBe(0);
+        expect(context.occupancyCreditsByKey.size).toBe(0);
+    });
+
+    it('keeps other pending and approved appointments from the same customer as conflicts', () => {
+        const selectedPending = {
+            ...appointment('pending-self', 0, '2026-09-20', 'pending'),
+            recurrenceSeriesId: undefined,
+            approvedSlot: undefined,
+        };
+        const otherPending = {
+            ...appointment('pending-other', 1, '2026-09-21', 'pending'),
+            recurrenceSeriesId: undefined,
+            approvedSlot: undefined,
+        };
+        const otherApproved = {
+            ...appointment('approved-other', 2, '2026-09-22'),
+            recurrenceSeriesId: undefined,
+        };
+        const context = buildRescheduleCalendarContext(
+            [selectedPending, otherPending, otherApproved],
+            selectedPending.userId,
+            new Set([selectedPending.id]),
+        );
+
+        expect(context.userBookedSlotKeys).toContain('2026-09-21_10:00');
+        expect(context.userBookedSlotKeys).toContain('2026-09-22_10:00');
+        expect(context.userBookedSlotKeys).not.toContain('2026-09-20_10:00');
+    });
+
+    it('credits an excluded approved appointment across every covered block', () => {
+        const selectedApproved = {
+            ...selected,
+            recurrenceSeriesId: undefined,
+            approvedSlot: { date: '2026-09-14', time: '10:00' },
+        };
+        const context = buildRescheduleCalendarContext(
+            [selectedApproved],
+            selectedApproved.userId,
+            new Set([selectedApproved.id]),
+        );
+
+        expect(context.userBookedSlotKeys.size).toBe(0);
+        expect([...context.occupancyCreditsByKey.entries()]).toEqual([
+            ['2026-09-14_10:00', 1],
+            ['2026-09-14_10:15', 1],
+            ['2026-09-14_10:30', 1],
+            ['2026-09-14_10:45', 1],
+        ]);
     });
 
     it('keeps a partially occupied recurring slot selectable across all duration blocks', () => {

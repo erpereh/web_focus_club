@@ -71,6 +71,7 @@ import { MediaPicker } from '@/components/admin/MediaPicker';
 import { IconPicker } from '@/components/admin/IconPicker';
 import { AppointmentsCalendar } from '@/components/admin/appointments/AppointmentsCalendar';
 import { TrainerStatsModal } from '@/components/admin/TrainerStatsModal';
+import { AppointmentRescheduleModal } from '@/components/admin/AppointmentRescheduleModal';
 import {
   filterAppointments,
   getTrainerIdFromFilter,
@@ -175,7 +176,6 @@ import {
   subscribeAppointments,
   subscribeAppointmentsByTrainer,
   subscribeBlockedSlots,
-  subscribeMonthAvailability,
   subscribeBrandingConfig,
   subscribeServices,
   subscribeSiteConfig,
@@ -188,13 +188,7 @@ import {
 } from '@/lib/firestore';
 import {
   buildRecurringRescheduleRequest,
-  getRecurringRescheduleSlotAvailability,
-  getRecurringRescheduleErrorMessage,
-  getRecurringRescheduleExcludedAppointmentIds,
-  RECURRING_RESCHEDULE_SCOPE_OPTIONS,
-  type RecurringRescheduleScope,
 } from '@/lib/recurring-reschedule';
-import { getMadridDateKey } from '@/lib/madrid-date';
 import { DEFAULT_SITE_CONFIG, MAX_MAX_CAPACITY, MIN_MAX_CAPACITY, normalizeMaxCapacity } from '@/lib/site-config';
 import type { AdminUserAccessMethod, AdminUserRole } from '@/lib/firestore';
 import { auth } from '@/lib/firebase';
@@ -1078,17 +1072,6 @@ export default function AdminPage() {
 
   // Estado para modal "Modificar Franja"
   const [showEditSlotModal, setShowEditSlotModal] = useState(false);
-  const [editSlotData, setEditSlotData] = useState<TimeSlot>({ date: '', time: '' });
-  const [editRecurringScope, setEditRecurringScope] = useState<RecurringRescheduleScope | null>(null);
-  const [editSlotBusy, setEditSlotBusy] = useState(false);
-  const [editSlotError, setEditSlotError] = useState('');
-  const [editRecurringAvailability, setEditRecurringAvailability] = useState<{
-    monthKey: string;
-    occupancy: Record<string, number>;
-    blockedSlotKeys: Set<string>;
-  } | null>(null);
-  const [editRecurringAvailabilityLoading, setEditRecurringAvailabilityLoading] = useState(false);
-  const [editRecurringAvailabilityError, setEditRecurringAvailabilityError] = useState('');
   const [showSeriesApprovalModal, setShowSeriesApprovalModal] = useState(false);
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
   const [seriesApprovalTrainer, setSeriesApprovalTrainer] = useState('');
@@ -1402,57 +1385,6 @@ export default function AdminPage() {
     }
     return subscribeAppointmentsByTrainer(trainerProfile.id, setTrainerAppointments, console.error);
   }, [isTrainerRole, trainerProfile]);
-
-  useEffect(() => {
-    const appointment = appointments.find((item) => item.id === selectedAppointmentId);
-    const date = editSlotData.date;
-    const isRecurringApproved = appointment?.status === 'approved' && Boolean(appointment.recurrenceSeriesId);
-    if (!showEditSlotModal || !isRecurringApproved || !editRecurringScope || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      setEditRecurringAvailability(null);
-      setEditRecurringAvailabilityLoading(false);
-      setEditRecurringAvailabilityError('');
-      return;
-    }
-
-    const year = Number(date.slice(0, 4));
-    const month = Number(date.slice(5, 7));
-    const monthKey = date.slice(0, 7);
-    let active = true;
-    setEditRecurringAvailability(null);
-    setEditRecurringAvailabilityLoading(true);
-    setEditRecurringAvailabilityError('');
-
-    const unsubscribe = subscribeMonthAvailability(
-      year,
-      month,
-      ({ occupancy, blockedSlots: monthBlockedSlots }) => {
-        if (!active) return;
-        setEditRecurringAvailability({
-          monthKey,
-          occupancy,
-          blockedSlotKeys: new Set(monthBlockedSlots.map((slot) => `${slot.date}_${slot.time}`)),
-        });
-        setEditRecurringAvailabilityLoading(false);
-      },
-      () => {
-        if (!active) return;
-        setEditRecurringAvailability(null);
-        setEditRecurringAvailabilityLoading(false);
-        setEditRecurringAvailabilityError('No se pudo cargar la disponibilidad. Inténtalo de nuevo.');
-      },
-    );
-
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, [
-    appointments,
-    editRecurringScope,
-    editSlotData.date,
-    selectedAppointmentId,
-    showEditSlotModal,
-  ]);
 
   // Stats
   const stats = {
@@ -3615,7 +3547,6 @@ export default function AdminPage() {
                                       icon={<CalendarClock className="w-4 h-4" />}
                                       onClick={() => {
                                         setSelectedAppointmentId(appointment.id);
-                                        setEditSlotData({ date: '', time: '' });
                                         setShowEditSlotModal(true);
                                       }}
                                       className="flex-1 lg:flex-none"
@@ -3641,9 +3572,6 @@ export default function AdminPage() {
                                       icon={<CalendarClock className="w-4 h-4" />}
                                       onClick={() => {
                                         setSelectedAppointmentId(appointment.id);
-                                        setEditSlotData({ date: '', time: '' });
-                                        setEditRecurringScope(null);
-                                        setEditSlotError('');
                                         setShowEditSlotModal(true);
                                       }}
                                       className="w-full"
@@ -3678,9 +3606,6 @@ export default function AdminPage() {
                                       icon={<CalendarClock className="w-4 h-4" />}
                                       onClick={() => {
                                         setSelectedAppointmentId(appointment.id);
-                                        setEditSlotData({ date: '', time: '' });
-                                        setEditRecurringScope(null);
-                                        setEditSlotError('');
                                         setShowEditSlotModal(true);
                                       }}
                                       className="w-full"
@@ -8387,264 +8312,53 @@ export default function AdminPage() {
                 MODIFICAR FRANJA MODAL
                 ============================================ */}
             <AnimatePresence>
-              {showEditSlotModal && selectedAppointmentId && (
-                <motion.div
-                  key="edit-slot-modal"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-                  onClick={() => {
-                    if (editSlotBusy) return;
-                    setShowEditSlotModal(false);
-                    setSelectedAppointmentId(null);
-                    setEditSlotData({ date: '', time: '' });
-                    setEditRecurringScope(null);
-                    setEditSlotError('');
-                  }}
-                >
-                  <motion.div
-                    initial={{ scale: 0.95, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.95, opacity: 0 }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-full max-w-lg"
-                  >
-                    <GlassCard className="p-6">
-                      {(() => {
-                        const appt = appointments.find(a => a.id === selectedAppointmentId);
-                        const isApproved = appt?.status === 'approved';
-                        const isRecurringApproved = Boolean(isApproved && appt?.recurrenceSeriesId);
-                        const visuallyExcludedIds = appt && editRecurringScope
-                          ? getRecurringRescheduleExcludedAppointmentIds(
-                              appointments,
-                              appt,
-                              editRecurringScope,
-                              new Date(),
-                            )
-                          : new Set([selectedAppointmentId]);
-
-                        // Compute unavailable times for the selected date
-                        const selectedDate = editSlotData.date;
-                        const blockedTimes = new Set(
-                          blockedSlots.filter(s => s.date === selectedDate).map(s => s.time)
+              {showEditSlotModal && selectedAppointmentId && (() => {
+                const appointment = appointments.find((item) => item.id === selectedAppointmentId);
+                if (!appointment) return null;
+                return (
+                  <AppointmentRescheduleModal
+                    appointment={appointment}
+                    appointments={appointments}
+                    trainers={trainers}
+                    onClose={() => {
+                      setShowEditSlotModal(false);
+                      setSelectedAppointmentId(null);
+                    }}
+                    onSave={async ({ slot, scope }) => {
+                      const isApproved = appointment.status === 'approved';
+                      const isRecurringApproved = Boolean(isApproved && appointment.recurrenceSeriesId);
+                      if (isRecurringApproved && scope) {
+                        await rescheduleRecurringAppointmentFromAdminFS(
+                          buildRecurringRescheduleRequest(selectedAppointmentId, slot, scope),
                         );
-                        const occupiedTimes = new Set(
-                          appointments
-                            .filter(a =>
-                              !visuallyExcludedIds.has(a.id) &&
-                              a.status === 'approved'
-                            )
-                            .map(a => a.approvedSlot || a.preferredSlots?.[0])
-                            .filter((slot): slot is TimeSlot => Boolean(slot && slot.date === selectedDate))
-                            .map(slot => slot.time)
+                        setShowEditSlotModal(false);
+                        setSelectedAppointmentId(null);
+                        return;
+                      }
+
+                      // Preserve the existing non-recurring persistence flow exactly.
+                      if (isApproved && appointment.approvedSlot) {
+                        const duration = parseInt(appointment.duration || '60', 10);
+                        await decrementSlotOccupancy(
+                          appointment.approvedSlot.date,
+                          appointment.approvedSlot.time,
+                          duration,
                         );
-                        return (
-                          <>
-                            <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-1">Modificar</h2>
-                            <p className="text-sm text-[var(--color-text-secondary)] mb-6">
-                              {isApproved
-                                ? 'Cambia la franja aprobada de esta cita. Se actualizará directamente.'
-                                : 'Cambia la franja preferida de esta cita. Se actualizará directamente.'}
-                            </p>
-
-                            {isRecurringApproved && (
-                              <div className="space-y-3 mb-6">
-                                <p className="text-sm font-semibold text-[var(--color-text-primary)]">¿Qué quieres modificar?</p>
-                                {RECURRING_RESCHEDULE_SCOPE_OPTIONS.map((option) => (
-                                  <button
-                                    key={option.scope}
-                                    type="button"
-                                    disabled={editSlotBusy}
-                                    onClick={() => {
-                                      setEditRecurringScope(option.scope);
-                                      setEditSlotData({ date: '', time: '' });
-                                      setEditSlotError('');
-                                    }}
-                                    className={cn(
-                                      'w-full text-left rounded-xl border p-4 transition-colors',
-                                      editRecurringScope === option.scope
-                                        ? 'border-[var(--color-accent-val)] bg-[var(--color-accent-dim)]'
-                                        : 'border-border bg-input hover:border-[var(--color-accent-border)]',
-                                    )}
-                                  >
-                                    <span className="block font-semibold text-[var(--color-text-primary)]">{option.title}</span>
-                                    <span className="block text-sm text-[var(--color-text-secondary)] mt-1">{option.description}</span>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-
-                            {(!isRecurringApproved || editRecurringScope) && (
-                            <div className="space-y-4 mb-6">
-                              <div>
-                                <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Fecha</label>
-                                <input
-                                  type="date"
-                                  value={editSlotData.date}
-                                  onChange={(e) => setEditSlotData({ date: e.target.value, time: '' })}
-                                  min={getMadridDateKey(new Date())}
-                                  disabled={editSlotBusy}
-                                  className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Hora</label>
-                                <select
-                                  value={editSlotData.time}
-                                  onChange={(e) => setEditSlotData(prev => ({ ...prev, time: e.target.value }))}
-                                  disabled={editSlotBusy || Boolean(isRecurringApproved && (
-                                    !selectedDate
-                                    || editRecurringAvailabilityLoading
-                                    || editRecurringAvailabilityError
-                                    || editRecurringAvailability?.monthKey !== selectedDate.slice(0, 7)
-                                  ))}
-                                  className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                                >
-                                  <option value="">Seleccionar hora</option>
-                                  {timeSlots.map((t) => {
-                                    const appointmentDuration = parseInt(appt?.duration || String(siteConfig.slotInterval ?? 30), 10);
-                                    const isBlocked = getCoveredSlotBlocks(t, appointmentDuration).some((blockTime) => blockedTimes.has(blockTime));
-                                    const isOccupied = occupiedTimes.has(t);
-                                    const validRecurringDuration = [30, 45, 60].includes(appointmentDuration);
-                                    const recurringAvailability = isRecurringApproved
-                                      && appt
-                                      && selectedDate
-                                      && validRecurringDuration
-                                      && editRecurringAvailability?.monthKey === selectedDate.slice(0, 7)
-                                      ? getRecurringRescheduleSlotAvailability({
-                                          appointments,
-                                          selected: appt,
-                                          excludedAppointmentIds: visuallyExcludedIds,
-                                          slot: { date: selectedDate, time: t },
-                                          durationMinutes: appointmentDuration as 30 | 45 | 60,
-                                          occupancy: editRecurringAvailability.occupancy,
-                                          blockedSlotKeys: editRecurringAvailability.blockedSlotKeys,
-                                          maxCapacity: siteConfig.maxCapacity,
-                                        })
-                                      : null;
-                                    const isUnavailable = isRecurringApproved
-                                      ? !recurringAvailability || recurringAvailability.disabled
-                                      : isBlocked || isOccupied;
-                                    const recurringLabel = recurringAvailability?.reason === 'slot_blocked'
-                                      ? `${t} — Bloqueada`
-                                      : recurringAvailability?.reason === 'slot_full'
-                                        ? `${t} — Completa`
-                                        : recurringAvailability?.reason === 'appointment_conflict'
-                                          ? `${t} — Conflicto cliente`
-                                          : recurringAvailability && recurringAvailability.occupancy > 0
-                                            ? `${t} — ${recurringAvailability.occupancy}/${siteConfig.maxCapacity}`
-                                            : t;
-                                    const label = isRecurringApproved
-                                      ? (validRecurringDuration ? recurringLabel : `${t} — Duración no válida`)
-                                      : isBlocked ? `${t} — Bloqueada` : isOccupied ? `${t} — Ocupada` : t;
-                                    return (
-                                      <option key={t} value={t} disabled={isUnavailable} style={isUnavailable ? { color: '#555' } : undefined}>
-                                        {label}
-                                      </option>
-                                    );
-                                  })}
-                                </select>
-                                {isRecurringApproved && selectedDate && editRecurringAvailabilityLoading && (
-                                  <p className="text-xs text-[var(--color-text-secondary)] mt-2">Cargando disponibilidad...</p>
-                                )}
-                                {isRecurringApproved && editRecurringAvailabilityError && (
-                                  <p className="text-xs text-red-400 mt-2">{editRecurringAvailabilityError}</p>
-                                )}
-                              </div>
-                            </div>
-                            )}
-
-                            {editSlotError && (
-                              <p className="text-sm text-red-400 mb-4">{editSlotError}</p>
-                            )}
-
-                            <div className="flex gap-3 justify-end">
-                              <PremiumButton
-                                variant="ghost"
-                                onClick={() => {
-                                  setShowEditSlotModal(false);
-                                  setSelectedAppointmentId(null);
-                                  setEditSlotData({ date: '', time: '' });
-                                  setEditRecurringScope(null);
-                                  setEditSlotError('');
-                                }}
-                                disabled={editSlotBusy}
-                              >
-                                Cancelar
-                              </PremiumButton>
-                              <PremiumButton
-                                variant="cta"
-                                icon={<CalendarClock className="w-4 h-4" />}
-                                disabled={editSlotBusy
-                                  || (isRecurringApproved && !editRecurringScope)
-                                  || Boolean(isRecurringApproved && (
-                                    editRecurringAvailabilityLoading || editRecurringAvailabilityError
-                                  ))}
-                                onClick={async () => {
-                                  if (isRecurringApproved && !editRecurringScope) {
-                                    setEditSlotError('Elige qué citas quieres modificar.');
-                                    return;
-                                  }
-                                  if (!editSlotData.date || !editSlotData.time) {
-                                    setEditSlotError('Selecciona fecha y hora.');
-                                    return;
-                                  }
-                                  setEditSlotBusy(true);
-                                  setEditSlotError('');
-                                  try {
-                                    if (isRecurringApproved && appt && editRecurringScope) {
-                                      await rescheduleRecurringAppointmentFromAdminFS(
-                                        buildRecurringRescheduleRequest(
-                                          selectedAppointmentId,
-                                          editSlotData,
-                                          editRecurringScope,
-                                        ),
-                                      );
-                                      setShowEditSlotModal(false);
-                                      setSelectedAppointmentId(null);
-                                      setEditSlotData({ date: '', time: '' });
-                                      setEditRecurringScope(null);
-                                      return;
-                                    }
-                                    // If approved, decrement old slot occupancy and increment new slot
-                                    if (isApproved && appt?.approvedSlot) {
-                                      const dur = parseInt(appt?.duration || '60', 10);
-                                      await decrementSlotOccupancy(appt.approvedSlot.date, appt.approvedSlot.time, dur);
-                                      await incrementSlotOccupancy(editSlotData.date, editSlotData.time, dur);
-                                    }
-                                    await updateAppointmentSlotFS(
-                                      selectedAppointmentId,
-                                      appt?.status || 'pending',
-                                      editSlotData
-                                    );
-                                    await addActivityLog({
-                                      action: 'appointment_slot_modified',
-                                      adminEmail: user?.email || 'unknown',
-                                      details: `Cita ID: ${selectedAppointmentId} → ${editSlotData.date} ${editSlotData.time}`,
-                                    });
-                                    await refreshData();
-                                    setShowEditSlotModal(false);
-                                    setSelectedAppointmentId(null);
-                                    setEditSlotData({ date: '', time: '' });
-                                  } catch (err) {
-                                    console.error('Error modificando franja:', err);
-                                    setEditSlotError(getRecurringRescheduleErrorMessage(err, 'Error al modificar la franja.'));
-                                  } finally {
-                                    setEditSlotBusy(false);
-                                  }
-                                }}
-                              >
-                                {editSlotBusy ? 'Guardando...' : 'Guardar Cambio'}
-                              </PremiumButton>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </GlassCard>
-                  </motion.div>
-                </motion.div>
-              )}
+                        await incrementSlotOccupancy(slot.date, slot.time, duration);
+                      }
+                      await updateAppointmentSlotFS(selectedAppointmentId, appointment.status, slot);
+                      await addActivityLog({
+                        action: 'appointment_slot_modified',
+                        adminEmail: user?.email || 'unknown',
+                        details: `Cita ID: ${selectedAppointmentId} → ${slot.date} ${slot.time}`,
+                      });
+                      await refreshData();
+                      setShowEditSlotModal(false);
+                      setSelectedAppointmentId(null);
+                    }}
+                  />
+                );
+              })()}
             </AnimatePresence>
 
             {/* ============================================
