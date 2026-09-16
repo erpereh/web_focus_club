@@ -35,6 +35,7 @@ import {
 } from "./recurringAppointments.js";
 import { createRecurringSeriesHandlers } from "./recurringSeries.js";
 import { createRecurringRescheduleHandlers } from "./recurringReschedule.js";
+import { createAdminAppointmentRescheduleHandlers } from "./adminAppointmentReschedule.js";
 import { createSupportChatHandlers, type SupportChatNotificationInput } from "./supportChat";
 import {
   createCustomerSuggestionHandlers,
@@ -1668,6 +1669,12 @@ const recurringReschedule = createRecurringRescheduleHandlers({
   getNowDate,
 });
 
+const adminAppointmentReschedule = createAdminAppointmentRescheduleHandlers({
+  db,
+  requireAdmin,
+  getNowDate,
+});
+
 export const createRecurringAppointmentsFromAdmin = onCall(
   { region: REGION },
   recurringSeries.createRecurringAppointmentsFromAdmin,
@@ -1701,6 +1708,16 @@ export const rescheduleRecurringAppointmentFromAdmin = onCall(
 export const rescheduleOwnRecurringAppointment = onCall(
   { region: REGION },
   recurringReschedule.rescheduleOwnRecurringAppointment,
+);
+
+export const rescheduleAppointmentFromAdmin = onCall(
+  { region: REGION },
+  adminAppointmentReschedule.rescheduleAppointmentFromAdmin,
+);
+
+export const replaceRecurringSeriesScheduleFromAdmin = onCall(
+  { region: REGION },
+  adminAppointmentReschedule.replaceRecurringSeriesScheduleFromAdmin,
 );
 
 export const sendContactMessage = onCall<ContactMessageRequest>(
