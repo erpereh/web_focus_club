@@ -1,8 +1,8 @@
 import { FieldValue, Firestore, Transaction } from "firebase-admin/firestore";
 import { CallableRequest, HttpsError } from "firebase-functions/v2/https";
 import {
-  classifyMadridCivilSlot,
   getSlotBlocks,
+  madridCivilSlotToInstant,
   slotOccupancyDocId,
   SAME_DAY_CHANGE_MESSAGE,
   SAME_DAY_CHANGE_NOT_ALLOWED,
@@ -25,6 +25,11 @@ import {
   normalizeSiteConfig,
   type SiteConfig,
 } from "./siteConfig.js";
+import {
+  calculateActiveSeriesMetadata,
+  isActiveOccurrenceStatus,
+  isHistoricalReplacementOccurrence,
+} from "./recurringScheduleReplacement.js";
 
 type HttpsCode = "invalid-argument" | "failed-precondition" | "permission-denied";
 
@@ -635,42 +640,51 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         const appointmentsSnap = await transaction.get(appointmentsQuery);
         const allOccurrences = appointmentsSnap.docs
           .map((docSnap) => ({ id: docSnap.id, ref: docSnap.ref, data: docSnap.data() as SeriesAppointment }));
-        const occurrences = allOccurrences
-          .filter((occurrence) => occurrence.data.status === "pending")
-          .sort((left, right) => Number(left.data.recurrenceIndex) - Number(right.data.recurrenceIndex));
+        const activeOccurrences = allOccurrences
+          .filter((occurrence) => isActiveOccurrenceStatus(occurrence.data.status));
         const durationMinutes = Number(series.duration);
         if (!validDuration(durationMinutes)
-          || occurrences.length < 1
-          || occurrences.length > MAX_RECURRING_OCCURRENCES
-          || occurrences.length !== series.occurrenceCount
-          || series.totalMinutes !== occurrences.length * durationMinutes) {
+          || activeOccurrences.length < 1
+          || activeOccurrences.length > MAX_RECURRING_OCCURRENCES
+          || activeOccurrences.length !== series.occurrenceCount
+          || series.totalMinutes !== activeOccurrences.length * durationMinutes) {
           throwHttps("failed-precondition", "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.");
         }
         const seenIndexes = new Set<number>();
         const nowDate = getNowDate();
-        const prepared = occurrences.map((occurrence) => {
+        activeOccurrences.forEach((occurrence) => {
           const index = occurrence.data.recurrenceIndex;
           const occurrenceDuration = Number(occurrence.data.duration);
-          const slot = pendingOccurrenceSlot(occurrence.data);
           if (!Number.isInteger(index)
             || (index as number) < 0
             || seenIndexes.has(index as number)
             || occurrence.data.userId !== series.userId
             || occurrence.data.recurrenceSeriesId !== seriesId
-            || occurrenceDuration !== durationMinutes
-            || !slot
-            || !classifyMadridCivilSlot(slot, nowDate).isFuture) {
+            || occurrenceDuration !== durationMinutes) {
             throwHttps("failed-precondition", "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.");
           }
           seenIndexes.add(index as number);
+        });
+        const pendingOccurrences = activeOccurrences
+          .filter((occurrence) => occurrence.data.status === "pending")
+          .sort((left, right) => Number(left.data.recurrenceIndex) - Number(right.data.recurrenceIndex));
+        const prepared = pendingOccurrences.flatMap((occurrence) => {
+          const slot = pendingOccurrenceSlot(occurrence.data);
+          const instant = slot ? madridCivilSlotToInstant(slot) : undefined;
+          if (!slot || !instant || instant <= nowDate) return [];
           const keys = getSlotBlocks(slot.time, durationMinutes).map((time) => slotOccupancyDocId(slot.date, time));
           if (keys.length === 0) {
             throwHttps("failed-precondition", "La ocupacion de una cita de la serie no es valida.", {
               reason: "invalid_occupancy",
             });
           }
-          return { ...occurrence, slot, keys };
+          return [{ ...occurrence, slot, keys }];
         });
+        if (prepared.length === 0) {
+          throwHttps("failed-precondition", "La serie no tiene citas pendientes futuras validas para aprobar.", {
+            reason: "series_unavailable",
+          });
+        }
         const dates = prepared.map((occurrence) => occurrence.slot.date).sort();
         const occupancyKeys = [...new Set(prepared.flatMap((occurrence) => occurrence.keys))].sort();
         const occupancyRefs = occupancyKeys.map((key) => db.collection("slot_occupancy").doc(key));
@@ -710,7 +724,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           bono: bonoSnap.exists
             ? { id: bonoSnap.id, ...(bonoSnap.data() as BonoDoc) }
             : undefined,
-          occurrences: occurrences.map((occurrence) => occurrence.data),
+          occurrences: activeOccurrences.map((occurrence) => occurrence.data),
         });
         if (!reserved.ok) throwHttps("failed-precondition", reserved.message);
 
@@ -731,9 +745,10 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           occupancyByKey.set(occupancyKeys[index], assertOccupancyCount(occupancy?.count ?? 0));
         });
         const userSlotKeys = new Set<string>();
+        const preparedIds = new Set(prepared.map((occurrence) => occurrence.id));
         userAppointmentsSnap.docs.forEach((docSnap) => {
           const appointment = docSnap.data() as SeriesAppointment;
-          if (appointment.recurrenceSeriesId === seriesId) return;
+          if (preparedIds.has(docSnap.id)) return;
           appointmentSlotKeys(appointment).forEach((key) => userSlotKeys.add(key));
         });
         const internalKeys = new Set<string>();
@@ -784,20 +799,36 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           );
         });
 
-        const chronological = [...prepared].sort((left, right) =>
-          `${left.slot.date}_${left.slot.time}`.localeCompare(`${right.slot.date}_${right.slot.time}`));
-        const firstOccurrence = chronological[0];
-        const lastOccurrence = chronological.at(-1)!;
+        const metadata = calculateActiveSeriesMetadata(
+          activeOccurrences.map((occurrence) => ({
+            data: occurrence.data,
+            ...(preparedIds.has(occurrence.id) ? { statusOverride: "approved" } : {}),
+          })),
+          nowDate,
+        );
+        if (!metadata) {
+          throwHttps("failed-precondition", "No se pueden calcular los metadatos activos de la serie.", {
+            reason: "recurring_occurrence_unavailable",
+          });
+        }
+        const remainingPending = activeOccurrences.some((occurrence) =>
+          occurrence.data.status === "pending" && !preparedIds.has(occurrence.id));
+        const hasHistorical = activeOccurrences.some((occurrence) =>
+          isHistoricalReplacementOccurrence(occurrence.data, nowDate));
         transaction.set(seriesRef, {
-          status: "approved",
+          status: remainingPending ? "pending" : "approved",
           assignedTrainer: assignedTrainer || series.assignedTrainer || null,
-          startDate: firstOccurrence.slot.date,
-          startTime: firstOccurrence.slot.time,
-          endDate: lastOccurrence.slot.date,
-          futureOccurrenceCount: prepared.length,
-          futureStartDate: firstOccurrence.slot.date,
-          futureStartTime: firstOccurrence.slot.time,
-          futureEndDate: lastOccurrence.slot.date,
+          occurrenceCount: metadata.occurrenceCount,
+          totalMinutes: metadata.totalMinutes,
+          ...(!hasHistorical && metadata.futureStartDate ? {
+            startDate: metadata.futureStartDate,
+            startTime: metadata.futureStartTime,
+          } : {}),
+          ...(metadata.futureEndDate ? { endDate: metadata.futureEndDate } : {}),
+          futureOccurrenceCount: metadata.futureOccurrenceCount,
+          futureStartDate: metadata.futureStartDate ?? FieldValue.delete(),
+          futureStartTime: metadata.futureStartTime ?? FieldValue.delete(),
+          futureEndDate: metadata.futureEndDate ?? FieldValue.delete(),
           approvedByAdminUid: adminUid,
           approvedAt: now,
           updatedAt: now,
@@ -808,8 +839,8 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           adminUid,
           seriesId,
           affectedAppointmentIds: prepared.map((occurrence) => occurrence.id),
-          occurrenceCount: series.occurrenceCount,
-          totalMinutes: series.totalMinutes,
+          occurrenceCount: metadata.occurrenceCount,
+          totalMinutes: metadata.totalMinutes,
           createdAt: now,
           timestamp: now,
         });

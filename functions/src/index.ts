@@ -19,8 +19,12 @@ import {
   clientOwnAppointmentMutationBlockedReason,
   getAppointmentEffectiveSlot,
   getSlotBlocks,
+  isInsideCustomerRescheduleLockWindow,
   isRescheduleCapacityAvailable,
   isSlotAtCapacity,
+  madridCivilSlotToInstant,
+  ONE_DAY_CHANGE_MESSAGE,
+  ONE_DAY_CHANGE_NOT_ALLOWED,
   reconcileAppointmentMinutes,
   reconcileOwnAppointmentReschedule,
   SAME_DAY_CHANGE_MESSAGE,
@@ -470,6 +474,12 @@ function toHttpsError(
 function throwSameDayChangeNotAllowed(): never {
   throw toHttpsError("failed-precondition", SAME_DAY_CHANGE_MESSAGE, {
     reason: SAME_DAY_CHANGE_NOT_ALLOWED,
+  });
+}
+
+function throwOneDayChangeNotAllowed(): never {
+  throw toHttpsError("failed-precondition", ONE_DAY_CHANGE_MESSAGE, {
+    reason: ONE_DAY_CHANGE_NOT_ALLOWED,
   });
 }
 
@@ -1711,6 +1721,11 @@ export const rescheduleOwnRecurringAppointment = onCall(
   recurringReschedule.rescheduleOwnRecurringAppointment,
 );
 
+export const replaceOwnRecurringSeriesSchedule = onCall(
+  { region: REGION },
+  recurringReschedule.replaceOwnRecurringSeriesSchedule,
+);
+
 export const rescheduleAppointmentFromAdmin = onCall(
   { region: REGION },
   adminAppointmentReschedule.rescheduleAppointmentFromAdmin,
@@ -2195,16 +2210,19 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
         throw toHttpsError("failed-precondition", "Esta cita ya no se puede modificar.");
       }
       const nowDate = getNowDate();
-      const blocked = clientOwnAppointmentMutationBlockedReason(appointment, requestUid, nowDate);
-      if (blocked === SAME_DAY_CHANGE_NOT_ALLOWED) {
-        throwSameDayChangeNotAllowed();
-      }
 
       const durationMinutes = appointmentDurationMinutes(appointment);
       const currentSlot = notificationSlot(appointment);
-      const newSlotDate = slotDateTime(preferredSlot);
-      if (!durationMinutes || Number.isNaN(newSlotDate.getTime()) || newSlotDate <= getNowDate()) {
-        throw toHttpsError("failed-precondition", "La franja seleccionada ya no está disponible.");
+      const currentSlotDate = currentSlot ? madridCivilSlotToInstant(currentSlot) : undefined;
+      const newSlotDate = madridCivilSlotToInstant(preferredSlot);
+      if (!durationMinutes || !currentSlot || !currentSlotDate || currentSlotDate <= nowDate || !newSlotDate || newSlotDate <= nowDate) {
+        throw toHttpsError("failed-precondition", "La franja seleccionada ya no está disponible.", {
+          reason: "slot_not_future",
+        });
+      }
+      if (isInsideCustomerRescheduleLockWindow(currentSlot, nowDate)
+        || isInsideCustomerRescheduleLockWindow(preferredSlot, nowDate)) {
+        throwOneDayChangeNotAllowed();
       }
 
       const oldOccupancyRefs = appointment.status === "approved"
@@ -2230,7 +2248,9 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
       const slotBlocks = getSlotBlocks(preferredSlot.time, durationMinutes);
       if (!new Set(generateTimeSlots(config)).has(preferredSlot.time)
         || !doesSessionFitWithinSchedule(config, preferredSlot.time, durationMinutes)) {
-        throw toHttpsError("failed-precondition", "La franja seleccionada no es válida para el horario configurado.");
+        throw toHttpsError("failed-precondition", "La franja seleccionada no es válida para el horario configurado.", {
+          reason: "outside_schedule",
+        });
       }
 
       const blockedTimes = new Set(
@@ -2239,13 +2259,20 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
           .filter((time): time is string => typeof time === "string"),
       );
       if (slotBlocks.some((time) => blockedTimes.has(time))) {
-        throw toHttpsError("failed-precondition", "La franja seleccionada está bloqueada.");
+        throw toHttpsError("failed-precondition", "La franja seleccionada está bloqueada.", {
+          reason: "slot_blocked",
+        });
       }
 
       const occupancyByTime = new Map<string, number>();
       occupancySnap.docs.forEach((docSnap) => {
         const occupancy = docSnap.data() as SlotOccupancy;
-        occupancyByTime.set(occupancy.time, typeof occupancy.count === "number" ? occupancy.count : 0);
+        if (typeof occupancy.count !== "number" || !Number.isInteger(occupancy.count) || occupancy.count < 0) {
+          throw toHttpsError("failed-precondition", "La ocupación registrada no es válida.", {
+            reason: "invalid_occupancy",
+          });
+        }
+        occupancyByTime.set(occupancy.time, occupancy.count);
       });
       const ownApprovedKeys = appointment.status === "approved" ? appointmentSlotKeys(appointment) : new Set<string>();
       if (slotBlocks.some((time) => {
@@ -2253,7 +2280,9 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
         const current = occupancyByTime.get(time) ?? 0;
         return !isRescheduleCapacityAvailable(current, ownApprovedKeys.has(key), config.maxCapacity);
       })) {
-        throw toHttpsError("failed-precondition", "La franja seleccionada está llena.");
+        throw toHttpsError("failed-precondition", "La franja seleccionada está llena.", {
+          reason: "slot_full",
+        });
       }
 
       const targetSlotKeys = getOverlappingSlotKeys(preferredSlot, durationMinutes);
@@ -2265,10 +2294,12 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
         return false;
       });
       if (hasConflict) {
-        throw toHttpsError("failed-precondition", "Ya tienes una sesión reservada en esta franja.");
+        throw toHttpsError("failed-precondition", "Ya tienes una sesión reservada en esta franja.", {
+          reason: "appointment_conflict",
+        });
       }
 
-      const now = new Date().toISOString();
+      const now = nowDate.toISOString();
       let shouldReleaseApprovedOccupancy = false;
       let approvalFieldsToDelete: readonly string[] = [];
       let appointmentPatch: Record<string, unknown> | undefined;
@@ -2281,7 +2312,7 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
         },
         uid: requestUid,
         preferredSlot,
-        nowMillis: getNowDate().getTime(),
+        nowMillis: nowDate.getTime(),
         now,
         transaction: {
           releaseApprovedOccupancy: () => { shouldReleaseApprovedOccupancy = true; },
@@ -2295,6 +2326,9 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
         }
         if (reschedule.reason === "not-future") {
           throw toHttpsError("failed-precondition", "Solo puedes modificar citas futuras.");
+        }
+        if (reschedule.reason === "one-day-lock") {
+          throwOneDayChangeNotAllowed();
         }
         throw toHttpsError("failed-precondition", "Esta cita ya no se puede modificar.");
       }

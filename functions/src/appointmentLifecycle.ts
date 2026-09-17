@@ -151,6 +151,9 @@ export function reconcileAppointmentMinutes(input: ReconcileAppointmentMinutesIn
 export const MADRID_TIME_ZONE = "Europe/Madrid";
 export const SAME_DAY_CHANGE_NOT_ALLOWED = "same_day_change_not_allowed" as const;
 export const SAME_DAY_CHANGE_MESSAGE = "Las citas no se pueden modificar ni cancelar el mismo día.";
+export const ONE_DAY_CHANGE_NOT_ALLOWED = "one_day_change_not_allowed" as const;
+export const ONE_DAY_CHANGE_MESSAGE = "Esta cita ya está dentro del plazo de 24 horas previo al entrenamiento y no puede modificarse.";
+export const CUSTOMER_RESCHEDULE_LOCK_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export type ClientAppointmentMutationBlockReason =
   | "not-owner"
@@ -217,6 +220,97 @@ function getMadridTimeKey(now: Date): string {
     throw new Error("No se ha podido calcular la hora en Europe/Madrid.");
   }
   return `${hour}:${minute}`;
+}
+
+interface CivilDateTimeParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+}
+
+const madridCivilFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: MADRID_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+function parseCivilSlot(slot: AppointmentSlotLike): CivilDateTimeParts | undefined {
+  const date = slot.date ?? "";
+  const time = slot.time ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+    return undefined;
+  }
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const parsedDate = new Date(Date.UTC(year, month - 1, day));
+  if (parsedDate.getUTCFullYear() !== year
+    || parsedDate.getUTCMonth() !== month - 1
+    || parsedDate.getUTCDate() !== day) {
+    return undefined;
+  }
+  return { year, month, day, hour, minute };
+}
+
+function madridParts(instant: Date): CivilDateTimeParts & { second: number } {
+  const parts = madridCivilFormatter.formatToParts(instant);
+  const value = (type: Intl.DateTimeFormatPartTypes): number =>
+    Number(parts.find((part) => part.type === type)?.value);
+  return {
+    year: value("year"),
+    month: value("month"),
+    day: value("day"),
+    hour: value("hour"),
+    minute: value("minute"),
+    second: value("second"),
+  };
+}
+
+function madridOffsetMilliseconds(instant: Date): number {
+  const parts = madridParts(instant);
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second)
+    - instant.getTime();
+}
+
+/**
+ * Resolves a Europe/Madrid civil slot to a real instant without using the
+ * server timezone. Non-existent DST wall times are invalid; repeated wall
+ * times resolve to their earliest real instant.
+ */
+export function madridCivilSlotToInstant(slot: AppointmentSlotLike): Date | undefined {
+  const civil = parseCivilSlot(slot);
+  if (!civil) return undefined;
+  const civilAsUtc = Date.UTC(civil.year, civil.month - 1, civil.day, civil.hour, civil.minute);
+  const probeOffsets = new Set<number>();
+  [-48, -24, 0, 24, 48].forEach((hours) => {
+    probeOffsets.add(madridOffsetMilliseconds(new Date(civilAsUtc + hours * 60 * 60 * 1000)));
+  });
+  const candidates = [...probeOffsets]
+    .map((offset) => new Date(civilAsUtc - offset))
+    .filter((candidate) => {
+      const parts = madridParts(candidate);
+      return parts.year === civil.year
+        && parts.month === civil.month
+        && parts.day === civil.day
+        && parts.hour === civil.hour
+        && parts.minute === civil.minute
+        && parts.second === 0;
+    })
+    .sort((left, right) => left.getTime() - right.getTime());
+  return candidates[0];
+}
+
+/** Inclusive real-time lock window for customer reschedules. Invalid slots fail closed. */
+export function isInsideCustomerRescheduleLockWindow(slot: AppointmentSlotLike, now: Date): boolean {
+  const appointmentStart = madridCivilSlotToInstant(slot);
+  return !appointmentStart
+    || appointmentStart.getTime() - now.getTime() <= CUSTOMER_RESCHEDULE_LOCK_WINDOW_MS;
 }
 
 /** Compares a civil gym slot against the Madrid wall clock without parsing it in the server timezone. */
@@ -311,11 +405,21 @@ export function validateOwnReschedule(
   uid: string,
   preferredSlot: { date: string; time: string },
   nowMillis: number,
-): "not-owner" | "invalid-status" | "not-future" | undefined {
-  const existingValidation = validateOwnFutureAppointment(appointment, uid, nowMillis);
-  if (existingValidation) return existingValidation;
-  const preferredDate = new Date(`${preferredSlot.date}T${preferredSlot.time}:00`);
-  if (Number.isNaN(preferredDate.getTime()) || preferredDate.getTime() <= nowMillis) return "not-future";
+): "not-owner" | "invalid-status" | "not-future" | "one-day-lock" | undefined {
+  if (appointment.userId !== uid) return "not-owner";
+  if (appointment.status !== "pending" && appointment.status !== "approved") return "invalid-status";
+  const existingSlot = { date: appointment.date, time: appointment.time };
+  const existingDate = madridCivilSlotToInstant(existingSlot);
+  const preferredDate = madridCivilSlotToInstant(preferredSlot);
+  if (!existingDate || existingDate.getTime() <= nowMillis
+    || !preferredDate || preferredDate.getTime() <= nowMillis) {
+    return "not-future";
+  }
+  const now = new Date(nowMillis);
+  if (isInsideCustomerRescheduleLockWindow(existingSlot, now)
+    || isInsideCustomerRescheduleLockWindow(preferredSlot, now)) {
+    return "one-day-lock";
+  }
   return undefined;
 }
 
@@ -354,7 +458,7 @@ export interface ReconcileOwnAppointmentRescheduleInput {
  * reschedule releases occupancy and clears approval metadata together.
  */
 export function reconcileOwnAppointmentReschedule(input: ReconcileOwnAppointmentRescheduleInput):
-  { ok: true } | { ok: false; reason: "not-owner" | "invalid-status" | "not-future" } {
+  { ok: true } | { ok: false; reason: "not-owner" | "invalid-status" | "not-future" | "one-day-lock" } {
   const validation = validateOwnReschedule(
     input.appointment,
     input.uid,

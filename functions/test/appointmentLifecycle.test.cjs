@@ -21,6 +21,9 @@ const {
   seriesHasSameDayOccurrence,
   clientOwnAppointmentMutationBlockedReason,
   classifyMadridCivilSlot,
+  madridCivilSlotToInstant,
+  isInsideCustomerRescheduleLockWindow,
+  ONE_DAY_CHANGE_NOT_ALLOWED,
   SAME_DAY_CHANGE_NOT_ALLOWED,
 } = require("../lib/appointmentLifecycle.js");
 
@@ -116,6 +119,18 @@ assert.equal(validateOwnFutureAppointment({ userId: "u1", status: "cancelled", d
 assert.equal(validateOwnFutureAppointment({ userId: "u1", status: "approved", date: "2020-01-01", time: "10:00" }, "u1", Date.now()), "not-future");
 assert.equal(validateOwnReschedule({ userId: "u1", status: "approved", date: "2020-01-01", time: "10:00" }, "u1", { date: "2026-07-20", time: "10:00" }, new Date("2026-07-14T09:00:00").getTime()), "not-future");
 assert.equal(validateOwnReschedule({ userId: "u2", status: "pending", date: "2026-07-20", time: "10:00" }, "u1", { date: "2026-07-21", time: "10:00" }, new Date("2026-07-14T09:00:00").getTime()), "not-owner");
+assert.equal(validateOwnReschedule(
+  { userId: "u1", status: "approved", date: "2026-01-16", time: "12:00" },
+  "u1",
+  { date: "2026-01-20", time: "12:00" },
+  new Date("2026-01-15T11:00:00.000Z").getTime(),
+), "one-day-lock");
+assert.equal(validateOwnReschedule(
+  { userId: "u1", status: "approved", date: "2026-01-20", time: "12:00" },
+  "u1",
+  { date: "2026-01-16", time: "12:00" },
+  new Date("2026-01-15T11:00:00.000Z").getTime(),
+), "one-day-lock");
 assert.deepEqual(approvalOnlyAppointmentFields(), ["approvedSlot", "assignedTrainer", "sessionType", "trainerNotes", "approvedAt", "approvedBy", "approvedByAdmin", "approvalNotes"]);
 
 const rescheduleCalls = { released: 0, cleared: [], patches: [] };
@@ -164,6 +179,52 @@ assert.deepEqual(
   { isValid: true, isToday: false, isPast: false, isFuture: true },
   "tomorrow remains future across the Madrid day boundary",
 );
+
+assert.equal(
+  madridCivilSlotToInstant({ date: "2026-01-16", time: "12:00" })?.toISOString(),
+  "2026-01-16T11:00:00.000Z",
+  "winter civil slots resolve through CET",
+);
+assert.equal(
+  madridCivilSlotToInstant({ date: "2026-07-16", time: "12:00" })?.toISOString(),
+  "2026-07-16T10:00:00.000Z",
+  "summer civil slots resolve through CEST",
+);
+assert.equal(
+  madridCivilSlotToInstant({ date: "2026-03-29", time: "02:30" }),
+  undefined,
+  "non-existent Madrid wall times are invalid",
+);
+assert.equal(
+  madridCivilSlotToInstant({ date: "2026-10-25", time: "02:30" })?.toISOString(),
+  "2026-10-25T00:30:00.000Z",
+  "ambiguous Madrid wall times use the earlier instant",
+);
+assert.equal(
+  isInsideCustomerRescheduleLockWindow(
+    { date: "2026-01-16", time: "12:00" },
+    new Date("2026-01-15T10:00:00.000Z"),
+  ),
+  false,
+  "25 real hours remain outside the lock window",
+);
+assert.equal(
+  isInsideCustomerRescheduleLockWindow(
+    { date: "2026-01-16", time: "12:00" },
+    new Date("2026-01-15T11:00:00.000Z"),
+  ),
+  true,
+  "24 real hours are locked inclusively",
+);
+assert.equal(
+  isInsideCustomerRescheduleLockWindow(
+    { date: "2026-01-16", time: "12:00" },
+    new Date("2026-01-15T11:01:00.000Z"),
+  ),
+  true,
+  "23 hours 59 minutes are locked",
+);
+assert.equal(ONE_DAY_CHANGE_NOT_ALLOWED, "one_day_change_not_allowed");
 
 const rejectedRescheduleCalls = { released: 0, patches: 0 };
 assert.deepEqual(reconcileOwnAppointmentReschedule({
@@ -322,17 +383,18 @@ const updateOwnSource = indexSource.slice(
   indexSource.indexOf("export const updateOwnAppointmentSlot"),
   indexSource.indexOf("export const onUserProfileCreatedWelcomeEmail"),
 );
-assert.match(updateOwnSource, /clientOwnAppointmentMutationBlockedReason/);
-assert.match(updateOwnSource, /throwSameDayChangeNotAllowed/);
+assert.match(updateOwnSource, /isInsideCustomerRescheduleLockWindow/);
+assert.match(updateOwnSource, /throwOneDayChangeNotAllowed/);
+assert.doesNotMatch(updateOwnSource, /throwSameDayChangeNotAllowed/);
 assert.ok(
-  updateOwnSource.indexOf("throwSameDayChangeNotAllowed")
+  updateOwnSource.indexOf("throwOneDayChangeNotAllowed")
     < updateOwnSource.indexOf("reconcileOwnAppointmentReschedule"),
-  "same-day must reject before reschedule writes",
+  "24-hour lock must reject before reschedule writes",
 );
 assert.ok(
-  updateOwnSource.indexOf("throwSameDayChangeNotAllowed")
+  updateOwnSource.indexOf("throwOneDayChangeNotAllowed")
     < updateOwnSource.indexOf("transaction.get(occupancyQuery)"),
-  "same-day must reject before occupancy queries",
+  "24-hour lock must reject before occupancy queries",
 );
 
 const adminCreateSource = indexSource.slice(

@@ -368,9 +368,45 @@ assert.equal(
   false,
 );
 assert.equal(
+  shouldSkipRecurringFinanceReconciliation(
+    { status: "approved", recurrenceSeriesId: "series-1" },
+    { status: "pending", recurrenceSeriesId: "series-1" },
+  ),
+  true,
+);
+assert.equal(
+  shouldSkipRecurringFinanceReconciliation(
+    { status: "approved", recurrenceSeriesId: "series-1" },
+    {
+      status: "cancelled",
+      recurrenceSeriesId: "series-1",
+      cancellationReason: "customer_series_schedule_reduction",
+    },
+  ),
+  true,
+);
+assert.equal(
   shouldSkipRecurringStatusNotification(
     { status: "pending", recurrenceSeriesId: "series-1" },
     { status: "approved", recurrenceSeriesId: "series-1" },
+  ),
+  true,
+);
+assert.equal(
+  shouldSkipRecurringStatusNotification(
+    { status: "approved", recurrenceSeriesId: "series-1" },
+    { status: "pending", recurrenceSeriesId: "series-1" },
+  ),
+  true,
+);
+assert.equal(
+  shouldSkipRecurringStatusNotification(
+    { status: "approved", recurrenceSeriesId: "series-1" },
+    {
+      status: "cancelled",
+      recurrenceSeriesId: "series-1",
+      cancellationReason: "customer_series_schedule_reduction",
+    },
   ),
   true,
 );

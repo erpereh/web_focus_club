@@ -286,3 +286,89 @@ test("expanded pending series keeps bono stable through approve pending approve 
     assert.equal(db.documents.get(`appointments/${id}`).sessionType, "Personal");
   }
 });
+
+function mixedApprovalFixture({ includeHistoricalPending = false } = {}) {
+  const documents = pendingFixture(2);
+  delete documents["appointments/pending-1"];
+  documents["appointment_recurrences/series-1"] = {
+    ...documents["appointment_recurrences/series-1"],
+    startDate: "2026-08-25",
+    occurrenceCount: includeHistoricalPending ? 4 : 3,
+    totalMinutes: includeHistoricalPending ? 240 : 180,
+  };
+  documents["appointments/historical-approved"] = {
+    ...pendingOccurrence(0, "2026-08-25"),
+    status: "approved",
+    approvedSlot: { date: "2026-08-25", time: "10:00" },
+    assignedTrainer: "trainer-old",
+  };
+  documents["appointments/future-approved"] = {
+    ...pendingOccurrence(4, "2026-09-15", "12:00"),
+    status: "approved",
+    approvedSlot: { date: "2026-09-15", time: "12:00" },
+    assignedTrainer: "trainer-old",
+    updatedAt: "2026-08-10T10:00:00.000Z",
+  };
+  documents["appointments/cancelled"] = {
+    ...pendingOccurrence(5, "2026-09-22"),
+    status: "cancelled",
+    minutesRefunded: true,
+    minutesRefundedAt: "2026-08-20T10:00:00.000Z",
+  };
+  documents["appointments/rejected"] = {
+    ...pendingOccurrence(6, "2026-09-29"),
+    status: "rejected",
+  };
+  if (includeHistoricalPending) {
+    documents["appointments/historical-pending"] = pendingOccurrence(7, "2026-08-20");
+  }
+  addOccupancy(documents, "2026-09-08", "10:00", 0);
+  addOccupancy(documents, "2026-09-15", "12:00", 1);
+  return documents;
+}
+
+test("mixed approval only approves future pending and counts every active occurrence", async () => {
+  const documents = mixedApprovalFixture();
+  const db = new FakeFirestore(documents);
+  const existingApprovedBefore = clone(documents["appointments/future-approved"]);
+  await recurringHandlers(db).approveRecurringAppointmentSeriesFromAdmin(adminRequest({
+    seriesId: "series-1",
+    assignedTrainer: "trainer-1",
+  }));
+
+  assert.equal(db.documents.get("appointments/pending-0").status, "approved");
+  assert.equal(db.documents.get("appointments/historical-approved").assignedTrainer, "trainer-old");
+  assert.deepEqual(db.documents.get("appointments/future-approved"), existingApprovedBefore);
+  assert.equal(db.documents.get("appointments/cancelled").status, "cancelled");
+  assert.equal(db.documents.get("appointments/rejected").status, "rejected");
+  slotKeys("2026-09-08", "10:00").forEach((key) => {
+    assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 1);
+  });
+  slotKeys("2026-09-15", "12:00").forEach((key) => {
+    assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 1, "existing approved occupancy is untouched");
+  });
+  const series = db.documents.get("appointment_recurrences/series-1");
+  assert.equal(series.status, "approved");
+  assert.equal(series.occurrenceCount, 3);
+  assert.equal(series.totalMinutes, 180);
+  assert.equal(series.futureOccurrenceCount, 2);
+  assert.equal(series.futureStartDate, "2026-09-08");
+  assert.equal(series.futureEndDate, "2026-09-15");
+});
+
+test("historical pending remains pending and keeps mixed series pending after future approval", async () => {
+  const documents = mixedApprovalFixture({ includeHistoricalPending: true });
+  const db = new FakeFirestore(documents);
+  await recurringHandlers(db).approveRecurringAppointmentSeriesFromAdmin(adminRequest({
+    seriesId: "series-1",
+    assignedTrainer: "trainer-1",
+  }));
+
+  assert.equal(db.documents.get("appointments/pending-0").status, "approved");
+  assert.equal(db.documents.get("appointments/historical-pending").status, "pending");
+  const series = db.documents.get("appointment_recurrences/series-1");
+  assert.equal(series.status, "pending");
+  assert.equal(series.occurrenceCount, 4);
+  assert.equal(series.totalMinutes, 240);
+  assert.equal(series.futureOccurrenceCount, 2);
+});

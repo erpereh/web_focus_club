@@ -9,6 +9,7 @@ const {
   prepareRecurringReschedule,
   validateRecurringRescheduleAvailability,
 } = require("../lib/recurringReschedule.js");
+const { getSlotBlocks } = require("../lib/appointmentLifecycle.js");
 
 const now = new Date("2026-09-01T08:00:00.000Z"); // 10:00 Europe/Madrid
 const siteConfig = { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 };
@@ -642,7 +643,10 @@ class FakeFirestore {
       set: (ref, value, options) => {
         firstWriteSeen = true;
         this.operations.push({ type: "write", target: ref.path });
-        staged.push({ ref, value, merge: options?.merge === true });
+        const deleteFields = Object.entries(value)
+          .filter(([, fieldValue]) => fieldValue?.constructor?.name === "DeleteTransform")
+          .map(([field]) => field);
+        staged.push({ ref, value, merge: options?.merge === true, deleteFields });
       },
       create: (ref, value) => {
         firstWriteSeen = true;
@@ -651,9 +655,11 @@ class FakeFirestore {
       },
     };
     const result = await callback(transaction);
-    staged.forEach(({ ref, value, merge }) => {
+    staged.forEach(({ ref, value, merge, deleteFields = [] }) => {
       const previous = this.documents.get(ref.path) ?? {};
-      this.documents.set(ref.path, merge ? { ...previous, ...value } : value);
+      const next = merge ? { ...previous, ...value } : value;
+      deleteFields.forEach((field) => delete next[field]);
+      this.documents.set(ref.path, next);
     });
     return result;
   }
@@ -861,6 +867,110 @@ async function runHandlerTests() {
     `customer handler changed ${field}`,
   ));
 
+  const approvedSingleDocs = transactionDocuments();
+  const approvedSingleBefore = structuredClone(approvedSingleDocs["appointments/a1"]);
+  const approvedSingleOldKeys = getSlotBlocks("10:00", 60).map((time) => `2026-09-14_${time}`);
+  const approvedSingleNewKeys = getSlotBlocks("19:00", 60).map((time) => `2026-09-20_${time}`);
+  const approvedSingleDb = new FakeFirestore(approvedSingleDocs);
+  const approvedSingleHandlers = createRecurringRescheduleHandlers({
+    db: approvedSingleDb,
+    requireAdmin: async () => { throw new Error("customer handler must not require admin"); },
+    getNowDate: () => fixedNow,
+  });
+  const approvedSingleResponse = await approvedSingleHandlers.rescheduleOwnRecurringAppointment({
+    auth: { uid: "user-1", token: {} },
+    data: {
+      appointmentId: "a1",
+      preferredSlot: { date: "2026-09-20", time: "19:00" },
+      scope: "single",
+    },
+  });
+  assert.deepEqual(approvedSingleResponse, {
+    success: true,
+    appointmentId: "a1",
+    status: "pending",
+  });
+  const approvedSingleAfter = approvedSingleDb.documents.get("appointments/a1");
+  assert.equal(approvedSingleAfter.status, "pending");
+  assert.equal("approvedSlot" in approvedSingleAfter, false);
+  assert.equal("assignedTrainer" in approvedSingleAfter, false);
+  assert.equal(approvedSingleAfter.sessionType, approvedSingleBefore.sessionType);
+  assert.equal(approvedSingleAfter.bonoId, approvedSingleBefore.bonoId);
+  assert.equal(approvedSingleAfter.minutesDeductedAt, approvedSingleBefore.minutesDeductedAt);
+  assert.equal(approvedSingleAfter.googleCalendarEventId, approvedSingleBefore.googleCalendarEventId);
+  assert.equal(approvedSingleDb.documents.get("appointments/a3").status, "approved");
+  assert.equal(approvedSingleDb.documents.get("appointment_recurrences/series-1").status, "pending");
+  approvedSingleOldKeys.forEach((key) => {
+    assert.equal(approvedSingleDb.documents.get(`slot_occupancy/${key}`).count, 0);
+  });
+  approvedSingleNewKeys.forEach((key) => {
+    assert.equal(approvedSingleDb.documents.get(`slot_occupancy/${key}`)?.count ?? 0, 0);
+  });
+
+  const pendingSingleDocs = transactionDocuments({
+    records: occurrences.map((item) => item.id === "a1"
+      ? {
+        ...item,
+        data: {
+          ...item.data,
+          status: "pending",
+          approvedSlot: undefined,
+          assignedTrainer: undefined,
+        },
+      }
+      : item),
+    recurrenceSeries: { ...series, status: "pending" },
+    draft: following.draft,
+  });
+  const pendingSingleDb = new FakeFirestore(pendingSingleDocs);
+  const pendingSingleHandlers = createRecurringRescheduleHandlers({
+    db: pendingSingleDb,
+    requireAdmin: async () => ({}),
+    getNowDate: () => fixedNow,
+  });
+  const pendingSingleResponse = await pendingSingleHandlers.rescheduleOwnRecurringAppointment({
+    auth: { uid: "user-1", token: {} },
+    data: {
+      appointmentId: "a1",
+      preferredSlot: { date: "2026-09-20", time: "19:00" },
+      scope: "single",
+    },
+  });
+  assert.equal(pendingSingleResponse.status, "pending");
+  assert.equal(pendingSingleDb.documents.get("appointments/a1").status, "pending");
+  assert.equal(
+    pendingSingleDb.operations.some((operation) => operation.type === "write" && operation.target.startsWith("slot_occupancy/")),
+    false,
+  );
+
+  const lockedSingleDocs = transactionDocuments();
+  lockedSingleDocs["appointments/a1"] = {
+    ...lockedSingleDocs["appointments/a1"],
+    approvedSlot: { date: "2026-09-02", time: "10:00" },
+    preferredSlots: [{ date: "2026-09-02", time: "10:00" }],
+    date: "2026-09-02",
+    time: "10:00",
+  };
+  const lockedSingleDb = new FakeFirestore(lockedSingleDocs);
+  const lockedSingleHandlers = createRecurringRescheduleHandlers({
+    db: lockedSingleDb,
+    requireAdmin: async () => ({}),
+    getNowDate: () => fixedNow,
+  });
+  await assert.rejects(
+    lockedSingleHandlers.rescheduleOwnRecurringAppointment({
+      auth: { uid: "user-1", token: {} },
+      data: {
+        appointmentId: "a1",
+        preferredSlot: { date: "2026-09-20", time: "19:00" },
+        scope: "single",
+      },
+    }),
+    (error) => error.code === "failed-precondition"
+      && error.details.reason === "one_day_change_not_allowed",
+  );
+  assert.equal(lockedSingleDb.operations.some((operation) => operation.type === "write"), false);
+
   const foreignDocs = transactionDocuments();
   const foreignDb = new FakeFirestore(foreignDocs);
   const foreignHandlers = createRecurringRescheduleHandlers({
@@ -905,7 +1015,7 @@ async function runHandlerTests() {
       },
     }),
     (error) => error.code === "failed-precondition"
-      && error.details.reason === "same_day_change_not_allowed",
+      && error.details.reason === "one_day_change_not_allowed",
   );
   assert.equal(selectedTodayDb.operations.some((operation) => operation.type === "write"), false);
 
@@ -926,7 +1036,7 @@ async function runHandlerTests() {
       },
     }),
     (error) => error.code === "failed-precondition"
-      && error.details.reason === "same_day_change_not_allowed",
+      && error.details.reason === "one_day_change_not_allowed",
   );
   assert.equal(targetTodayDb.operations.some((operation) => operation.type === "write"), false);
 

@@ -7,7 +7,6 @@ import {
   getBonoTotalMinutes,
   getAppointmentEffectiveSlot,
   getMadridDateKey,
-  getSlotBlocks,
   isBonoExpiredAt,
   slotOccupancyDocId,
   type LifecycleAppointment,
@@ -24,6 +23,21 @@ import {
   normalizeSiteConfig,
   type SiteConfig,
 } from "./siteConfig.js";
+import {
+  copyDefinedFields,
+  firstReplacementIntersection,
+  getUsableBonoRemainingMinutes as getSharedUsableBonoRemainingMinutes,
+  hasValidFutureReservation,
+  hasValidReservedBonoData as hasSharedValidReservedBonoData,
+  isHistoricalReplacementOccurrence,
+  isNonNegativeInteger as isSharedNonNegativeInteger,
+  planReplacementGroups,
+  replacementDurationMinutes,
+  replacementHistoryEntries,
+  replacementOccupancyKeys,
+  safeReplacementCivilDate,
+  validReplacementSlot,
+} from "./recurringScheduleReplacement.js";
 
 interface TimeSlot {
   date: string;
@@ -170,12 +184,11 @@ function parseReturnSeriesToPendingInput(value: unknown): AdminReturnSeriesToPen
 }
 
 function durationMinutes(appointment: AppointmentData): 30 | 45 | 60 | undefined {
-  const duration = Number(appointment.duration);
-  return duration === 30 || duration === 45 || duration === 60 ? duration : undefined;
+  return replacementDurationMinutes(appointment);
 }
 
 function occupancyKeys(slot: TimeSlot, duration: number): string[] {
-  return getSlotBlocks(slot.time, duration).map((time) => slotOccupancyDocId(slot.date, time));
+  return replacementOccupancyKeys(slot, duration);
 }
 
 function keysForAppointment(appointment: AppointmentData): string[] {
@@ -288,28 +301,19 @@ function buildAbsoluteOccupancyWrites(input: {
 }
 
 function safeCivilDate(appointment: AppointmentData): string | undefined {
-  const candidates = [
-    appointment.approvedSlot?.date,
-    appointment.preferredSlots?.[0]?.date,
-    appointment.date,
-  ];
-  return candidates.find((value): value is string => typeof value === "string" && isValidDate(value));
+  return safeReplacementCivilDate(appointment);
 }
 
 function validEffectiveSlot(appointment: AppointmentData): TimeSlot | undefined {
-  const slot = getAppointmentEffectiveSlot(appointment);
-  return slot && isSlot(slot) ? slot : undefined;
+  return validReplacementSlot(appointment);
 }
 
 function isHistoricalOccurrence(appointment: AppointmentData, now: Date): boolean {
-  const slot = validEffectiveSlot(appointment);
-  if (slot) return !classifyMadridCivilSlot(slot, now).isFuture;
-  const date = safeCivilDate(appointment);
-  return Boolean(date && date < getMadridDateKey(now));
+  return isHistoricalReplacementOccurrence(appointment, now);
 }
 
 function firstIntersection(left: string[], right: Set<string>): string | undefined {
-  return left.find((key) => right.has(key));
+  return firstReplacementIntersection(left, right);
 }
 
 function assertSeriesFutureAvailability(input: {
@@ -349,13 +353,7 @@ function assertFutureReservation(
   seriesBonoId: string,
   duration: number,
 ): void {
-  if (appointment.bonoId !== seriesBonoId
-    || appointment.minutesDeducted !== true
-    || appointment.minutesDeductedAmount !== duration
-    || typeof appointment.minutesDeductedAt !== "string"
-    || !appointment.minutesDeductedAt
-    || appointment.minutesRefunded === true
-    || Boolean(appointment.minutesRefundedAt)) {
+  if (!hasValidFutureReservation(appointment, seriesBonoId, duration)) {
     throwHttps(
       "failed-precondition",
       "Las reservas financieras de la serie no son validas.",
@@ -365,53 +363,23 @@ function assertFutureReservation(
 }
 
 function historyEntries(value: unknown): unknown[] {
-  return Array.isArray(value) ? [...value] : [];
+  return replacementHistoryEntries(value);
 }
 
 function isNonNegativeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+  return isSharedNonNegativeInteger(value);
 }
 
 function hasValidReservedBonoData(bono: BonoData): boolean {
-  if (!["activo", "agotado", "expirado", "eliminado"].includes(bono.estado)) return false;
-  const totalFields = [bono.tamano, bono.minutosTotales, bono.sesionesTotales]
-    .filter((value) => value !== undefined);
-  const remainingFields = [bono.minutosRestantes, bono.sesionesRestantes]
-    .filter((value) => value !== undefined);
-  if (totalFields.length === 0 || !totalFields.every(isNonNegativeInteger)) return false;
-  if (!remainingFields.every(isNonNegativeInteger)) return false;
-  if (bono.fechaExpiracion !== undefined
-    && (typeof bono.fechaExpiracion !== "string" || Number.isNaN(new Date(bono.fechaExpiracion).getTime()))) {
-    return false;
-  }
-  return true;
+  return hasSharedValidReservedBonoData(bono);
 }
 
 function getUsableBonoRemainingMinutes(bono: BonoData): number | undefined {
-  const totalMinutes = getBonoTotalMinutes(bono);
-  if (!isNonNegativeInteger(totalMinutes)) return undefined;
-  if (bono.minutosRestantes !== undefined) {
-    return isNonNegativeInteger(bono.minutosRestantes) && bono.minutosRestantes <= totalMinutes
-      ? bono.minutosRestantes
-      : undefined;
-  }
-  if (bono.sesionesRestantes !== undefined) {
-    if (!isNonNegativeInteger(bono.sesionesRestantes)) return undefined;
-    const minutesPerSession = bono.modalidad === "30min" ? 30 : 60;
-    const remainingMinutes = bono.sesionesRestantes * minutesPerSession;
-    return isNonNegativeInteger(remainingMinutes) && remainingMinutes <= totalMinutes
-      ? remainingMinutes
-      : undefined;
-  }
-  return undefined;
+  return getSharedUsableBonoRemainingMinutes(bono);
 }
 
 function copyDefined(source: Record<string, unknown>, fields: string[]): Record<string, unknown> {
-  const copy: Record<string, unknown> = {};
-  fields.forEach((field) => {
-    if (source[field] !== undefined) copy[field] = source[field];
-  });
-  return copy;
+  return copyDefinedFields(source, fields);
 }
 
 async function rescheduleAppointmentFromAdmin(
@@ -845,9 +813,10 @@ async function replaceRecurringSeriesScheduleFromAdmin(
       seriesDuration,
     );
 
-    const reused = managedOccurrences.slice(0, desired.length);
-    const cancelled = managedOccurrences.slice(desired.length);
-    const newCount = Math.max(0, desired.length - managedOccurrences.length);
+    const replacementGroups = planReplacementGroups(managedOccurrences, desired.length);
+    const reused = replacementGroups.reused;
+    const cancelled = replacementGroups.cancelled;
+    const newCount = replacementGroups.createdCount;
     const oldFutureReservedMinutes = managedOccurrences.length * seriesDuration;
     const newFutureMinutes = desired.length * seriesDuration;
     const minutesDelta = newFutureMinutes - oldFutureReservedMinutes;

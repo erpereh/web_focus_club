@@ -1,14 +1,43 @@
-import type { Firestore, Transaction } from "firebase-admin/firestore";
+import { FieldValue, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import {
+  calculateAppointmentDeduction,
+  calculateAppointmentRefund,
   classifyMadridCivilSlot,
+  getBonoTotalMinutes,
   getAppointmentEffectiveSlot,
   getMadridDateKey,
   getSlotBlocks,
+  isBonoExpiredAt,
+  isInsideCustomerRescheduleLockWindow,
   isSameDayInMadrid,
+  madridCivilSlotToInstant,
   slotOccupancyDocId,
 } from "./appointmentLifecycle.js";
-import { addUtcDays } from "./recurringAppointments.js";
+import {
+  addUtcDays,
+  civilDateFromExpiration,
+  generateRecurringOccurrenceDates,
+  MAX_RECURRING_OCCURRENCES,
+} from "./recurringAppointments.js";
+import {
+  calculateActiveSeriesMetadata,
+  copyDefinedFields,
+  firstReplacementIntersection,
+  getUsableBonoRemainingMinutes,
+  hasValidFutureReservation,
+  hasValidReservedBonoData,
+  isActiveOccurrenceStatus,
+  isHistoricalReplacementOccurrence,
+  isNonNegativeInteger,
+  planReplacementGroups,
+  replacementDurationMinutes,
+  replacementHistoryEntries,
+  safeReplacementCivilDate,
+  validReplacementSlot,
+  type ReplacementAppointmentData,
+  type ReplacementBonoData,
+} from "./recurringScheduleReplacement.js";
 import {
   doesSessionFitWithinSchedule,
   generateTimeSlots,
@@ -19,6 +48,7 @@ import {
 export type RecurringRescheduleScope = "single" | "series" | "following";
 export type RecurringRescheduleActorType = "admin" | "customer";
 export type RecurringRescheduleReason =
+  | "one_day_change_not_allowed"
   | "same_day_change_not_allowed"
   | "slot_blocked"
   | "slot_full"
@@ -37,6 +67,13 @@ export interface RecurringRescheduleRequest {
   appointmentId: string;
   preferredSlot: RecurringRescheduleSlot;
   scope: RecurringRescheduleScope;
+}
+
+export interface ReplaceOwnRecurringSeriesScheduleRequest {
+  appointmentId: string;
+  startSlot: RecurringRescheduleSlot;
+  intervalDays: number;
+  endDate: string;
 }
 
 export interface RecurringAppointmentData {
@@ -63,6 +100,14 @@ export interface RecurringSeriesData {
   status: string;
   intervalDays: number;
   endDate: string;
+  duration?: string | number;
+  bonoId?: string;
+  serviceType?: string;
+  startDate?: string;
+  startTime?: string;
+  assignedTrainer?: string | null;
+  occurrenceCount?: number;
+  totalMinutes?: number;
   [key: string]: unknown;
 }
 
@@ -141,6 +186,25 @@ export function parseRecurringRescheduleRequest(value: unknown): RecurringResche
   if (!appointmentId || appointmentId.length > 256 || !isSlot(value.preferredSlot)) return undefined;
   if (value.scope !== "single" && value.scope !== "series" && value.scope !== "following") return undefined;
   return { appointmentId, preferredSlot: value.preferredSlot, scope: value.scope };
+}
+
+export function parseReplaceOwnRecurringSeriesScheduleRequest(
+  value: unknown,
+): ReplaceOwnRecurringSeriesScheduleRequest | undefined {
+  if (!isRecord(value)
+    || typeof value.appointmentId !== "string"
+    || !isSlot(value.startSlot)
+    || typeof value.endDate !== "string"
+    || !isValidDateKey(value.endDate)
+    || typeof value.intervalDays !== "number"
+    || !Number.isInteger(value.intervalDays)
+    || value.intervalDays < 1) {
+    return undefined;
+  }
+  const appointmentId = value.appointmentId.trim();
+  return appointmentId && appointmentId.length <= 256
+    ? { appointmentId, startSlot: value.startSlot, intervalDays: value.intervalDays, endDate: value.endDate }
+    : undefined;
 }
 
 function planError(
@@ -504,7 +568,7 @@ export function validateRecurringRescheduleAvailability(input: {
   }
 
   const otherAppointments = input.userAppointments.filter((item) =>
-    !affectedIds.has(item.id) && (item.data.status === "pending" || item.data.status === "approved"));
+    !affectedIds.has(item.id) && isActiveOccurrenceStatus(item.data.status));
   for (const affected of input.draft.affected) {
     const targetKeys = new Set(affected.newKeys);
     const hasConflict = otherAppointments.some((item) => firstIntersection(appointmentKeys(item.data), targetKeys));
@@ -637,6 +701,235 @@ function throwHttps(error: RecurringRescheduleError): never {
   });
 }
 
+function throwCustomerSingleError(
+  reason: RecurringRescheduleReason | "series_unavailable",
+  message: string,
+  slot?: RecurringRescheduleSlot,
+  appointmentId?: string,
+): never {
+  throw new HttpsError("failed-precondition", message, {
+    reason,
+    scope: "single",
+    ...(slot ? { problematicSlot: slot } : {}),
+    ...(appointmentId ? { problematicAppointmentId: appointmentId } : {}),
+  });
+}
+
+async function runCustomerSingleRecurringReschedule(
+  deps: RecurringRescheduleDeps,
+  request: CallableRequest,
+  parsed: RecurringRescheduleRequest,
+): Promise<Record<string, unknown>> {
+  const actorUid = request.auth!.uid;
+  const selectedRef = deps.db.collection("appointments").doc(parsed.appointmentId);
+  return deps.db.runTransaction(async (transaction: Transaction) => {
+    const selectedSnap = await transaction.get(selectedRef);
+    if (!selectedSnap.exists) {
+      throwCustomerSingleError("recurring_occurrence_unavailable", "No se ha encontrado la cita indicada.");
+    }
+    const selected = selectedSnap.data() as RecurringAppointmentData;
+    if (selected.userId !== actorUid) {
+      throw new HttpsError("permission-denied", "No puedes modificar la cita de otro usuario.");
+    }
+    if (!selected.recurrenceSeriesId || !isActiveOccurrenceStatus(selected.status)) {
+      throwCustomerSingleError("recurring_occurrence_unavailable", "La cita recurrente ya no se puede modificar.");
+    }
+
+    const seriesRef = deps.db.collection("appointment_recurrences").doc(selected.recurrenceSeriesId);
+    const occurrencesQuery = deps.db.collection("appointments")
+      .where("recurrenceSeriesId", "==", selected.recurrenceSeriesId);
+    const configRef = deps.db.collection("site_config").doc("main");
+    const userAppointmentsQuery = deps.db.collection("appointments")
+      .where("userId", "==", actorUid)
+      .where("status", "in", ["pending", "approved"]);
+    const [seriesSnap, occurrencesSnap, configSnap, userAppointmentsSnap] = await Promise.all([
+      transaction.get(seriesRef),
+      transaction.get(occurrencesQuery),
+      transaction.get(configRef),
+      transaction.get(userAppointmentsQuery),
+    ]);
+    if (!seriesSnap.exists) {
+      throwCustomerSingleError("series_unavailable", "No se ha encontrado la serie indicada.");
+    }
+    const series = seriesSnap.data() as RecurringSeriesData;
+    if (series.userId !== actorUid || !isActiveOccurrenceStatus(series.status)) {
+      throwCustomerSingleError("series_unavailable", "La serie ya no se puede modificar.");
+    }
+
+    const duration = durationMinutes(selected);
+    const currentSlot = effectiveSlot(selected);
+    const nowDate = deps.getNowDate();
+    const currentInstant = currentSlot ? madridCivilSlotToInstant(currentSlot) : undefined;
+    const targetInstant = madridCivilSlotToInstant(parsed.preferredSlot);
+    if (!duration || !currentSlot || !currentInstant || currentInstant <= nowDate) {
+      throwCustomerSingleError(
+        "recurring_occurrence_unavailable",
+        "La cita recurrente no tiene una franja futura valida.",
+        currentSlot,
+        selectedRef.id,
+      );
+    }
+    if (!targetInstant || targetInstant <= nowDate) {
+      throwCustomerSingleError("slot_not_future", "La nueva franja debe estar en el futuro.", parsed.preferredSlot, selectedRef.id);
+    }
+    if (isInsideCustomerRescheduleLockWindow(currentSlot, nowDate)
+      || isInsideCustomerRescheduleLockWindow(parsed.preferredSlot, nowDate)) {
+      throwCustomerSingleError(
+        "one_day_change_not_allowed",
+        "Esta cita ya esta dentro del plazo de 24 horas previo al entrenamiento y no puede modificarse.",
+        isInsideCustomerRescheduleLockWindow(currentSlot, nowDate) ? currentSlot : parsed.preferredSlot,
+        selectedRef.id,
+      );
+    }
+
+    const oldKeys = selected.status === "approved" ? slotKeys(currentSlot, duration) : [];
+    const newKeys = slotKeys(parsed.preferredSlot, duration);
+    if (newKeys.length === 0 || (selected.status === "approved" && oldKeys.length === 0)) {
+      throwCustomerSingleError("invalid_occupancy", "Los bloques de ocupacion de la cita no son validos.", parsed.preferredSlot, selectedRef.id);
+    }
+    const occupancyDelta = new Map<string, number>();
+    oldKeys.forEach((key) => occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) - 1));
+    newKeys.forEach((key) => occupancyDelta.set(key, occupancyDelta.get(key) ?? 0));
+    const occupancyKeys = [...occupancyDelta.keys()].sort();
+    const occupancyRefs = occupancyKeys.map((key) => deps.db.collection("slot_occupancy").doc(key));
+    const blockedQuery = deps.db.collection("blocked_slots").where("date", "==", parsed.preferredSlot.date);
+    const [occupancySnaps, blockedSnap] = await Promise.all([
+      Promise.all(occupancyRefs.map((ref) => transaction.get(ref))),
+      transaction.get(blockedQuery),
+    ]);
+
+    const config = normalizeSiteConfig(configSnap.exists ? configSnap.data() as Partial<SiteConfig> : undefined);
+    if (!new Set(generateTimeSlots(config)).has(parsed.preferredSlot.time)
+      || !doesSessionFitWithinSchedule(config, parsed.preferredSlot.time, duration)) {
+      throwCustomerSingleError("outside_schedule", "La franja seleccionada queda fuera del horario del centro.", parsed.preferredSlot, selectedRef.id);
+    }
+    const blockedKeys = new Set<string>();
+    blockedSnap.docs.forEach((snap) => {
+      const data = snap.data() as Partial<RecurringRescheduleSlot>;
+      if (typeof data.date === "string" && typeof data.time === "string") {
+        blockedKeys.add(slotOccupancyDocId(data.date, data.time));
+      }
+    });
+    if (newKeys.some((key) => blockedKeys.has(key))) {
+      throwCustomerSingleError("slot_blocked", "La franja seleccionada esta bloqueada.", parsed.preferredSlot, selectedRef.id);
+    }
+    const targetKeySet = new Set(newKeys);
+    const hasConflict = userAppointmentsSnap.docs.some((snap) => {
+      if (snap.id === selectedRef.id) return false;
+      const data = snap.data() as RecurringAppointmentData;
+      return appointmentKeys(data).some((key) => targetKeySet.has(key));
+    });
+    if (hasConflict) {
+      throwCustomerSingleError("appointment_conflict", "Ya tienes una cita que se solapa con esta franja.", parsed.preferredSlot, selectedRef.id);
+    }
+
+    const occupancyWrites: Array<{ key: string; date: string; time: string; count: number }> = [];
+    occupancySnaps.forEach((snap, index) => {
+      const key = occupancyKeys[index];
+      const raw = snap.exists ? (snap.data() as { count?: unknown }).count : 0;
+      if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0) {
+        throwCustomerSingleError("invalid_occupancy", "La ocupacion registrada no es valida.", parsed.preferredSlot, selectedRef.id);
+      }
+      const delta = occupancyDelta.get(key) ?? 0;
+      const finalCount = raw + delta;
+      if (!Number.isInteger(finalCount) || finalCount < 0) {
+        throwCustomerSingleError("invalid_occupancy", "La ocupacion final no es valida.", parsed.preferredSlot, selectedRef.id);
+      }
+      if (targetKeySet.has(key) && finalCount >= config.maxCapacity) {
+        throwCustomerSingleError("slot_full", "La franja seleccionada esta completa.", parsed.preferredSlot, selectedRef.id);
+      }
+      if (delta !== 0) {
+        const separator = key.indexOf("_");
+        occupancyWrites.push({
+          key,
+          date: key.slice(0, separator),
+          time: key.slice(separator + 1),
+          count: finalCount,
+        });
+      }
+    });
+
+    const now = nowDate.toISOString();
+    const deleteField = FieldValue.delete();
+    const appointmentPatch: Record<string, unknown> = {
+      preferredSlots: [parsed.preferredSlot],
+      date: parsed.preferredSlot.date,
+      time: parsed.preferredSlot.time,
+      status: "pending",
+      updatedAt: now,
+      modifiedAt: now,
+      modifiedBy: actorUid,
+    };
+    if (selected.status === "approved") {
+      Object.assign(appointmentPatch, {
+        approvedSlot: deleteField,
+        assignedTrainer: deleteField,
+        trainerNotes: deleteField,
+        approvedAt: deleteField,
+        approvedBy: deleteField,
+        approvedByAdmin: deleteField,
+        approvedByAdminUid: deleteField,
+        approvalNotes: deleteField,
+      });
+    }
+
+    const occurrences = occurrencesSnap.docs.map((snap) => ({
+      id: snap.id,
+      data: snap.data() as RecurringAppointmentData,
+    }));
+    const metadata = calculateActiveSeriesMetadata(occurrences.map((occurrence) => ({
+      data: occurrence.data as RecurringAppointmentData & ReplacementAppointmentData,
+      ...(occurrence.id === selectedRef.id ? {
+        statusOverride: "pending",
+        slotOverride: parsed.preferredSlot,
+      } : {}),
+    })), nowDate);
+    if (!metadata) {
+      throwCustomerSingleError(
+        "recurring_occurrence_unavailable",
+        "No se pueden calcular los metadatos activos de la serie.",
+        parsed.preferredSlot,
+        selectedRef.id,
+      );
+    }
+    const seriesPatch: Record<string, unknown> = {
+      status: "pending",
+      assignedTrainer: deleteField,
+      updatedAt: now,
+      lastRescheduledAt: now,
+      lastRescheduledByUid: actorUid,
+      lastRescheduleScope: "single",
+      lastRescheduleAppointmentId: selectedRef.id,
+      futureOccurrenceCount: metadata.futureOccurrenceCount,
+      futureStartDate: metadata.futureStartDate ?? deleteField,
+      futureStartTime: metadata.futureStartTime ?? deleteField,
+      futureEndDate: metadata.futureEndDate ?? deleteField,
+    };
+
+    transaction.set(selectedRef, appointmentPatch, { merge: true });
+    occupancyWrites.forEach((write) => {
+      transaction.set(
+        deps.db.collection("slot_occupancy").doc(write.key),
+        { date: write.date, time: write.time, count: write.count },
+        { merge: true },
+      );
+    });
+    transaction.set(seriesRef, seriesPatch, { merge: true });
+    transaction.create(deps.db.collection("activity_logs").doc(), {
+      action: "customer_recurring_appointment_rescheduled",
+      userId: actorUid,
+      appointmentId: selectedRef.id,
+      seriesId: selected.recurrenceSeriesId,
+      oldStatus: selected.status,
+      newStatus: "pending",
+      oldSlot: currentSlot,
+      newSlot: parsed.preferredSlot,
+      createdAt: now,
+    });
+    return { success: true, appointmentId: selectedRef.id, status: "pending" };
+  });
+}
+
 export interface RecurringRescheduleDeps {
   db: Firestore;
   requireAdmin: (uid: string) => Promise<unknown>;
@@ -645,6 +938,557 @@ export interface RecurringRescheduleDeps {
 
 interface TransactionOccurrence extends RecurringAppointmentRecord {
   ref: FirebaseFirestore.DocumentReference;
+}
+
+interface CustomerSeriesOccurrence extends TransactionOccurrence {
+  data: RecurringAppointmentData & ReplacementAppointmentData;
+}
+
+function throwCustomerSeriesError(
+  reason: string,
+  message: string,
+  problematicSlot?: RecurringRescheduleSlot,
+  problematicAppointmentId?: string,
+): never {
+  throw new HttpsError("failed-precondition", message, {
+    reason,
+    scope: "series",
+    ...(problematicSlot ? { problematicSlot } : {}),
+    ...(problematicAppointmentId ? { problematicAppointmentId } : {}),
+  });
+}
+
+async function runCustomerSeriesReplacement(
+  deps: RecurringRescheduleDeps,
+  request: CallableRequest,
+): Promise<Record<string, unknown>> {
+  if (!request.auth) {
+    throw new HttpsError("permission-denied", "Debes iniciar sesion para modificar una serie.");
+  }
+  const input = parseReplaceOwnRecurringSeriesScheduleRequest(request.data);
+  if (!input) {
+    throw new HttpsError("invalid-argument", "Los datos de la nueva programacion no son validos.", {
+      reason: "invalid_request",
+    });
+  }
+  const customerUid = request.auth.uid;
+  const selectedRef = deps.db.collection("appointments").doc(input.appointmentId);
+  return deps.db.runTransaction(async (transaction: Transaction) => {
+    const selectedSnap = await transaction.get(selectedRef);
+    if (!selectedSnap.exists) {
+      throwCustomerSeriesError("series_unavailable", "No se ha encontrado la cita indicada.");
+    }
+    const selected = selectedSnap.data() as RecurringAppointmentData;
+    if (selected.userId !== customerUid) {
+      throw new HttpsError("permission-denied", "No puedes modificar la serie de otro usuario.");
+    }
+    if (!selected.recurrenceSeriesId) {
+      throwCustomerSeriesError("series_unavailable", "La cita indicada no pertenece a una serie recurrente.");
+    }
+
+    const seriesId = selected.recurrenceSeriesId;
+    const seriesRef = deps.db.collection("appointment_recurrences").doc(seriesId);
+    const seriesSnap = await transaction.get(seriesRef);
+    if (!seriesSnap.exists) {
+      throwCustomerSeriesError("series_unavailable", "No se ha encontrado la serie indicada.");
+    }
+    const series = { id: seriesSnap.id, ...seriesSnap.data() } as RecurringSeriesData;
+    if (series.userId !== customerUid || !isActiveOccurrenceStatus(series.status)) {
+      throwCustomerSeriesError("series_unavailable", "La serie ya no se puede modificar.");
+    }
+    const seriesDuration = replacementDurationMinutes({ duration: series.duration ?? "" });
+    if (!seriesDuration || typeof series.bonoId !== "string" || !series.bonoId) {
+      throwCustomerSeriesError("invalid_financial_reservation", "Los datos reservados de la serie no son validos.");
+    }
+
+    const occurrencesQuery = deps.db.collection("appointments").where("recurrenceSeriesId", "==", seriesId);
+    const bonoRef = deps.db.collection("bonos").doc(series.bonoId);
+    const configRef = deps.db.collection("site_config").doc("main");
+    const userRef = deps.db.collection("users").doc(customerUid);
+    const userAppointmentsQuery = deps.db.collection("appointments")
+      .where("userId", "==", customerUid)
+      .where("status", "in", ["pending", "approved"]);
+    const [occurrencesSnap, bonoSnap, configSnap, userSnap, userAppointmentsSnap] = await Promise.all([
+      transaction.get(occurrencesQuery),
+      transaction.get(bonoRef),
+      transaction.get(configRef),
+      transaction.get(userRef),
+      transaction.get(userAppointmentsQuery),
+    ]);
+    if (!bonoSnap.exists) {
+      throwCustomerSeriesError("bono_unavailable", "No se ha encontrado el bono reservado de la serie.");
+    }
+    const bono = { id: bonoSnap.id, ...bonoSnap.data() } as ReplacementBonoData & { id: string; userId?: string };
+    if (bono.userId !== customerUid || bono.estado === "eliminado") {
+      throwCustomerSeriesError("bono_unavailable", "El bono reservado no esta disponible.");
+    }
+    if (!hasValidReservedBonoData(bono)) {
+      throwCustomerSeriesError("invalid_financial_reservation", "La reserva financiera de la serie no es valida.");
+    }
+    const usableRemainingMinutes = getUsableBonoRemainingMinutes(bono);
+    const totalBonoMinutes = getBonoTotalMinutes(bono as Parameters<typeof getBonoTotalMinutes>[0]);
+    if (usableRemainingMinutes === undefined || !isNonNegativeInteger(totalBonoMinutes)) {
+      throwCustomerSeriesError("invalid_financial_reservation", "La reserva financiera no se puede aplicar con exactitud.");
+    }
+    if (!userSnap.exists) {
+      throwCustomerSeriesError("series_unavailable", "No se ha encontrado el perfil del cliente.");
+    }
+    const userProfile = userSnap.data() as Record<string, unknown>;
+
+    const nowDate = deps.getNowDate();
+    const now = nowDate.toISOString();
+    const today = getMadridDateKey(nowDate);
+    const occurrences: CustomerSeriesOccurrence[] = occurrencesSnap.docs.map((snap) => ({
+      id: snap.id,
+      ref: snap.ref,
+      data: snap.data() as CustomerSeriesOccurrence["data"],
+    }));
+    if (!occurrences.some((occurrence) => occurrence.id === selectedRef.id)) {
+      throwCustomerSeriesError("series_unavailable", "La cita indicada ya no pertenece a esta serie.");
+    }
+
+    const seenIndexes = new Set<number>();
+    let maxHistoricalIndex = -1;
+    occurrences.forEach((occurrence) => {
+      const index = occurrence.data.recurrenceIndex;
+      if (!Number.isInteger(index)) return;
+      if (seenIndexes.has(index as number)) {
+        throwCustomerSeriesError("recurring_occurrence_unavailable", "La serie contiene indices de recurrencia duplicados.");
+      }
+      seenIndexes.add(index as number);
+      if ((index as number) >= 0) maxHistoricalIndex = Math.max(maxHistoricalIndex, index as number);
+    });
+
+    const historicalActive: CustomerSeriesOccurrence[] = [];
+    const futureActive: Array<CustomerSeriesOccurrence & { slot: RecurringRescheduleSlot; index: number; oldKeys: string[] }> = [];
+    for (const occurrence of occurrences) {
+      if (!isActiveOccurrenceStatus(occurrence.data.status)) continue;
+      const occurrenceDuration = replacementDurationMinutes(occurrence.data);
+      if (occurrence.data.userId !== customerUid
+        || occurrence.data.recurrenceSeriesId !== seriesId
+        || occurrenceDuration !== seriesDuration) {
+        throwCustomerSeriesError(
+          "recurring_occurrence_unavailable",
+          "Una occurrence activa de la serie contiene datos no validos.",
+          undefined,
+          occurrence.id,
+        );
+      }
+      const slot = validReplacementSlot(occurrence.data);
+      if (!slot) {
+        const safeDate = safeReplacementCivilDate(occurrence.data);
+        if (safeDate && safeDate < today) {
+          historicalActive.push(occurrence);
+          continue;
+        }
+        throwCustomerSeriesError(
+          "recurring_occurrence_unavailable",
+          "Una occurrence activa de la serie no tiene una franja valida.",
+          undefined,
+          occurrence.id,
+        );
+      }
+      const instant = madridCivilSlotToInstant(slot);
+      if (!instant) {
+        const safeDate = safeReplacementCivilDate(occurrence.data);
+        if (safeDate && safeDate < today) {
+          historicalActive.push(occurrence);
+          continue;
+        }
+        throwCustomerSeriesError(
+          "recurring_occurrence_unavailable",
+          "Una occurrence activa de la serie no tiene un instante civil valido.",
+          slot,
+          occurrence.id,
+        );
+      }
+      if (instant <= nowDate) {
+        historicalActive.push(occurrence);
+        continue;
+      }
+      if (isInsideCustomerRescheduleLockWindow(slot, nowDate)) {
+        throwCustomerSeriesError(
+          "one_day_change_not_allowed",
+          "Una de las sesiones de esta serie ya esta dentro del plazo de 24 horas previo y no puede reprogramarse toda la serie.",
+          slot,
+          occurrence.id,
+        );
+      }
+      const index = occurrence.data.recurrenceIndex;
+      if (!Number.isInteger(index) || (index as number) < 0) {
+        throwCustomerSeriesError(
+          "recurring_occurrence_unavailable",
+          "Una occurrence futura de la serie no tiene un indice valido.",
+          slot,
+          occurrence.id,
+        );
+      }
+      if (!hasValidFutureReservation(occurrence.data, series.bonoId, seriesDuration)) {
+        throwCustomerSeriesError(
+          "invalid_financial_reservation",
+          "Una reserva futura de la serie no es valida.",
+          slot,
+          occurrence.id,
+        );
+      }
+      const oldKeys = occurrence.data.status === "approved" ? slotKeys(slot, seriesDuration) : [];
+      if (occurrence.data.status === "approved" && oldKeys.length === 0) {
+        throwCustomerSeriesError("invalid_occupancy", "La ocupacion antigua no es valida.", slot, occurrence.id);
+      }
+      futureActive.push({ ...occurrence, slot, index: index as number, oldKeys });
+    }
+    futureActive.sort((left, right) => left.index - right.index);
+    if (futureActive.length === 0) {
+      throwCustomerSeriesError("series_unavailable", "La serie no tiene sesiones futuras activas para sustituir.");
+    }
+
+    const generatedDates = generateRecurringOccurrenceDates(input.startSlot.date, input.intervalDays, input.endDate);
+    if (generatedDates.length < 2
+      || generatedDates.length > MAX_RECURRING_OCCURRENCES
+      || generatedDates.at(-1) !== input.endDate) {
+      throwCustomerSeriesError("invalid_series_length", "La nueva serie debe contener entre dos y veinte sesiones alineadas con su intervalo.");
+    }
+    const desired = generatedDates.map((date) => {
+      const slot = { date, time: input.startSlot.time };
+      const instant = madridCivilSlotToInstant(slot);
+      if (!instant || instant <= nowDate) {
+        throwCustomerSeriesError("slot_not_future", "Todas las nuevas sesiones deben estar en el futuro.", slot);
+      }
+      if (isInsideCustomerRescheduleLockWindow(slot, nowDate)) {
+        throwCustomerSeriesError(
+          "one_day_change_not_allowed",
+          "La nueva programacion debe comenzar fuera del plazo de 24 horas.",
+          slot,
+        );
+      }
+      return { slot, keys: slotKeys(slot, seriesDuration) };
+    });
+    const config = normalizeSiteConfig(configSnap.exists ? configSnap.data() as Partial<SiteConfig> : undefined);
+    const validTimes = new Set(generateTimeSlots(config));
+    if (!validTimes.has(input.startSlot.time)
+      || !doesSessionFitWithinSchedule(config, input.startSlot.time, seriesDuration)) {
+      throwCustomerSeriesError("outside_schedule", "La nueva programacion queda fuera del horario del centro.", input.startSlot);
+    }
+
+    const { reused, cancelled, createdCount } = planReplacementGroups(futureActive, desired.length);
+    const oldFutureReservedMinutes = futureActive.reduce(
+      (total, occurrence) => total + Number(occurrence.data.minutesDeductedAmount),
+      0,
+    );
+    const newFutureMinutes = desired.length * seriesDuration;
+    const minutesDelta = newFutureMinutes - oldFutureReservedMinutes;
+    const expirationDate = civilDateFromExpiration(typeof bono.fechaExpiracion === "string" ? bono.fechaExpiracion : undefined);
+    const bonoExpired = bono.estado === "expirado"
+      || isBonoExpiredAt(bono as Parameters<typeof isBonoExpiredAt>[0], nowDate);
+    if (!bonoExpired && expirationDate && input.endDate > expirationDate) {
+      throwCustomerSeriesError("bono_unavailable", "La nueva programacion supera la vigencia del bono.");
+    }
+    if (minutesDelta > 0 && (bono.estado !== "activo" || bonoExpired)) {
+      throwCustomerSeriesError("bono_unavailable", "Un bono expirado no puede ampliar reservas.");
+    }
+
+    const occupancyDelta = new Map<string, number>();
+    futureActive.forEach((occurrence) => occurrence.oldKeys.forEach((key) => {
+      occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) - 1);
+    }));
+    desired.forEach((occurrence) => occurrence.keys.forEach((key) => {
+      occupancyDelta.set(key, occupancyDelta.get(key) ?? 0);
+    }));
+    const occupancyKeys = [...occupancyDelta.keys()].sort();
+    const occupancyRefs = occupancyKeys.map((key) => deps.db.collection("slot_occupancy").doc(key));
+    const blockedQuery = deps.db.collection("blocked_slots")
+      .where("date", ">=", generatedDates[0])
+      .where("date", "<=", generatedDates.at(-1));
+    const [occupancySnaps, blockedSnap] = await Promise.all([
+      Promise.all(occupancyRefs.map((ref) => transaction.get(ref))),
+      transaction.get(blockedQuery),
+    ]);
+
+    const occupancyByKey = new Map<string, number>();
+    occupancySnaps.forEach((snap, index) => {
+      const raw = snap.exists ? (snap.data() as { count?: unknown }).count : 0;
+      if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0) {
+        throwCustomerSeriesError("invalid_occupancy", "La ocupacion registrada no es valida.");
+      }
+      occupancyByKey.set(occupancyKeys[index], raw);
+    });
+    const blockedKeys = new Set<string>();
+    blockedSnap.docs.forEach((snap) => {
+      const data = snap.data() as Partial<RecurringRescheduleSlot>;
+      if (typeof data.date === "string" && typeof data.time === "string") {
+        blockedKeys.add(slotOccupancyDocId(data.date, data.time));
+      }
+    });
+    const excludedIds = new Set(futureActive.map((occurrence) => occurrence.id));
+    const externalAppointments = userAppointmentsSnap.docs
+      .filter((snap) => !excludedIds.has(snap.id))
+      .map((snap) => snap.data() as RecurringAppointmentData);
+    const internalKeys = new Set<string>();
+    for (const occurrence of desired) {
+      if (occurrence.keys.some((key) => blockedKeys.has(key))) {
+        throwCustomerSeriesError("slot_blocked", "Una franja de la nueva serie esta bloqueada.", occurrence.slot);
+      }
+      for (const key of occurrence.keys) {
+        if (internalKeys.has(key)) {
+          throwCustomerSeriesError("appointment_conflict", "Dos sesiones nuevas de la serie se solaparian.", occurrence.slot);
+        }
+        const current = occupancyByKey.get(key) ?? 0;
+        const effective = current + (occupancyDelta.get(key) ?? 0);
+        if (!Number.isInteger(effective) || effective < 0) {
+          throwCustomerSeriesError("invalid_occupancy", "La ocupacion final calculada no es valida.", occurrence.slot);
+        }
+        if (effective >= config.maxCapacity) {
+          throwCustomerSeriesError("slot_full", "Una franja de la nueva serie esta completa.", occurrence.slot);
+        }
+        const targetKeys = new Set(occurrence.keys);
+        if (externalAppointments.some((appointment) => firstReplacementIntersection(appointmentKeys(appointment), targetKeys))) {
+          throwCustomerSeriesError("appointment_conflict", "Ya tienes una cita que se solapa con la nueva serie.", occurrence.slot);
+        }
+        internalKeys.add(key);
+      }
+    }
+    const occupancyWrites: Array<{ key: string; date: string; time: string; count: number }> = [];
+    occupancyKeys.forEach((key) => {
+      const current = occupancyByKey.get(key) ?? 0;
+      const delta = occupancyDelta.get(key) ?? 0;
+      const finalCount = current + delta;
+      if (!Number.isInteger(finalCount) || finalCount < 0) {
+        throwCustomerSeriesError("invalid_occupancy", "La ocupacion final calculada no es valida.");
+      }
+      if (delta !== 0) {
+        const separator = key.indexOf("_");
+        occupancyWrites.push({ key, date: key.slice(0, separator), time: key.slice(separator + 1), count: finalCount });
+      }
+    });
+
+    const createdRefs = Array.from({ length: createdCount }, () => deps.db.collection("appointments").doc());
+    const refundPatches = new Map<string, Record<string, unknown>>();
+    const histories = replacementHistoryEntries(bono.historial);
+    let bonoPatch: Record<string, unknown> | undefined;
+    if (minutesDelta > 0) {
+      const deduction = calculateAppointmentDeduction(
+        bono as Parameters<typeof calculateAppointmentDeduction>[0],
+        minutesDelta,
+        now,
+      );
+      if (!deduction.ok) {
+        throwCustomerSeriesError(
+          deduction.reason === "insufficient-minutes" ? "insufficient_bono_minutes" : "bono_unavailable",
+          "El bono no tiene minutos suficientes para ampliar la serie.",
+        );
+      }
+      bonoPatch = {
+        minutosRestantes: deduction.remainingMinutes,
+        estado: deduction.bonoStatus,
+        historial: [
+          ...histories,
+          ...createdRefs.map((ref) => ({
+            fecha: now,
+            tipo: series.serviceType ?? "",
+            duracion: String(seriesDuration),
+            appointmentId: ref.id,
+            accion: "descuento_cita",
+          })),
+        ],
+      };
+    } else if (minutesDelta < 0) {
+      const exactRemaining = usableRemainingMinutes - minutesDelta;
+      if (!isNonNegativeInteger(exactRemaining) || exactRemaining > totalBonoMinutes) {
+        throwCustomerSeriesError("invalid_financial_reservation", "La devolucion no se puede aplicar con exactitud.");
+      }
+      let workingBono = { ...bono, minutosRestantes: usableRemainingMinutes };
+      cancelled.forEach((occurrence) => {
+        const refund = calculateAppointmentRefund(
+          workingBono as Parameters<typeof calculateAppointmentRefund>[0],
+          occurrence.data,
+          now,
+        );
+        if (!refund.ok) {
+          throwCustomerSeriesError("invalid_financial_reservation", "Una reserva cancelada no se puede devolver.");
+        }
+        workingBono = { ...workingBono, minutosRestantes: refund.remainingMinutes, estado: refund.bonoStatus };
+        refundPatches.set(occurrence.id, {
+          minutesRefunded: true,
+          minutesRefundedAmount: refund.minutesRefundedAmount,
+          minutesRefundedAt: refund.minutesRefundedAt,
+          minutesRefundReason: "customer_series_schedule_reduction",
+        });
+      });
+      if (workingBono.minutosRestantes !== exactRemaining) {
+        throwCustomerSeriesError("invalid_financial_reservation", "La devolucion no coincide con el delta esperado.");
+      }
+      bonoPatch = {
+        minutosRestantes: workingBono.minutosRestantes,
+        estado: workingBono.estado,
+        historial: [
+          ...histories,
+          ...cancelled.map((occurrence) => ({
+            fecha: now,
+            tipo: series.serviceType ?? "",
+            duracion: String(seriesDuration),
+            appointmentId: occurrence.id,
+            accion: "devolucion_cita",
+          })),
+        ],
+      };
+    }
+
+    const deleted = FieldValue.delete();
+    const modeled = occurrences.map((occurrence) => {
+      const reusedIndex = reused.findIndex((item) => item.id === occurrence.id);
+      const isCancelled = cancelled.some((item) => item.id === occurrence.id);
+      return {
+        data: occurrence.data,
+        ...(reusedIndex >= 0 ? { statusOverride: "pending", slotOverride: desired[reusedIndex].slot } : {}),
+        ...(isCancelled ? { statusOverride: "cancelled" } : {}),
+      };
+    });
+    createdRefs.forEach((_, index) => {
+      modeled.push({
+        data: {
+          userId: customerUid,
+          status: "pending",
+          duration: String(seriesDuration),
+          preferredSlots: [desired[reused.length + index].slot],
+        },
+      });
+    });
+    const metadata = calculateActiveSeriesMetadata(modeled, nowDate);
+    if (!metadata) {
+      throwCustomerSeriesError("recurring_occurrence_unavailable", "No se pueden calcular los metadatos de la serie.");
+    }
+    const hasHistorical = occurrences.some((occurrence) => isHistoricalReplacementOccurrence(occurrence.data, nowDate));
+
+    reused.forEach((occurrence, index) => {
+      transaction.set(occurrence.ref, {
+        preferredSlots: [desired[index].slot],
+        date: desired[index].slot.date,
+        time: desired[index].slot.time,
+        status: "pending",
+        assignedTrainer: deleted,
+        approvedSlot: deleted,
+        trainerNotes: deleted,
+        approvedAt: deleted,
+        approvedBy: deleted,
+        approvedByAdmin: deleted,
+        approvedByAdminUid: deleted,
+        approvalNotes: deleted,
+        updatedAt: now,
+        modifiedAt: now,
+        modifiedBy: customerUid,
+      }, { merge: true });
+    });
+    cancelled.forEach((occurrence) => {
+      transaction.set(occurrence.ref, {
+        status: "cancelled",
+        cancelledBy: customerUid,
+        cancelledAt: now,
+        cancellationReason: "customer_series_schedule_reduction",
+        updatedAt: now,
+        ...refundPatches.get(occurrence.id),
+      }, { merge: true });
+    });
+    const identityTemplate = futureActive[0].data;
+    createdRefs.forEach((ref, index) => {
+      const slot = desired[reused.length + index].slot;
+      transaction.create(ref, {
+        ...copyDefinedFields(identityTemplate, ["sessionType", "reason"]),
+        userId: customerUid,
+        name: typeof userProfile.name === "string" ? userProfile.name : "",
+        email: typeof userProfile.email === "string" ? userProfile.email : "",
+        phone: typeof userProfile.phone === "string" ? userProfile.phone : "",
+        serviceType: series.serviceType ?? identityTemplate.serviceType ?? "",
+        duration: String(seriesDuration),
+        preferredSlots: [slot],
+        date: slot.date,
+        time: slot.time,
+        status: "pending",
+        recurrenceSeriesId: seriesId,
+        recurrenceIndex: maxHistoricalIndex + index + 1,
+        bonoId: series.bonoId,
+        minutesDeducted: true,
+        minutesDeductedAmount: seriesDuration,
+        minutesDeductedAt: now,
+        minutesDeductionSkippedAt: null,
+        minutesDeductionSkippedReason: null,
+        minutesRefunded: false,
+        minutesRefundedAmount: null,
+        minutesRefundedAt: null,
+        minutesRefundReason: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+    occupancyWrites.forEach((write) => {
+      transaction.set(
+        deps.db.collection("slot_occupancy").doc(write.key),
+        { date: write.date, time: write.time, count: write.count },
+        { merge: true },
+      );
+    });
+    if (bonoPatch) transaction.set(bonoRef, bonoPatch, { merge: true });
+
+    const seriesPatch: Record<string, unknown> = {
+      status: "pending",
+      intervalDays: input.intervalDays,
+      endDate: input.endDate,
+      assignedTrainer: deleted,
+      occurrenceCount: metadata.occurrenceCount,
+      totalMinutes: metadata.totalMinutes,
+      futureOccurrenceCount: metadata.futureOccurrenceCount,
+      futureStartDate: metadata.futureStartDate ?? deleted,
+      futureStartTime: metadata.futureStartTime ?? deleted,
+      futureEndDate: metadata.futureEndDate ?? deleted,
+      updatedAt: now,
+      lastRescheduledAt: now,
+      lastRescheduledByUid: customerUid,
+      lastRescheduleScope: "series",
+    };
+    if (!hasHistorical) {
+      seriesPatch.startDate = input.startSlot.date;
+      seriesPatch.startTime = input.startSlot.time;
+    }
+    transaction.set(seriesRef, seriesPatch, { merge: true });
+
+    const reusedAppointmentIds = reused.map((occurrence) => occurrence.id);
+    const createdAppointmentIds = createdRefs.map((ref) => ref.id);
+    const cancelledAppointmentIds = cancelled.map((occurrence) => occurrence.id);
+    const affectedAppointmentIds = [...new Set([
+      ...reusedAppointmentIds,
+      ...createdAppointmentIds,
+      ...cancelledAppointmentIds,
+    ])];
+    transaction.create(deps.db.collection("activity_logs").doc(), {
+      action: "customer_recurring_series_schedule_replaced",
+      userId: customerUid,
+      seriesId,
+      sourceAppointmentId: selectedRef.id,
+      oldFutureCount: futureActive.length,
+      newFutureCount: desired.length,
+      oldFutureReservedMinutes,
+      newFutureMinutes,
+      minutesDelta,
+      newStartSlot: input.startSlot,
+      newEndDate: input.endDate,
+      intervalDays: input.intervalDays,
+      affectedAppointmentIds,
+      reusedAppointmentIds,
+      createdAppointmentIds,
+      cancelledAppointmentIds,
+      createdAt: now,
+    });
+    return {
+      success: true,
+      seriesId,
+      affectedAppointmentIds,
+      reusedAppointmentIds,
+      createdAppointmentIds,
+      cancelledAppointmentIds,
+      occurrenceCount: metadata.occurrenceCount,
+      totalMinutes: metadata.totalMinutes,
+      status: "pending",
+    };
+  });
 }
 
 async function runRecurringReschedule(
@@ -661,6 +1505,9 @@ async function runRecurringReschedule(
   }
   const actorUid = request.auth.uid;
   if (actorType === "admin") await deps.requireAdmin(actorUid);
+  if (actorType === "customer" && parsed.scope === "single") {
+    return runCustomerSingleRecurringReschedule(deps, request, parsed);
+  }
   const selectedRef = deps.db.collection("appointments").doc(parsed.appointmentId);
 
   const result = await deps.db.runTransaction(async (transaction: Transaction) => {
@@ -804,5 +1651,7 @@ export function createRecurringRescheduleHandlers(deps: RecurringRescheduleDeps)
       runRecurringReschedule(deps, request, "admin"),
     rescheduleOwnRecurringAppointment: (request: CallableRequest) =>
       runRecurringReschedule(deps, request, "customer"),
+    replaceOwnRecurringSeriesSchedule: (request: CallableRequest) =>
+      runCustomerSeriesReplacement(deps, request),
   };
 }

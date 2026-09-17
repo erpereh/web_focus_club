@@ -517,20 +517,26 @@ export function buildPendingSeriesOccurrencePatch(input: {
 }
 
 export function isRecurringBulkManagedTransition(
-  before: { status?: string; recurrenceSeriesId?: string },
-  after: { status?: string; recurrenceSeriesId?: string },
-): "approve" | "reject" | "cancel-pending" | undefined {
+  before: { status?: string; recurrenceSeriesId?: string; cancellationReason?: string },
+  after: { status?: string; recurrenceSeriesId?: string; cancellationReason?: string },
+): "approve" | "reject" | "cancel-pending" | "return-to-pending" | "schedule-reduction" | undefined {
   const seriesId = after.recurrenceSeriesId || before.recurrenceSeriesId;
   if (!seriesId) return undefined;
   if (before.status === "pending" && after.status === "approved") return "approve";
   if (before.status === "pending" && after.status === "rejected") return "reject";
   if (before.status === "pending" && after.status === "cancelled") return "cancel-pending";
+  if (before.status === "approved" && after.status === "pending") return "return-to-pending";
+  if (before.status === "approved"
+    && after.status === "cancelled"
+    && after.cancellationReason === "customer_series_schedule_reduction") {
+    return "schedule-reduction";
+  }
   return undefined;
 }
 
 export function shouldSkipRecurringFinanceReconciliation(
-  before: { status?: string; recurrenceSeriesId?: string },
-  after: { status?: string; recurrenceSeriesId?: string },
+  before: { status?: string; recurrenceSeriesId?: string; cancellationReason?: string },
+  after: { status?: string; recurrenceSeriesId?: string; cancellationReason?: string },
 ): boolean {
   return Boolean(isRecurringBulkManagedTransition(before, after));
 }
@@ -538,7 +544,8 @@ export function shouldSkipRecurringFinanceReconciliation(
 export function shouldSkipRecurringStatusNotification(appointment: {
   status?: string;
   recurrenceSeriesId?: string;
-}, after?: { status?: string; recurrenceSeriesId?: string }): boolean {
+  cancellationReason?: string;
+}, after?: { status?: string; recurrenceSeriesId?: string; cancellationReason?: string }): boolean {
   if (!after) return Boolean(appointment.recurrenceSeriesId);
   return Boolean(isRecurringBulkManagedTransition(appointment, after));
 }
