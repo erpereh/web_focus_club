@@ -57,6 +57,29 @@ describe('recurring reschedule UI helpers', () => {
             .toEqual(['a0', 'a1', 'a3']);
     });
 
+    it('excludes every active pending occurrence when replacing a pending series without occupancy credit', () => {
+        const selectedPending = {
+            ...appointment('p1', 3, '2026-09-14', 'pending'),
+            approvedSlot: undefined,
+        };
+        const pendingSeries = [
+            { ...appointment('p0', 1, '2026-09-07', 'pending'), approvedSlot: undefined },
+            selectedPending,
+            { ...appointment('p2', 5, '2026-09-21', 'pending'), approvedSlot: undefined },
+            appointment('p3', 7, '2026-09-28', 'cancelled'),
+        ];
+        const excluded = getRecurringRescheduleExcludedAppointmentIds(
+            pendingSeries,
+            selectedPending,
+            'series',
+            now,
+        );
+        expect([...excluded]).toEqual(['p0', 'p1', 'p2']);
+        const context = buildRescheduleCalendarContext(pendingSeries, 'user-1', excluded);
+        expect(context.userBookedSlotKeys.size).toBe(0);
+        expect(context.occupancyCreditsByKey.size).toBe(0);
+    });
+
     it('builds only the new UI scopes without changing the slot', () => {
         const slot = { date: '2026-09-20', time: '19:00' };
         expect(buildRecurringRescheduleRequest('a1', slot, 'single')).toEqual({

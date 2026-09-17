@@ -106,7 +106,10 @@ class FakeFirestore {
       set: (ref, value, options) => {
         firstWriteSeen = true;
         this.operations.push({ type: "write", target: ref.path, value: clone(value) });
-        staged.push({ ref, value: clone(value), merge: options?.merge === true });
+        const deleteFields = Object.entries(value)
+          .filter(([, fieldValue]) => fieldValue?.constructor?.name === "DeleteTransform")
+          .map(([field]) => field);
+        staged.push({ ref, value: clone(value), merge: options?.merge === true, deleteFields });
       },
       create: (ref, value) => {
         if (this.documents.has(ref.path) || staged.some((entry) => entry.ref.path === ref.path)) {
@@ -118,9 +121,11 @@ class FakeFirestore {
       },
     };
     const result = await callback(transaction);
-    staged.forEach(({ ref, value, merge }) => {
+    staged.forEach(({ ref, value, merge, deleteFields = [] }) => {
       const previous = this.documents.get(ref.path) ?? {};
-      this.documents.set(ref.path, merge ? { ...previous, ...value } : value);
+      const next = merge ? { ...previous, ...value } : value;
+      deleteFields.forEach((field) => delete next[field]);
+      this.documents.set(ref.path, next);
     });
     return result;
   }
@@ -287,6 +292,79 @@ function recurringSeriesFixture(overrides = {}) {
   return documents;
 }
 
+function pendingRecurringSeriesFixture(overrides = {}) {
+  const records = {
+    "pending-0": recurringOccurrence("pending-0", 0, "2026-09-07", "pending", {
+      approvedSlot: undefined,
+      googleCalendarEventId: undefined,
+      googleCalendarSyncedAt: undefined,
+      googleCalendarSyncStatus: undefined,
+      googleCalendarSyncHash: undefined,
+    }),
+    "pending-1": recurringOccurrence("pending-1", 1, "2026-09-14", "pending", {
+      approvedSlot: undefined,
+      googleCalendarEventId: undefined,
+      googleCalendarSyncedAt: undefined,
+      googleCalendarSyncStatus: undefined,
+      googleCalendarSyncHash: undefined,
+    }),
+    "pending-2": recurringOccurrence("pending-2", 2, "2026-09-21", "pending", {
+      approvedSlot: undefined,
+      googleCalendarEventId: undefined,
+      googleCalendarSyncedAt: undefined,
+      googleCalendarSyncStatus: undefined,
+      googleCalendarSyncHash: undefined,
+    }),
+    "cancelled-3": recurringOccurrence("cancelled-3", 3, "2026-09-28", "cancelled", {
+      approvedSlot: undefined,
+      minutesRefunded: true,
+      minutesRefundedAmount: 60,
+      minutesRefundedAt: "2026-08-15T10:00:00.000Z",
+      minutesRefundReason: "previous_cancel",
+    }),
+  };
+  const documents = {
+    "appointment_recurrences/series-1": {
+      userId: "user-1",
+      serviceType: "Entrenamiento personal",
+      duration: "60",
+      assignedTrainer: "trainer-1",
+      startDate: "2026-09-07",
+      startTime: "10:00",
+      intervalDays: 7,
+      endDate: "2026-09-21",
+      occurrenceCount: 3,
+      totalMinutes: 180,
+      futureOccurrenceCount: 3,
+      futureStartDate: "2026-09-07",
+      futureStartTime: "10:00",
+      futureEndDate: "2026-09-21",
+      bonoId: "bono-1",
+      status: "pending",
+      origin: "admin",
+      ...overrides.series,
+    },
+    "users/user-1": { uid: "user-1", role: "user" },
+    "trainers/trainer-1": { uid: "trainer-1", active: true },
+    "trainers/trainer-2": { uid: "trainer-2", active: true },
+    "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 },
+    "bonos/bono-1": {
+      userId: "user-1",
+      tamano: 600,
+      minutosTotales: 600,
+      minutosRestantes: 300,
+      fechaExpiracion: "2026-12-01T23:59:59.000Z",
+      estado: "activo",
+      historial: [{ accion: "kept_history" }],
+      ...overrides.bono,
+    },
+  };
+  Object.entries(records).forEach(([id, record]) => {
+    documents[`appointments/${id}`] = { ...record, ...(overrides.records?.[id] ?? {}) };
+  });
+  return documents;
+}
+
 function activityLog(db, action) {
   return [...db.documents.entries()].find(([path, value]) => path.startsWith("activity_logs/") && value.action === action)?.[1];
 }
@@ -325,7 +403,7 @@ test("admin single reschedule updates a future pending record without consuming 
   assert.deepEqual(updated.preferredSlots, [{ date: "2026-09-08", time: "11:00" }]);
   assert.equal(updated.date, "2026-09-08");
   assert.equal(updated.time, "11:00");
-  assert.equal("approvedSlot" in updated, false);
+  assert.equal(updated.approvedSlot, undefined);
   assert.equal(updated.bonoId, before.bonoId);
   assert.equal(updated.minutesDeductedAt, before.minutesDeductedAt);
   assert.equal(updated.googleCalendarEventId, before.googleCalendarEventId);
@@ -406,6 +484,9 @@ test("both admin rescheduling callables expose stable reasons for denied admin c
       startSlot: { date: "2026-09-08", time: "11:00" },
       endDate: "2026-09-22",
       assignedTrainer: null,
+    },
+    returnRecurringSeriesToPendingFromAdmin: {
+      seriesId: "series-1",
     },
   };
 
@@ -753,24 +834,232 @@ test("admin single recurrent approved reschedule changes only its selected recor
   assert.equal(series.lastRescheduleAppointmentId, "single-recurring");
 });
 
-test("admin single does not allow a recurring pending occurrence through the individual path", async () => {
+test("admin single allows a recurring pending occurrence and preserves its financial reservation", async () => {
   const documents = {
-    "appointments/recurring-pending": futurePendingAppointment({ recurrenceSeriesId: "series-1" }),
-  };
-  const db = new FakeFirestore(documents);
-  const before = snapshotDocuments(db);
-  await assert.rejects(
-    createHandlers(db).rescheduleAppointmentFromAdmin({
-      auth: { uid: "admin-1", token: {} },
-      data: {
-        appointmentId: "recurring-pending",
-        slot: { date: "2026-09-08", time: "11:00" },
-        assignedTrainer: null,
-      },
+    "appointments/recurring-pending": recurringOccurrence("recurring-pending", 0, "2026-09-07", "pending", {
+      approvedSlot: undefined,
     }),
-    (error) => error.code === "failed-precondition" && error.details.reason === "appointment_unavailable",
-  );
-  assertNoWrites(db, before);
+    "appointment_recurrences/series-1": {
+      userId: "user-1",
+      status: "pending",
+      intervalDays: 7,
+      endDate: "2026-09-07",
+      bonoId: "bono-1",
+    },
+    "trainers/trainer-2": { uid: "trainer-2", active: true },
+    "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 },
+  };
+  addOccupancy(documents, "2026-09-08", "11:00", 0);
+  const db = new FakeFirestore(documents);
+  const before = clone(documents["appointments/recurring-pending"]);
+  await createHandlers(db).rescheduleAppointmentFromAdmin({
+    auth: { uid: "admin-1", token: {} },
+    data: {
+      appointmentId: "recurring-pending",
+      slot: { date: "2026-09-08", time: "11:00" },
+      assignedTrainer: "trainer-2",
+    },
+  });
+  const updated = db.documents.get("appointments/recurring-pending");
+  assert.equal(updated.status, "pending");
+  assert.deepEqual(updated.preferredSlots, [{ date: "2026-09-08", time: "11:00" }]);
+  assert.equal(updated.assignedTrainer, "trainer-2");
+  assert.equal(updated.approvedSlot, undefined);
+  for (const field of ["bonoId", "minutesDeducted", "minutesDeductedAmount", "minutesDeductedAt", "recurrenceSeriesId", "recurrenceIndex"]) {
+    assert.equal(updated[field], before[field]);
+  }
+  assert.equal(db.operations.some((operation) => operation.type === "write" && operation.target.startsWith("slot_occupancy/")), false);
+});
+
+test("recurring pending trainer-only bypasses full and blocked availability without occupancy reads", async () => {
+  const documents = {
+    "appointments/recurring-pending": recurringOccurrence("recurring-pending", 0, "2026-09-07", "pending", {
+      approvedSlot: undefined,
+    }),
+    "appointment_recurrences/series-1": {
+      userId: "user-1", status: "pending", intervalDays: 7, endDate: "2026-09-07", bonoId: "bono-1",
+    },
+    "trainers/trainer-2": { uid: "trainer-2", active: true },
+    "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 1 },
+    "blocked_slots/blocked": { date: "2026-09-07", time: "10:00" },
+  };
+  addOccupancy(documents, "2026-09-07", "10:00", 1);
+  const db = new FakeFirestore(documents);
+  const beforeSlot = clone(documents["appointments/recurring-pending"].preferredSlots);
+  await createHandlers(db).rescheduleAppointmentFromAdmin({
+    auth: { uid: "admin-1", token: {} },
+    data: {
+      appointmentId: "recurring-pending",
+      slot: { date: "2026-09-07", time: "10:00" },
+      assignedTrainer: "trainer-2",
+    },
+  });
+  const updated = db.documents.get("appointments/recurring-pending");
+  assert.equal(updated.assignedTrainer, "trainer-2");
+  assert.deepEqual(updated.preferredSlots, beforeSlot);
+  assert.equal(updated.date, "2026-09-07");
+  assert.equal(updated.time, "10:00");
+  assert.equal(db.operations.some((operation) => operation.type === "write" && operation.target.startsWith("slot_occupancy/")), false);
+  assert.equal(db.operations.some((operation) => operation.target === "blocked_slots"), false);
+  assert.equal(db.operations.some((operation) => operation.target === "site_config/main"), false);
+});
+
+test("admin pending series replacement reuses records and applies only the financial delta without occupancy", async () => {
+  const documents = pendingRecurringSeriesFixture();
+  const db = new FakeFirestore(documents);
+  const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+    auth: { uid: "admin-1", token: {} },
+    data: {
+      appointmentId: "pending-1",
+      startSlot: { date: "2026-09-08", time: "11:00" },
+      endDate: "2026-09-15",
+      assignedTrainer: "trainer-2",
+    },
+  });
+  assert.equal(result.success, true);
+  assert.equal(result.minutesDelta, -60);
+  assert.deepEqual(result.reusedAppointmentIds, ["pending-0", "pending-1"]);
+  assert.deepEqual(result.cancelledAppointmentIds, ["pending-2"]);
+  assert.equal(db.documents.get("appointments/pending-0").status, "pending");
+  assert.equal(db.documents.get("appointments/pending-0").approvedSlot, undefined);
+  assert.equal(db.documents.get("appointments/pending-2").minutesRefunded, true);
+  assert.equal(db.documents.get("bonos/bono-1").minutosRestantes, 360);
+  assert.equal(db.operations.some((operation) => operation.type === "write" && operation.target.startsWith("slot_occupancy/")), false);
+  const series = db.documents.get("appointment_recurrences/series-1");
+  assert.equal(series.status, "pending");
+  assert.equal(series.occurrenceCount, 2);
+  assert.equal(series.totalMinutes, 120);
+  assert.equal(activityLog(db, "recurring_pending_series_schedule_replaced").minutesDelta, -60);
+});
+
+test("admin pending series same-count replacement changes neither bono nor occupancy", async () => {
+  const documents = pendingRecurringSeriesFixture();
+  const beforeBono = clone(documents["bonos/bono-1"]);
+  const db = new FakeFirestore(documents);
+  const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+    auth: { uid: "admin-1", token: {} },
+    data: {
+      appointmentId: "pending-0",
+      startSlot: { date: "2026-09-08", time: "11:00" },
+      endDate: "2026-09-22",
+      assignedTrainer: null,
+    },
+  });
+  assert.equal(result.minutesDelta, 0);
+  assert.deepEqual(result.reusedAppointmentIds, ["pending-0", "pending-1", "pending-2"]);
+  assert.deepEqual(db.documents.get("bonos/bono-1"), beforeBono);
+  assert.equal(db.operations.some((operation) => operation.type === "write" && operation.target.startsWith("slot_occupancy/")), false);
+});
+
+test("admin pending series validates capacity and an eliminated bono before writes", async (t) => {
+  await t.test("full target", async () => {
+    const documents = pendingRecurringSeriesFixture();
+    addOccupancy(documents, "2026-09-08", "11:00", 2);
+    const db = new FakeFirestore(documents);
+    const before = snapshotDocuments(db);
+    await assert.rejects(
+      createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+        auth: { uid: "admin-1", token: {} },
+        data: {
+          appointmentId: "pending-0",
+          startSlot: { date: "2026-09-08", time: "11:00" },
+          endDate: "2026-09-22",
+          assignedTrainer: null,
+        },
+      }),
+      (error) => error.code === "failed-precondition" && error.details.reason === "slot_full",
+    );
+    assertNoWrites(db, before);
+  });
+
+  await t.test("eliminated bono", async () => {
+    const documents = pendingRecurringSeriesFixture({ bono: { estado: "eliminado" } });
+    const db = new FakeFirestore(documents);
+    const before = snapshotDocuments(db);
+    await assert.rejects(
+      createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+        auth: { uid: "admin-1", token: {} },
+        data: {
+          appointmentId: "pending-0",
+          startSlot: { date: "2026-09-08", time: "11:00" },
+          endDate: "2026-09-22",
+          assignedTrainer: null,
+        },
+      }),
+      (error) => error.code === "failed-precondition" && error.details.reason === "bono_unavailable",
+    );
+    assertNoWrites(db, before);
+  });
+});
+
+test("returning an approved series to pending releases occupancy and preserves finance and session type", async () => {
+  const documents = recurringSeriesFixture({
+    records: {
+      "past-0": { status: "cancelled" },
+      "pending-5": { status: "cancelled" },
+    },
+    series: { occurrenceCount: 3, totalMinutes: 180, startDate: "2026-09-07" },
+  });
+  const db = new FakeFirestore(documents);
+  const result = await createHandlers(db).returnRecurringSeriesToPendingFromAdmin({
+    auth: { uid: "admin-1", token: {} },
+    data: { seriesId: "series-1" },
+  });
+  assert.deepEqual(result.affectedAppointmentIds, ["future-1", "future-2", "future-3"]);
+  for (const id of result.affectedAppointmentIds) {
+    const occurrence = db.documents.get(`appointments/${id}`);
+    assert.equal(occurrence.status, "pending");
+    assert.equal(occurrence.sessionType, "Personal");
+    assert.equal(occurrence.serviceType, "Entrenamiento personal");
+    assert.equal(occurrence.assignedTrainer, undefined);
+    assert.equal(occurrence.approvedSlot, undefined);
+    assert.equal(occurrence.minutesDeducted, true);
+    assert.equal(occurrence.minutesRefunded, false);
+  }
+  assert.equal(db.documents.get("appointment_recurrences/series-1").status, "pending");
+  assert.equal(db.documents.get("appointment_recurrences/series-1").assignedTrainer, null);
+  assert.equal(db.documents.get("bonos/bono-1").minutosRestantes, 500);
+  slotKeys("2026-09-07", "10:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 0));
+  assert.equal(activityLog(db, "recurring_series_returned_to_pending").oldStatus, "approved");
+  const log = activityLog(db, "recurring_series_returned_to_pending");
+  assert.equal("email" in log, false);
+  assert.equal("phone" in log, false);
+  assert.equal("name" in log, false);
+});
+
+test("returning an approved series rejects historical occurrences and invalid occupancy atomically", async (t) => {
+  await t.test("historical occurrence", async () => {
+    const documents = recurringSeriesFixture();
+    const db = new FakeFirestore(documents);
+    const before = snapshotDocuments(db);
+    await assert.rejects(
+      createHandlers(db).returnRecurringSeriesToPendingFromAdmin({
+        auth: { uid: "admin-1", token: {} },
+        data: { seriesId: "series-1" },
+      }),
+      (error) => error.code === "failed-precondition"
+        && error.details.reason === "series_has_historical_occurrences",
+    );
+    assertNoWrites(db, before);
+  });
+
+  await t.test("invalid occupancy", async () => {
+    const documents = recurringSeriesFixture({
+      records: { "past-0": { status: "cancelled" }, "pending-5": { status: "cancelled" } },
+      series: { occurrenceCount: 3, totalMinutes: 180, startDate: "2026-09-07" },
+    });
+    documents[`slot_occupancy/${slotKeys("2026-09-07", "10:00")[0]}`].count = -1;
+    const db = new FakeFirestore(documents);
+    const before = snapshotDocuments(db);
+    await assert.rejects(
+      createHandlers(db).returnRecurringSeriesToPendingFromAdmin({
+        auth: { uid: "admin-1", token: {} },
+        data: { seriesId: "series-1" },
+      }),
+      (error) => error.code === "failed-precondition" && error.details.reason === "invalid_occupancy",
+    );
+    assertNoWrites(db, before);
+  });
 });
 
 test("admin series replacement uses a cancelled selected occurrence only to identify the series and reuses future approved records", async () => {

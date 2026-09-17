@@ -449,7 +449,9 @@ const approveSrc = seriesSource.slice(
 );
 assert.doesNotMatch(approveSrc, /estado\",\s*\"==\",\s*\"activo\"/);
 assert.doesNotMatch(approveSrc, /minutosRestantes:/);
-assert.match(approveSrc, /FieldValue\.increment\(1\)/);
+assert.doesNotMatch(approveSrc, /FieldValue\.increment\(1\)/);
+assert.match(approveSrc, /pendingOccurrenceSlot\(occurrence\.data\)/);
+assert.match(approveSrc, /count:\s*assertOccupancyCount\(occupancyByKey\.get\(key\)\) \+ 1/);
 
 const updateOwn = indexSource.slice(
   indexSource.indexOf("export const updateOwnAppointmentSlot"),

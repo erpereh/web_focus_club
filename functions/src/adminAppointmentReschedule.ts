@@ -1,4 +1,4 @@
-import type { Firestore, Transaction } from "firebase-admin/firestore";
+import { FieldValue, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import {
   calculateAppointmentDeduction,
@@ -41,6 +41,10 @@ interface AdminSeriesReplaceInput {
   startSlot: TimeSlot;
   endDate: string;
   assignedTrainer: string | null;
+}
+
+interface AdminReturnSeriesToPendingInput {
+  seriesId: string;
 }
 
 interface AppointmentData {
@@ -157,6 +161,12 @@ function parseSeriesInput(value: unknown): AdminSeriesReplaceInput | undefined {
     endDate: value.endDate,
     assignedTrainer,
   };
+}
+
+function parseReturnSeriesToPendingInput(value: unknown): AdminReturnSeriesToPendingInput | undefined {
+  if (!isRecord(value) || typeof value.seriesId !== "string") return undefined;
+  const seriesId = value.seriesId.trim();
+  return seriesId && seriesId.length <= 256 ? { seriesId } : undefined;
 }
 
 function durationMinutes(appointment: AppointmentData): 30 | 45 | 60 | undefined {
@@ -307,11 +317,18 @@ function assertSeriesFutureAvailability(input: {
   blockedKeys: Set<string>;
   userAppointments: AppointmentRecord[];
   excludedAppointmentIds: Set<string>;
+  occupancyByKey?: Map<string, unknown>;
+  maxCapacity?: number;
+  consumesCapacity?: boolean;
 }): void {
   const desiredKeys = new Set<string>();
   for (const occurrence of input.desired) {
     if (occurrence.keys.some((key) => input.blockedKeys.has(key))) {
       throwHttps("failed-precondition", "Una de las franjas de la serie esta bloqueada.", "slot_blocked");
+    }
+    if (input.consumesCapacity === false && input.occupancyByKey && input.maxCapacity !== undefined
+      && occurrence.keys.some((key) => assertOccupancyCount(input.occupancyByKey?.get(key)) >= input.maxCapacity!)) {
+      throwHttps("failed-precondition", "Una de las franjas de la serie esta llena.", "slot_full");
     }
     if (firstIntersection(occurrence.keys, desiredKeys)) {
       throwHttps("failed-precondition", "Dos sesiones de la serie se solaparian.", "appointment_conflict");
@@ -417,9 +434,6 @@ async function rescheduleAppointmentFromAdmin(
     if (appointment.status !== "pending" && appointment.status !== "approved") {
       throwHttps("failed-precondition", "La cita indicada ya no se puede modificar.", "appointment_unavailable");
     }
-    if (appointment.recurrenceSeriesId && appointment.status !== "approved") {
-      throwHttps("failed-precondition", "La cita recurrente indicada ya no se puede modificar individualmente.", "appointment_unavailable");
-    }
     const duration = durationMinutes(appointment);
     if (!duration) {
       throwHttps("failed-precondition", "La duracion de la cita no es valida.", "invalid_duration");
@@ -462,7 +476,7 @@ async function rescheduleAppointmentFromAdmin(
     const recurrenceSeriesRef = recurrenceSeriesId
       ? deps.db.collection("appointment_recurrences").doc(recurrenceSeriesId)
       : undefined;
-    const recurrenceOccurrencesQuery = recurrenceSeriesId
+    const recurrenceOccurrencesQuery = recurrenceSeriesId && slotChanged && appointment.status === "approved"
       ? deps.db.collection("appointments").where("recurrenceSeriesId", "==", recurrenceSeriesId)
       : undefined;
     const configRef = slotChanged ? deps.db.collection("site_config").doc("main") : undefined;
@@ -498,7 +512,7 @@ async function rescheduleAppointmentFromAdmin(
         throwHttps("failed-precondition", "No se ha encontrado la serie de la cita.", "series_not_found");
       }
       const recurrenceSeries = recurrenceSeriesSnap.data() as RecurrenceSeriesData;
-      if (recurrenceSeries.status !== "approved" || recurrenceSeries.userId !== appointment.userId) {
+      if (recurrenceSeries.status !== appointment.status || recurrenceSeries.userId !== appointment.userId) {
         throwHttps("failed-precondition", "La serie de la cita ya no se puede modificar.", "series_unavailable");
       }
     }
@@ -518,6 +532,10 @@ async function rescheduleAppointmentFromAdmin(
 
     if (!slotChanged && !trainerChanged) {
       return { success: true, appointmentId: selectedRef.id, changed: false };
+    }
+
+    if (slotChanged && appointment.status === "pending" && recurrenceSeriesId && !targetState.isFuture) {
+      throwHttps("failed-precondition", "Las citas pendientes solo pueden moverse a una franja futura.", "slot_not_future");
     }
 
     const occupancyByKey = new Map<string, unknown>();
@@ -562,14 +580,16 @@ async function rescheduleAppointmentFromAdmin(
 
     const now = transactionNow.toISOString();
     const patch: Record<string, unknown> = {
-      preferredSlots: [input.slot],
-      date: input.slot.date,
-      time: input.slot.time,
       updatedAt: now,
       modifiedAt: now,
       modifiedBy: adminUid,
     };
-    if (appointment.status === "approved") patch.approvedSlot = input.slot;
+    if (slotChanged) {
+      patch.preferredSlots = [input.slot];
+      patch.date = input.slot.date;
+      patch.time = input.slot.time;
+      if (appointment.status === "approved") patch.approvedSlot = input.slot;
+    }
     if (trainerChanged) patch.assignedTrainer = input.assignedTrainer;
     transaction.set(selectedRef, patch, { merge: true });
     occupancyWrites.forEach((write) => {
@@ -579,7 +599,11 @@ async function rescheduleAppointmentFromAdmin(
         { merge: true },
       );
     });
-    if (slotChanged && recurrenceSeriesId && recurrenceSeriesRef && recurrenceSeriesSnap?.exists) {
+    if (slotChanged
+      && appointment.status === "approved"
+      && recurrenceSeriesId
+      && recurrenceSeriesRef
+      && recurrenceSeriesSnap?.exists) {
       const recurrenceSeries = recurrenceSeriesSnap.data() as RecurrenceSeriesData;
       const dates = recurrenceOccurrencesSnap?.docs
         .map((snap) => {
@@ -647,9 +671,10 @@ async function replaceRecurringSeriesScheduleFromAdmin(
       throwHttps("failed-precondition", "No se ha encontrado la serie indicada.", "series_not_found");
     }
     const series = seriesSnap.data() as RecurrenceSeriesData;
-    if (series.status !== "approved") {
+    if (series.status !== "approved" && series.status !== "pending") {
       throwHttps("failed-precondition", "La serie indicada ya no se puede modificar.", "series_unavailable");
     }
+    const isPendingSeries = series.status === "pending";
     if (typeof series.userId !== "string" || !series.userId) {
       throwHttps("failed-precondition", "Los datos de la serie no son validos.", "series_owner_mismatch");
     }
@@ -742,7 +767,7 @@ async function replaceRecurringSeriesScheduleFromAdmin(
       if ((index as number) >= 0) maxExistingIndex = Math.max(maxExistingIndex, index as number);
     });
 
-    const futureApproved: Array<{
+    const managedOccurrences: Array<{
       occurrence: TransactionAppointmentRecord;
       slot: TimeSlot;
       index: number;
@@ -750,14 +775,16 @@ async function replaceRecurringSeriesScheduleFromAdmin(
     }> = [];
     const hasHistoricalOccurrence = occurrences.some((occurrence) => isHistoricalOccurrence(occurrence.data, nowDate));
     for (const occurrence of occurrences) {
-      if (occurrence.data.status !== "approved") continue;
+      if (occurrence.data.status !== (isPendingSeries ? "pending" : "approved")) continue;
       const slot = validEffectiveSlot(occurrence.data);
       if (!slot) {
-        const safeDate = safeCivilDate(occurrence.data);
-        if (safeDate && safeDate < today) continue;
-        throwHttps("failed-precondition", "Una cita aprobada de la serie no tiene una franja valida.", "invalid_occurrence_slot");
+        if (!isPendingSeries) {
+          const safeDate = safeCivilDate(occurrence.data);
+          if (safeDate && safeDate < today) continue;
+        }
+        throwHttps("failed-precondition", "Una cita activa de la serie no tiene una franja valida.", "invalid_occurrence_slot");
       }
-      if (!classifyMadridCivilSlot(slot, nowDate).isFuture) continue;
+      if (!isPendingSeries && !classifyMadridCivilSlot(slot, nowDate).isFuture) continue;
       const index = occurrence.data.recurrenceIndex;
       const duration = durationMinutes(occurrence.data);
       if (occurrence.data.recurrenceSeriesId !== seriesId || occurrence.data.userId !== series.userId) {
@@ -767,15 +794,30 @@ async function replaceRecurringSeriesScheduleFromAdmin(
         throwHttps("failed-precondition", "Una cita futura de la serie contiene datos no validos.", "invalid_occurrence_data");
       }
       assertFutureReservation(occurrence.data, series.bonoId, seriesDuration);
-      const oldKeys = occupancyKeys(slot, duration);
-      if (oldKeys.length === 0) {
+      const oldKeys = isPendingSeries ? [] : occupancyKeys(slot, duration);
+      if (!isPendingSeries && oldKeys.length === 0) {
         throwHttps("failed-precondition", "Una cita futura no tiene bloques de ocupacion validos.", "invalid_occupancy");
       }
-      futureApproved.push({ occurrence, slot, index: index as number, oldKeys });
+      managedOccurrences.push({ occurrence, slot, index: index as number, oldKeys });
     }
-    futureApproved.sort((left, right) => left.index - right.index);
-    if (futureApproved.length === 0) {
-      throwHttps("failed-precondition", "La serie no tiene citas aprobadas futuras para modificar.", "no_future_approved_occurrences");
+    managedOccurrences.sort((left, right) => left.index - right.index);
+    if (managedOccurrences.length === 0) {
+      throwHttps(
+        "failed-precondition",
+        isPendingSeries
+          ? "La serie no tiene citas pendientes activas para modificar."
+          : "La serie no tiene citas aprobadas futuras para modificar.",
+        isPendingSeries ? "no_pending_occurrences" : "no_future_approved_occurrences",
+      );
+    }
+    if (isPendingSeries
+      && (series.occurrenceCount !== managedOccurrences.length
+        || series.totalMinutes !== managedOccurrences.length * seriesDuration)) {
+      throwHttps(
+        "failed-precondition",
+        "Las reservas activas de la serie pendiente no coinciden con sus metadatos.",
+        "invalid_financial_reservation",
+      );
     }
 
     const generatedDates = generateRecurringOccurrenceDates(input.startSlot.date, series.intervalDays, input.endDate);
@@ -803,19 +845,19 @@ async function replaceRecurringSeriesScheduleFromAdmin(
       seriesDuration,
     );
 
-    const reused = futureApproved.slice(0, desired.length);
-    const cancelled = futureApproved.slice(desired.length);
-    const newCount = Math.max(0, desired.length - futureApproved.length);
-    const oldFutureReservedMinutes = futureApproved.length * seriesDuration;
+    const reused = managedOccurrences.slice(0, desired.length);
+    const cancelled = managedOccurrences.slice(desired.length);
+    const newCount = Math.max(0, desired.length - managedOccurrences.length);
+    const oldFutureReservedMinutes = managedOccurrences.length * seriesDuration;
     const newFutureMinutes = desired.length * seriesDuration;
     const minutesDelta = newFutureMinutes - oldFutureReservedMinutes;
 
     const occupancyDelta = new Map<string, number>();
-    futureApproved.forEach((occurrence) => occurrence.oldKeys.forEach((key) => {
+    managedOccurrences.forEach((occurrence) => occurrence.oldKeys.forEach((key) => {
       occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) - 1);
     }));
     desired.forEach((occurrence) => occurrence.keys.forEach((key) => {
-      occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) + 1);
+      occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) + (isPendingSeries ? 0 : 1));
     }));
     const occupancyKeysToRead = [...occupancyDelta.keys()].sort();
     const occupancyRefs = occupancyKeysToRead.map((key) => deps.db.collection("slot_occupancy").doc(key));
@@ -839,11 +881,14 @@ async function replaceRecurringSeriesScheduleFromAdmin(
         blockedKeys.add(slotOccupancyDocId(data.date, data.time));
       }
     });
-    const oldFutureIds = new Set(futureApproved.map((occurrence) => occurrence.occurrence.id));
+    const oldFutureIds = new Set(managedOccurrences.map((occurrence) => occurrence.occurrence.id));
     assertSeriesFutureAvailability({
       desired,
       blockedKeys,
       excludedAppointmentIds: oldFutureIds,
+      occupancyByKey,
+      maxCapacity: config.maxCapacity,
+      consumesCapacity: !isPendingSeries,
       userAppointments: userAppointmentsSnap.docs.map((snap) => ({
         id: snap.id,
         data: snap.data() as AppointmentData,
@@ -941,13 +986,13 @@ async function replaceRecurringSeriesScheduleFromAdmin(
     reused.forEach((occurrence, index) => {
       const patch: Record<string, unknown> = {
         preferredSlots: [desired[index].slot],
-        approvedSlot: desired[index].slot,
         date: desired[index].slot.date,
         time: desired[index].slot.time,
         updatedAt: now,
         modifiedAt: now,
         modifiedBy: adminUid,
       };
+      if (!isPendingSeries) patch.approvedSlot = desired[index].slot;
       const existingTrainer = typeof occurrence.occurrence.data.assignedTrainer === "string"
         ? occurrence.occurrence.data.assignedTrainer
         : null;
@@ -964,7 +1009,7 @@ async function replaceRecurringSeriesScheduleFromAdmin(
         ...refundPatches.get(occurrence.occurrence.id),
       }, { merge: true });
     });
-    const identityTemplate = futureApproved[0].occurrence.data;
+    const identityTemplate = managedOccurrences[0].occurrence.data;
     createdRefs.forEach((ref, index) => {
       const desiredOccurrence = desired[reused.length + index];
       transaction.create(ref, {
@@ -981,10 +1026,9 @@ async function replaceRecurringSeriesScheduleFromAdmin(
         userId: identityTemplate.userId,
         duration: String(seriesDuration),
         preferredSlots: [desiredOccurrence.slot],
-        approvedSlot: desiredOccurrence.slot,
         date: desiredOccurrence.slot.date,
         time: desiredOccurrence.slot.time,
-        status: "approved",
+        status: isPendingSeries ? "pending" : "approved",
         assignedTrainer: input.assignedTrainer,
         recurrenceSeriesId: seriesId,
         recurrenceIndex: maxExistingIndex + index + 1,
@@ -1000,6 +1044,7 @@ async function replaceRecurringSeriesScheduleFromAdmin(
         minutesRefundReason: null,
         createdAt: now,
         updatedAt: now,
+        ...(!isPendingSeries ? { approvedSlot: desiredOccurrence.slot } : {}),
       });
     });
     occupancyWrites.forEach((write) => {
@@ -1011,13 +1056,16 @@ async function replaceRecurringSeriesScheduleFromAdmin(
     });
     if (bonoPatch) transaction.set(bonoRef, bonoPatch, { merge: true });
 
-    const historicalApproved = occurrences.filter((occurrence) =>
+    const historicalApproved = isPendingSeries ? [] : occurrences.filter((occurrence) =>
       occurrence.data.status === "approved" && !oldFutureIds.has(occurrence.id));
-    const totalMinutes = historicalApproved.reduce(
-      (total, occurrence) => total + (durationMinutes(occurrence.data) ?? seriesDuration),
-      desired.length * seriesDuration,
-    );
+    const totalMinutes = isPendingSeries
+      ? desired.length * seriesDuration
+      : historicalApproved.reduce(
+        (total, occurrence) => total + (durationMinutes(occurrence.data) ?? seriesDuration),
+        desired.length * seriesDuration,
+      );
     const seriesPatch: Record<string, unknown> = {
+      status: series.status,
       occurrenceCount: historicalApproved.length + desired.length,
       totalMinutes,
       futureOccurrenceCount: desired.length,
@@ -1034,20 +1082,29 @@ async function replaceRecurringSeriesScheduleFromAdmin(
     };
     const existingSeriesTrainer = typeof series.assignedTrainer === "string" ? series.assignedTrainer : null;
     if (existingSeriesTrainer !== input.assignedTrainer) seriesPatch.assignedTrainer = input.assignedTrainer;
-    if (!hasHistoricalOccurrence) {
+    if (isPendingSeries || !hasHistoricalOccurrence) {
       seriesPatch.startDate = input.startSlot.date;
       seriesPatch.startTime = input.startSlot.time;
     }
     transaction.set(seriesRef, seriesPatch, { merge: true });
     transaction.create(deps.db.collection("activity_logs").doc(), {
-      action: "recurring_series_schedule_replaced",
+      action: isPendingSeries
+        ? "recurring_pending_series_schedule_replaced"
+        : "recurring_series_schedule_replaced",
       adminUid,
       seriesId,
       appointmentId: selectedRef.id,
+      affectedAppointmentIds: [
+        ...reused.map((occurrence) => occurrence.occurrence.id),
+        ...cancelled.map((occurrence) => occurrence.occurrence.id),
+        ...createdRefs.map((ref) => ref.id),
+      ],
+      oldStatus: series.status,
+      newStatus: series.status,
       reusedAppointmentIds: reused.map((occurrence) => occurrence.occurrence.id),
       cancelledAppointmentIds: cancelled.map((occurrence) => occurrence.occurrence.id),
       createdAppointmentIds: createdRefs.map((ref) => ref.id),
-      oldFutureCount: futureApproved.length,
+      oldFutureCount: managedOccurrences.length,
       newFutureCount: desired.length,
       oldFutureReservedMinutes,
       newFutureMinutes,
@@ -1065,9 +1122,152 @@ async function replaceRecurringSeriesScheduleFromAdmin(
       reusedAppointmentIds: reused.map((occurrence) => occurrence.occurrence.id),
       cancelledAppointmentIds: cancelled.map((occurrence) => occurrence.occurrence.id),
       createdAppointmentIds: createdRefs.map((ref) => ref.id),
-      oldFutureCount: futureApproved.length,
+      oldFutureCount: managedOccurrences.length,
       newFutureCount: desired.length,
       minutesDelta,
+    };
+  });
+}
+
+async function returnRecurringSeriesToPendingFromAdmin(
+  deps: AdminAppointmentRescheduleDeps,
+  request: CallableRequest,
+): Promise<Record<string, unknown>> {
+  const adminUid = await requireAdminForRequest(deps, request);
+  const input = parseReturnSeriesToPendingInput(request.data);
+  if (!input) {
+    throwHttps("invalid-argument", "El identificador de la serie no es valido.", "invalid_request");
+  }
+
+  const seriesRef = deps.db.collection("appointment_recurrences").doc(input.seriesId);
+  return deps.db.runTransaction(async (transaction: Transaction) => {
+    const seriesSnap = await transaction.get(seriesRef);
+    if (!seriesSnap.exists) {
+      throwHttps("failed-precondition", "No se ha encontrado la serie indicada.", "series_not_found");
+    }
+    const series = seriesSnap.data() as RecurrenceSeriesData;
+    if (series.status !== "approved") {
+      throwHttps("failed-precondition", "La serie ya no puede volver a pendiente.", "series_unavailable");
+    }
+    if (typeof series.userId !== "string" || !series.userId || typeof series.bonoId !== "string" || !series.bonoId) {
+      throwHttps("failed-precondition", "Los datos de la serie no son validos.", "series_owner_mismatch");
+    }
+
+    const occurrencesQuery = deps.db.collection("appointments").where("recurrenceSeriesId", "==", input.seriesId);
+    const configRef = deps.db.collection("site_config").doc("main");
+    const [occurrencesSnap, configSnap] = await Promise.all([
+      transaction.get(occurrencesQuery),
+      transaction.get(configRef),
+    ]);
+    const nowDate = deps.getNowDate();
+    const now = nowDate.toISOString();
+    const approved = occurrencesSnap.docs
+      .map((snap) => ({ id: snap.id, ref: snap.ref, data: snap.data() as AppointmentData }))
+      .filter((occurrence) => occurrence.data.status === "approved")
+      .sort((left, right) => Number(left.data.recurrenceIndex) - Number(right.data.recurrenceIndex));
+    const seriesDuration = durationMinutes({ duration: series.duration } as AppointmentData);
+    if (approved.length === 0) {
+      throwHttps("failed-precondition", "La serie no tiene citas aprobadas para devolver a pendiente.", "no_approved_occurrences");
+    }
+    if (!seriesDuration
+      || series.occurrenceCount !== approved.length
+      || series.totalMinutes !== approved.length * seriesDuration) {
+      throwHttps("failed-precondition", "Los datos activos de la serie no son validos.", "invalid_occurrence_data");
+    }
+
+    const occupancyDelta = new Map<string, number>();
+    const prepared = approved.map((occurrence) => {
+      const slot = validEffectiveSlot(occurrence.data);
+      const duration = durationMinutes(occurrence.data);
+      const index = occurrence.data.recurrenceIndex;
+      if (occurrence.data.userId !== series.userId
+        || occurrence.data.recurrenceSeriesId !== input.seriesId
+        || !Number.isInteger(index)
+        || (index as number) < 0
+        || !slot
+        || !duration
+        || duration !== seriesDuration) {
+        throwHttps("failed-precondition", "Una cita de la serie contiene datos no validos.", "invalid_occurrence_data");
+      }
+      if (!classifyMadridCivilSlot(slot, nowDate).isFuture) {
+        throwHttps(
+          "failed-precondition",
+          "Esta serie ya contiene sesiones pasadas y no puede volver completa a pendiente.",
+          "series_has_historical_occurrences",
+        );
+      }
+      assertFutureReservation(occurrence.data, series.bonoId, duration);
+      const keys = occupancyKeys(slot, duration);
+      if (keys.length === 0) {
+        throwHttps("failed-precondition", "Una cita de la serie no tiene ocupacion valida.", "invalid_occupancy");
+      }
+      keys.forEach((key) => occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) - 1));
+      return { ...occurrence, slot, keys };
+    });
+
+    const occupancyKeysToRead = [...occupancyDelta.keys()].sort();
+    const occupancyRefs = occupancyKeysToRead.map((key) => deps.db.collection("slot_occupancy").doc(key));
+    const occupancySnaps = await Promise.all(occupancyRefs.map((ref) => transaction.get(ref)));
+    const occupancyByKey = new Map<string, unknown>();
+    occupancySnaps.forEach((snap, index) => {
+      occupancyByKey.set(occupancyKeysToRead[index], snap.exists ? (snap.data() as SlotOccupancyData).count : 0);
+    });
+    const config = normalizeSiteConfig(configSnap.exists ? configSnap.data() as Partial<SiteConfig> : undefined);
+    const occupancyWrites = buildAbsoluteOccupancyWrites({
+      keys: occupancyKeysToRead,
+      deltaByKey: occupancyDelta,
+      currentByKey: occupancyByKey,
+      config,
+      now: nowDate,
+    });
+
+    const deleted = FieldValue.delete();
+    prepared.forEach((occurrence) => {
+      transaction.set(occurrence.ref, {
+        status: "pending",
+        preferredSlots: [occurrence.slot],
+        date: occurrence.slot.date,
+        time: occurrence.slot.time,
+        approvedSlot: deleted,
+        assignedTrainer: deleted,
+        trainerNotes: deleted,
+        approvedAt: deleted,
+        approvedBy: deleted,
+        approvedByAdmin: deleted,
+        approvedByAdminUid: deleted,
+        approvalNotes: deleted,
+        updatedAt: now,
+        modifiedAt: now,
+        modifiedBy: adminUid,
+      }, { merge: true });
+    });
+    occupancyWrites.forEach((write) => {
+      transaction.set(
+        deps.db.collection("slot_occupancy").doc(write.key),
+        { date: write.date, time: write.time, count: write.count },
+        { merge: true },
+      );
+    });
+    transaction.set(seriesRef, {
+      status: "pending",
+      assignedTrainer: null,
+      approvedAt: deleted,
+      approvedByAdminUid: deleted,
+      updatedAt: now,
+    }, { merge: true });
+    transaction.create(deps.db.collection("activity_logs").doc(), {
+      action: "recurring_series_returned_to_pending",
+      adminUid,
+      seriesId: input.seriesId,
+      affectedAppointmentIds: prepared.map((occurrence) => occurrence.id),
+      oldStatus: "approved",
+      newStatus: "pending",
+      createdAt: now,
+    });
+    return {
+      success: true,
+      seriesId: input.seriesId,
+      affectedAppointmentIds: prepared.map((occurrence) => occurrence.id),
     };
   });
 }
@@ -1077,5 +1277,7 @@ export function createAdminAppointmentRescheduleHandlers(deps: AdminAppointmentR
     rescheduleAppointmentFromAdmin: (request: CallableRequest) => rescheduleAppointmentFromAdmin(deps, request),
     replaceRecurringSeriesScheduleFromAdmin: (request: CallableRequest) =>
       replaceRecurringSeriesScheduleFromAdmin(deps, request),
+    returnRecurringSeriesToPendingFromAdmin: (request: CallableRequest) =>
+      returnRecurringSeriesToPendingFromAdmin(deps, request),
   };
 }

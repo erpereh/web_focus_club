@@ -73,6 +73,7 @@ import { IconPicker } from '@/components/admin/IconPicker';
 import { AppointmentsCalendar } from '@/components/admin/appointments/AppointmentsCalendar';
 import { TrainerStatsModal } from '@/components/admin/TrainerStatsModal';
 import { AppointmentRescheduleModal } from '@/components/admin/AppointmentRescheduleModal';
+import { getRecurringRescheduleErrorMessage } from '@/lib/recurring-reschedule';
 import {
   filterAppointments,
   getTrainerIdFromFilter,
@@ -159,6 +160,7 @@ import {
   doesSessionFitWithinSchedule,
   rescheduleAppointmentFromAdmin as rescheduleAppointmentFromAdminFS,
   replaceRecurringSeriesScheduleFromAdmin as replaceRecurringSeriesScheduleFromAdminFS,
+  returnRecurringSeriesToPendingFromAdmin as returnRecurringSeriesToPendingFromAdminFS,
   getAllActiveBonos,
   getActiveBonoByUser,
   getBonosByUser,
@@ -1077,6 +1079,9 @@ export default function AdminPage() {
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
   const [seriesApprovalTrainer, setSeriesApprovalTrainer] = useState('');
   const [seriesActionBusy, setSeriesActionBusy] = useState(false);
+  const [showSeriesReturnPendingModal, setShowSeriesReturnPendingModal] = useState(false);
+  const [seriesReturnPendingId, setSeriesReturnPendingId] = useState<string | null>(null);
+  const [seriesReturnPendingError, setSeriesReturnPendingError] = useState('');
 
   // Estado para horarios bloqueados
   const [blockedSlots, setBlockedSlots] = useState<BlockedSlot[]>([]);
@@ -1941,18 +1946,11 @@ export default function AdminPage() {
 
   const handleApproveRecurringSeries = async () => {
     if (!selectedSeriesId) return;
-    const seriesAppointment = appointments.find((item) => item.recurrenceSeriesId === selectedSeriesId);
     setSeriesActionBusy(true);
     try {
       await approveRecurringAppointmentSeriesFromAdminFS({
         seriesId: selectedSeriesId,
         assignedTrainer: seriesApprovalTrainer || undefined,
-        sessionType: seriesAppointment?.serviceType,
-      });
-      await addActivityLog({
-        action: 'recurring_appointments_approved',
-        adminEmail: user?.email || 'unknown',
-        details: `Serie ID: ${selectedSeriesId}`,
       });
       await refreshData();
       setShowSeriesApprovalModal(false);
@@ -1970,14 +1968,28 @@ export default function AdminPage() {
     setSeriesActionBusy(true);
     try {
       await rejectRecurringAppointmentSeriesFromAdminFS(seriesId);
-      await addActivityLog({
-        action: 'recurring_appointments_rejected',
-        adminEmail: user?.email || 'unknown',
-        details: `Serie ID: ${seriesId}`,
-      });
       await refreshData();
     } catch (error) {
       alert(error instanceof Error ? error.message : 'No se pudo rechazar la serie.');
+    } finally {
+      setSeriesActionBusy(false);
+    }
+  };
+
+  const handleReturnRecurringSeriesToPending = async () => {
+    if (!seriesReturnPendingId || seriesActionBusy) return;
+    setSeriesActionBusy(true);
+    setSeriesReturnPendingError('');
+    try {
+      await returnRecurringSeriesToPendingFromAdminFS(seriesReturnPendingId);
+      await refreshData();
+      setShowSeriesReturnPendingModal(false);
+      setSeriesReturnPendingId(null);
+    } catch (error) {
+      setSeriesReturnPendingError(getRecurringRescheduleErrorMessage(
+        error,
+        'No se pudo volver la serie a pendiente.',
+      ));
     } finally {
       setSeriesActionBusy(false);
     }
@@ -3516,6 +3528,19 @@ export default function AdminPage() {
                                       Aprobar serie
                                     </PremiumButton>
                                     <PremiumButton
+                                      variant="outline"
+                                      size="sm"
+                                      icon={<CalendarClock className="w-4 h-4" />}
+                                      disabled={seriesActionBusy}
+                                      onClick={() => {
+                                        setSelectedAppointmentId(appointment.id);
+                                        setShowEditSlotModal(true);
+                                      }}
+                                      className="flex-1 lg:flex-none"
+                                    >
+                                      Modificar
+                                    </PremiumButton>
+                                    <PremiumButton
                                       variant="ghost"
                                       size="sm"
                                       icon={<XCircle className="w-4 h-4" />}
@@ -3578,6 +3603,20 @@ export default function AdminPage() {
                                       className="w-full"
                                     >
                                       Modificar
+                                    </PremiumButton>
+                                    <PremiumButton
+                                      variant="outline"
+                                      size="sm"
+                                      icon={<RefreshCw className="w-4 h-4" />}
+                                      disabled={seriesActionBusy}
+                                      onClick={() => {
+                                        setSeriesReturnPendingId(appointment.recurrenceSeriesId!);
+                                        setSeriesReturnPendingError('');
+                                        setShowSeriesReturnPendingModal(true);
+                                      }}
+                                      className="w-full"
+                                    >
+                                      Poner serie pendiente
                                     </PremiumButton>
                                     <PremiumButton
                                       variant="ghost"
@@ -8120,6 +8159,70 @@ export default function AdminPage() {
                             })}
                           </div>
                         )}
+                      </div>
+                    </GlassCard>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ============================================
+                RETURN RECURRING SERIES TO PENDING
+                ============================================ */}
+            <AnimatePresence>
+              {showSeriesReturnPendingModal && seriesReturnPendingId && (
+                <motion.div
+                  key="series-return-pending-modal"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+                  onClick={() => {
+                    if (!seriesActionBusy) setShowSeriesReturnPendingModal(false);
+                  }}
+                >
+                  <motion.div
+                    initial={{ scale: 0.96, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.97, opacity: 0 }}
+                    onClick={(event) => event.stopPropagation()}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="series-return-pending-title"
+                    className="w-full max-w-lg"
+                  >
+                    <GlassCard className="p-6">
+                      <h2 id="series-return-pending-title" className="text-xl font-bold text-[var(--color-text-primary)]">
+                        Volver serie a pendiente
+                      </h2>
+                      <p className="mt-3 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                        ¿Quieres volver esta serie a pendiente? Se liberarán las plazas reservadas, pero los minutos seguirán reservados.
+                      </p>
+                      {seriesReturnPendingError && (
+                        <p role="alert" className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+                          {seriesReturnPendingError}
+                        </p>
+                      )}
+                      <div className="mt-6 flex justify-end gap-3">
+                        <PremiumButton
+                          variant="ghost"
+                          disabled={seriesActionBusy}
+                          onClick={() => {
+                            setShowSeriesReturnPendingModal(false);
+                            setSeriesReturnPendingId(null);
+                            setSeriesReturnPendingError('');
+                          }}
+                        >
+                          Cancelar
+                        </PremiumButton>
+                        <PremiumButton
+                          variant="cta"
+                          icon={<RefreshCw className="h-4 w-4" />}
+                          disabled={seriesActionBusy}
+                          onClick={handleReturnRecurringSeriesToPending}
+                        >
+                          {seriesActionBusy ? 'Guardando...' : 'Poner serie pendiente'}
+                        </PremiumButton>
                       </div>
                     </GlassCard>
                   </motion.div>

@@ -1,6 +1,13 @@
 import { FieldValue, Firestore, Transaction } from "firebase-admin/firestore";
 import { CallableRequest, HttpsError } from "firebase-functions/v2/https";
-import { slotOccupancyDocId, SAME_DAY_CHANGE_MESSAGE, SAME_DAY_CHANGE_NOT_ALLOWED, seriesHasSameDayOccurrence } from "./appointmentLifecycle.js";
+import {
+  classifyMadridCivilSlot,
+  getSlotBlocks,
+  slotOccupancyDocId,
+  SAME_DAY_CHANGE_MESSAGE,
+  SAME_DAY_CHANGE_NOT_ALLOWED,
+  seriesHasSameDayOccurrence,
+} from "./appointmentLifecycle.js";
 import {
   collectRecurringOccupancyKeys,
   MAX_RECURRING_OCCURRENCES,
@@ -12,7 +19,12 @@ import {
   validateReservedSeriesMinutes,
   buildPendingSeriesOccurrencePatch,
 } from "./recurringAppointments.js";
-import { normalizeSiteConfig, type SiteConfig } from "./siteConfig.js";
+import {
+  doesSessionFitWithinSchedule,
+  generateTimeSlots,
+  normalizeSiteConfig,
+  type SiteConfig,
+} from "./siteConfig.js";
 
 type HttpsCode = "invalid-argument" | "failed-precondition" | "permission-denied";
 
@@ -134,6 +146,34 @@ function optionalText(data: Record<string, unknown>, field: string, maxLength: n
     throwHttps("invalid-argument", `El campo ${field} es demasiado largo.`);
   }
   return text;
+}
+
+function isTimeSlot(value: unknown): value is TimeSlot {
+  return isRecord(value)
+    && typeof value.date === "string"
+    && /^\d{4}-\d{2}-\d{2}$/.test(value.date)
+    && typeof value.time === "string"
+    && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value.time);
+}
+
+function pendingOccurrenceSlot(appointment: SeriesAppointment): TimeSlot | undefined {
+  const preferred = appointment.preferredSlots?.[0];
+  if (isTimeSlot(preferred)) return preferred;
+  const legacy = { date: appointment.date, time: appointment.time };
+  return isTimeSlot(legacy) ? legacy : undefined;
+}
+
+function validDuration(value: unknown): value is 30 | 45 | 60 {
+  return value === 30 || value === 45 || value === 60;
+}
+
+function assertOccupancyCount(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throwHttps("failed-precondition", "La ocupacion registrada para una franja no es valida.", {
+      reason: "invalid_occupancy",
+    });
+  }
+  return value;
 }
 
 export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
@@ -574,7 +614,6 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
       if (!request.auth) throwHttps("permission-denied", "Debes iniciar sesion como admin.");
       await requireAdmin(request.auth.uid);
       const adminUid = request.auth.uid;
-      const adminEmail = request.auth.token.email ?? "";
       const seriesId = seriesIdFrom(request.data);
       const assignedTrainer = isRecord(request.data) ? optionalText(request.data, "assignedTrainer", 128) : "";
       const sessionType = isRecord(request.data) ? optionalText(request.data, "sessionType", 180) : "";
@@ -592,17 +631,52 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         if (!series.bonoId) {
           throwHttps("failed-precondition", "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.");
         }
-
-        const occurrenceDates = generateRecurringOccurrenceDates(series.startDate, series.intervalDays, series.endDate);
-        if (occurrenceDates.length > MAX_RECURRING_OCCURRENCES) {
-          throwHttps("failed-precondition", `La serie no puede superar ${MAX_RECURRING_OCCURRENCES} sesiones.`);
-        }
-        const occupancyKeys = collectRecurringOccupancyKeys(occurrenceDates, series.startTime, Number(series.duration));
-        const occupancyRefs = occupancyKeys.map((key) => db.collection("slot_occupancy").doc(key));
         const appointmentsQuery = db.collection("appointments").where("recurrenceSeriesId", "==", seriesId);
+        const appointmentsSnap = await transaction.get(appointmentsQuery);
+        const allOccurrences = appointmentsSnap.docs
+          .map((docSnap) => ({ id: docSnap.id, ref: docSnap.ref, data: docSnap.data() as SeriesAppointment }));
+        const occurrences = allOccurrences
+          .filter((occurrence) => occurrence.data.status === "pending")
+          .sort((left, right) => Number(left.data.recurrenceIndex) - Number(right.data.recurrenceIndex));
+        const durationMinutes = Number(series.duration);
+        if (!validDuration(durationMinutes)
+          || occurrences.length < 1
+          || occurrences.length > MAX_RECURRING_OCCURRENCES
+          || occurrences.length !== series.occurrenceCount
+          || series.totalMinutes !== occurrences.length * durationMinutes) {
+          throwHttps("failed-precondition", "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.");
+        }
+        const seenIndexes = new Set<number>();
+        const nowDate = getNowDate();
+        const prepared = occurrences.map((occurrence) => {
+          const index = occurrence.data.recurrenceIndex;
+          const occurrenceDuration = Number(occurrence.data.duration);
+          const slot = pendingOccurrenceSlot(occurrence.data);
+          if (!Number.isInteger(index)
+            || (index as number) < 0
+            || seenIndexes.has(index as number)
+            || occurrence.data.userId !== series.userId
+            || occurrence.data.recurrenceSeriesId !== seriesId
+            || occurrenceDuration !== durationMinutes
+            || !slot
+            || !classifyMadridCivilSlot(slot, nowDate).isFuture) {
+            throwHttps("failed-precondition", "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.");
+          }
+          seenIndexes.add(index as number);
+          const keys = getSlotBlocks(slot.time, durationMinutes).map((time) => slotOccupancyDocId(slot.date, time));
+          if (keys.length === 0) {
+            throwHttps("failed-precondition", "La ocupacion de una cita de la serie no es valida.", {
+              reason: "invalid_occupancy",
+            });
+          }
+          return { ...occurrence, slot, keys };
+        });
+        const dates = prepared.map((occurrence) => occurrence.slot.date).sort();
+        const occupancyKeys = [...new Set(prepared.flatMap((occurrence) => occurrence.keys))].sort();
+        const occupancyRefs = occupancyKeys.map((key) => db.collection("slot_occupancy").doc(key));
         const blockedSlotsQuery = db.collection("blocked_slots")
-          .where("date", ">=", series.startDate)
-          .where("date", "<=", series.endDate);
+          .where("date", ">=", dates[0])
+          .where("date", "<=", dates.at(-1));
         const userAppointmentsQuery = db.collection("appointments")
           .where("userId", "==", series.userId)
           .where("status", "in", ["pending", "approved"]);
@@ -610,14 +684,12 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         const bonoRef = db.collection("bonos").doc(series.bonoId);
 
         const [
-          appointmentsSnap,
           blockedSlotsSnap,
           userAppointmentsSnap,
           siteConfigSnap,
           occupancySnaps,
           bonoSnap,
         ] = await Promise.all([
-          transaction.get(appointmentsQuery),
           transaction.get(blockedSlotsQuery),
           transaction.get(userAppointmentsQuery),
           transaction.get(siteConfigRef),
@@ -629,20 +701,6 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         } else {
           await loadServiceAndTrainer(transaction, series.serviceType, "", false);
         }
-
-        const occurrences = appointmentsSnap.docs
-          .map((docSnap) => ({ id: docSnap.id, ref: docSnap.ref, data: docSnap.data() as SeriesAppointment }))
-          .sort((a, b) => (a.data.recurrenceIndex ?? 0) - (b.data.recurrenceIndex ?? 0));
-        if (occurrences.length !== series.occurrenceCount || occurrences.length !== occurrenceDates.length) {
-          throwHttps("failed-precondition", "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.");
-        }
-        occurrences.forEach((occurrence, index) => {
-          if (occurrence.data.status !== "pending"
-            || occurrence.data.recurrenceIndex !== index
-            || occurrence.data.userId !== series.userId) {
-            throwHttps("failed-precondition", "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.");
-          }
-        });
 
         const reserved = validateReservedSeriesMinutes({
           seriesBonoId: series.bonoId,
@@ -659,6 +717,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         const config = siteConfigSnap.exists
           ? normalizeSiteConfig(siteConfigSnap.data() as Partial<SiteConfig>)
           : normalizeSiteConfig();
+        const validStartTimes = new Set(generateTimeSlots(config));
         const blockedKeys = new Set<string>();
         blockedSlotsSnap.docs.forEach((docSnap) => {
           const blocked = docSnap.data() as TimeSlot;
@@ -669,7 +728,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         const occupancyByKey = new Map<string, number>();
         occupancySnaps.forEach((snap, index) => {
           const occupancy = snap.exists ? snap.data() as SlotOccupancy : undefined;
-          occupancyByKey.set(occupancyKeys[index], occupancy?.count ?? 0);
+          occupancyByKey.set(occupancyKeys[index], assertOccupancyCount(occupancy?.count ?? 0));
         });
         const userSlotKeys = new Set<string>();
         userAppointmentsSnap.docs.forEach((docSnap) => {
@@ -677,31 +736,32 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           if (appointment.recurrenceSeriesId === seriesId) return;
           appointmentSlotKeys(appointment).forEach((key) => userSlotKeys.add(key));
         });
-
-        const plan = planRecurringAppointments({
-          startDate: series.startDate,
-          startTime: series.startTime,
-          endDate: series.endDate,
-          intervalDays: series.intervalDays,
-          durationMinutes: Number(series.duration),
-          now: getNowDate(),
-          siteConfig: config,
-          occupancyByKey,
-          blockedKeys,
-          userSlotKeys,
-          activeBonos: [],
-          requireBono: false,
+        const internalKeys = new Set<string>();
+        prepared.forEach((occurrence) => {
+          if (!validStartTimes.has(occurrence.slot.time)
+            || !doesSessionFitWithinSchedule(config, occurrence.slot.time, durationMinutes)) {
+            throwHttps("failed-precondition", "Una cita de la serie queda fuera del horario disponible.");
+          }
+          occurrence.keys.forEach((key) => {
+            if (blockedKeys.has(key)) throwHttps("failed-precondition", "Una franja de la serie esta bloqueada.");
+            if (userSlotKeys.has(key) || internalKeys.has(key)) {
+              throwHttps("failed-precondition", "Una franja de la serie entra en conflicto con otra cita.");
+            }
+            const current = assertOccupancyCount(occupancyByKey.get(key));
+            if (current + 1 > config.maxCapacity) {
+              throwHttps("failed-precondition", "Una franja de la serie esta completa.");
+            }
+            internalKeys.add(key);
+          });
         });
-        if (!plan.ok) throwHttps("failed-precondition", plan.message);
 
-        const now = new Date().toISOString();
-        occurrences.forEach((occurrence, index) => {
-          const slot = { date: occurrenceDates[index], time: series.startTime };
+        const now = nowDate.toISOString();
+        prepared.forEach((occurrence) => {
           const patch: Record<string, unknown> = {
             status: "approved",
-            date: slot.date,
-            time: slot.time,
-            approvedSlot: slot,
+            date: occurrence.slot.date,
+            time: occurrence.slot.time,
+            approvedSlot: occurrence.slot,
             updatedAt: now,
             approvedAt: now,
             approvedByAdmin: adminUid,
@@ -711,17 +771,33 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           transaction.set(occurrence.ref, patch, { merge: true });
         });
 
-        plan.writes.occupancyWrites.forEach((write) => {
+        occupancyKeys.forEach((key) => {
+          const separator = key.indexOf("_");
           transaction.set(
-            db.collection("slot_occupancy").doc(slotOccupancyDocId(write.date, write.time)),
-            { date: write.date, time: write.time, count: FieldValue.increment(1) },
+            db.collection("slot_occupancy").doc(key),
+            {
+              date: key.slice(0, separator),
+              time: key.slice(separator + 1),
+              count: assertOccupancyCount(occupancyByKey.get(key)) + 1,
+            },
             { merge: true },
           );
         });
 
+        const chronological = [...prepared].sort((left, right) =>
+          `${left.slot.date}_${left.slot.time}`.localeCompare(`${right.slot.date}_${right.slot.time}`));
+        const firstOccurrence = chronological[0];
+        const lastOccurrence = chronological.at(-1)!;
         transaction.set(seriesRef, {
           status: "approved",
           assignedTrainer: assignedTrainer || series.assignedTrainer || null,
+          startDate: firstOccurrence.slot.date,
+          startTime: firstOccurrence.slot.time,
+          endDate: lastOccurrence.slot.date,
+          futureOccurrenceCount: prepared.length,
+          futureStartDate: firstOccurrence.slot.date,
+          futureStartTime: firstOccurrence.slot.time,
+          futureEndDate: lastOccurrence.slot.date,
           approvedByAdminUid: adminUid,
           approvedAt: now,
           updatedAt: now,
@@ -730,17 +806,15 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         transaction.create(db.collection("activity_logs").doc(), {
           action: "recurring_appointments_approved",
           adminUid,
-          adminEmail,
           seriesId,
-          targetUid: series.userId,
+          affectedAppointmentIds: prepared.map((occurrence) => occurrence.id),
           occurrenceCount: series.occurrenceCount,
           totalMinutes: series.totalMinutes,
-          bonoId: series.bonoId,
           createdAt: now,
           timestamp: now,
         });
 
-        return { seriesId, appointmentIds: occurrences.map((occurrence) => occurrence.id) };
+        return { seriesId, appointmentIds: prepared.map((occurrence) => occurrence.id) };
       });
 
       return { success: true, ...result };
@@ -807,12 +881,13 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         transaction.get(appointmentsQuery),
         transaction.get(bonoRef),
       ]);
-      const occurrences = appointmentsSnap.docs.map((docSnap) => ({
+      const allOccurrences = appointmentsSnap.docs.map((docSnap) => ({
         id: docSnap.id,
         ref: docSnap.ref,
         data: docSnap.data() as SeriesAppointment,
       }));
-      if (occurrences.length !== series.occurrenceCount || occurrences.some((occurrence) => occurrence.data.status !== "pending")) {
+      const occurrences = allOccurrences.filter((occurrence) => occurrence.data.status === "pending");
+      if (occurrences.length !== series.occurrenceCount) {
         throwHttps("failed-precondition", "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.");
       }
       if (input.requireOwner && seriesHasSameDayOccurrence(occurrences.map((occurrence) => occurrence.data), getNowDate())) {
@@ -882,8 +957,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         action: input.activityAction,
         adminUid: input.requireOwner ? null : input.actorUid,
         seriesId: input.seriesId,
-        targetUid: series.userId,
-        bonoId: series.bonoId,
+        affectedAppointmentIds: occurrences.map((occurrence) => occurrence.id),
         createdAt: now,
         timestamp: now,
       });

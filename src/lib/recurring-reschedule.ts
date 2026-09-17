@@ -45,6 +45,14 @@ export function getRecurringRescheduleExcludedAppointmentIds(
     if (scope === 'single') return new Set([selected.id]);
     if (!selected.recurrenceSeriesId) return new Set([selected.id]);
 
+    if (selected.status === 'pending') {
+        return new Set(appointments
+            .filter((appointment) => appointment.recurrenceSeriesId === selected.recurrenceSeriesId
+                && appointment.status === 'pending')
+            .sort((left, right) => (left.recurrenceIndex ?? 0) - (right.recurrenceIndex ?? 0))
+            .map((appointment) => appointment.id));
+    }
+
     return new Set(appointments
         .filter((appointment) => {
             if (appointment.recurrenceSeriesId !== selected.recurrenceSeriesId
@@ -194,6 +202,9 @@ export function getRecurringRescheduleErrorMessage(error: unknown, fallback: str
         series_owner_mismatch: 'Los datos de la serie no coinciden con sus sesiones.',
         user_not_found: 'No se ha encontrado el cliente de la serie.',
         no_future_approved_occurrences: 'La serie no tiene sesiones futuras aprobadas para modificar.',
+        no_pending_occurrences: 'La serie no tiene sesiones pendientes para modificar.',
+        no_approved_occurrences: 'La serie no tiene sesiones aprobadas para volver a pendiente.',
+        series_has_historical_occurrences: 'Esta serie ya contiene sesiones pasadas y no puede volver completa a pendiente. Puedes modificar las sesiones futuras o corregir una cita individualmente.',
         trainer_not_found: 'No se ha encontrado el entrenador indicado.',
         trainer_inactive: 'El entrenador seleccionado no está activo.',
         invalid_duration: 'La duración de la cita no es válida.',

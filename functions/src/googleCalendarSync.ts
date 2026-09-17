@@ -138,6 +138,18 @@ export function normalizeAppointmentStatus(value: unknown): CalendarAppointmentS
   return undefined;
 }
 
+export function shouldDeleteRecurringPendingCalendarEvent(input: {
+  beforeStatus: unknown;
+  afterStatus: unknown;
+  recurrenceSeriesId: unknown;
+  eventId: unknown;
+}): boolean {
+  return normalizeAppointmentStatus(input.beforeStatus) === "approved"
+    && normalizeAppointmentStatus(input.afterStatus) === "pending"
+    && asString(input.recurrenceSeriesId).length > 0
+    && asString(input.eventId).length > 0;
+}
+
 export function normalizeDurationMinutes(value: unknown): number {
   const duration = typeof value === "number" ? value : Number.parseInt(asString(value), 10);
   return VALID_DURATION_MINUTES.has(duration) ? duration : FALLBACK_DURATION_MINUTES;

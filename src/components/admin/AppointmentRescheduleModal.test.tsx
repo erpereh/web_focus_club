@@ -189,6 +189,61 @@ describe('AppointmentRescheduleModal', () => {
     expect(screen.queryByTestId('calendar')).not.toBeInTheDocument();
   });
 
+  it('offers single and series for a pending recurrence and counts only active pending occurrences', async () => {
+    recurrenceControl.recurrence = { ...recurrenceControl.recurrence, status: 'pending' };
+    const selected = { ...appointment('a1', '2026-09-14', 'pending'), assignedTrainer: 'trainer-1' };
+    render(
+      <AppointmentRescheduleModal
+        appointment={selected}
+        appointments={[
+          selected,
+          appointment('a2', '2026-09-21', 'pending'),
+          appointment('a3', '2026-09-28'),
+          appointment('a4', '2026-10-05', 'cancelled'),
+        ]}
+        trainers={[trainer('trainer-1', 'Entrenador Uno')]}
+        onClose={vi.fn()}
+        onSave={vi.fn(async () => undefined)}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /Toda la serie/i })).toHaveTextContent('2 sesiones pendientes');
+    fireEvent.click(screen.getByRole('button', { name: /Solo esta cita/i }));
+    expect(screen.getByTestId('calendar')).toHaveAttribute('data-allow-past-dates', 'false');
+    expect(screen.queryByRole('button', { name: /Selecciona la última sesión/i })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Toda la serie/i }));
+    await waitFor(() => expect(screen.getByTestId('calendar')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Elegir fecha' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Elegir hora' }));
+    expect(screen.getByRole('button', { name: /Selecciona la última sesión/i })).toBeInTheDocument();
+  });
+
+  it('allows a recurring pending trainer-only change while availability is in error', async () => {
+    calendarControl.status = 'error';
+    const selected = { ...appointment('a1', '2026-09-14', 'pending'), assignedTrainer: 'trainer-1' };
+    const onSave = vi.fn(async () => undefined);
+    render(
+      <AppointmentRescheduleModal
+        appointment={selected}
+        appointments={[selected]}
+        trainers={[trainer('trainer-1', 'Entrenador Uno'), trainer('trainer-2', 'Entrenador Dos')]}
+        onClose={vi.fn()}
+        onSave={onSave}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Solo esta cita/i }));
+    chooseTrainer('Entrenador Dos');
+    expect(screen.getByRole('button', { name: /Guardar cambio/i })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /Guardar cambio/i }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith({
+      slot: { date: '2026-09-14', time: '10:00' },
+      scope: 'single',
+      assignedTrainer: 'trainer-2',
+    }));
+  });
+
   it.each([
     ['single', 'series'],
     ['series', 'single'],

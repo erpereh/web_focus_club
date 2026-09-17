@@ -8,7 +8,27 @@ const {
   normalizeAppointmentStatus,
   normalizeDurationMinutes,
   resolveAppointmentSlot,
+  shouldDeleteRecurringPendingCalendarEvent,
 } = require("../lib/googleCalendarSync.js");
+
+assert.equal(shouldDeleteRecurringPendingCalendarEvent({
+  beforeStatus: "approved",
+  afterStatus: "pending",
+  recurrenceSeriesId: "series-1",
+  eventId: "event-1",
+}), true);
+assert.equal(shouldDeleteRecurringPendingCalendarEvent({
+  beforeStatus: undefined,
+  afterStatus: "pending",
+  recurrenceSeriesId: "series-1",
+  eventId: undefined,
+}), false);
+assert.equal(shouldDeleteRecurringPendingCalendarEvent({
+  beforeStatus: "pending",
+  afterStatus: "approved",
+  recurrenceSeriesId: "series-1",
+  eventId: "event-1",
+}), false);
 
 assert.equal(normalizeAppointmentStatus("pending"), "pending");
 assert.equal(normalizeAppointmentStatus("pendiente"), "pending");

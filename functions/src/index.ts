@@ -13,6 +13,7 @@ import {
   buildCalendarSyncHash,
   normalizeAppointmentStatus,
   onlyGoogleCalendarSyncFieldsChanged,
+  shouldDeleteRecurringPendingCalendarEvent,
 } from "./googleCalendarSync";
 import {
   clientOwnAppointmentMutationBlockedReason,
@@ -1720,6 +1721,11 @@ export const replaceRecurringSeriesScheduleFromAdmin = onCall(
   adminAppointmentReschedule.replaceRecurringSeriesScheduleFromAdmin,
 );
 
+export const returnRecurringSeriesToPendingFromAdmin = onCall(
+  { region: REGION },
+  adminAppointmentReschedule.returnRecurringSeriesToPendingFromAdmin,
+);
+
 export const sendContactMessage = onCall<ContactMessageRequest>(
   {
     region: REGION,
@@ -1810,6 +1816,23 @@ export const syncAppointmentWithGoogleCalendar = onDocumentWritten(
         throw new Error("Estado de cita no compatible con Google Calendar.");
       }
       if (status === "pending" && after.recurrenceSeriesId) {
+        if (shouldDeleteRecurringPendingCalendarEvent({
+          beforeStatus: before?.status,
+          afterStatus: after.status,
+          recurrenceSeriesId: after.recurrenceSeriesId,
+          eventId: previousEventId,
+        })) {
+          const calendar = getGoogleCalendarService();
+          const calendarId = getGoogleCalendarId();
+          await deleteGoogleCalendarEventIfExists(calendar, calendarId, previousEventId);
+          await appointmentRef.set({
+            googleCalendarEventId: FieldValue.delete(),
+            googleCalendarSyncedAt: new Date().toISOString(),
+            googleCalendarSyncStatus: "deleted",
+            googleCalendarSyncError: FieldValue.delete(),
+            googleCalendarSyncHash: FieldValue.delete(),
+          }, { merge: true });
+        }
         return;
       }
 

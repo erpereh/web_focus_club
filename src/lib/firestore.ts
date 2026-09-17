@@ -801,6 +801,24 @@ export async function replaceRecurringSeriesScheduleFromAdmin(
     return result.data;
 }
 
+export interface AdminReturnRecurringSeriesToPendingResult {
+    success: true;
+    seriesId: string;
+    affectedAppointmentIds: string[];
+}
+
+/** Atomically releases an approved recurring series and returns it to pending. */
+export async function returnRecurringSeriesToPendingFromAdmin(
+    seriesId: string,
+): Promise<AdminReturnRecurringSeriesToPendingResult> {
+    const callable = httpsCallable<
+        { seriesId: string },
+        AdminReturnRecurringSeriesToPendingResult
+    >(firebaseFunctions, 'returnRecurringSeriesToPendingFromAdmin');
+    const result = await callable({ seriesId });
+    return result.data;
+}
+
 export interface RecurringRescheduleInput {
     appointmentId: string;
     preferredSlot: TimeSlot;

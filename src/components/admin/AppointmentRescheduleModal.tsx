@@ -141,12 +141,12 @@ function trainerSelectionValue(selection: TrainerSelection): string {
   return selection.trainerId;
 }
 
-function hasValidFutureReservation(
+function hasValidSeriesReservation(
   appointment: Appointment,
   duration: 30 | 45 | 60,
   seriesBonoId?: string,
 ): boolean {
-  return appointment.status === 'approved'
+  return (appointment.status === 'approved' || appointment.status === 'pending')
     && (!seriesBonoId || appointment.bonoId === seriesBonoId)
     && appointment.minutesDeducted === true
     && appointment.minutesDeductedAmount === duration
@@ -163,7 +163,10 @@ export function AppointmentRescheduleModal({
   onClose,
   onSave,
 }: AppointmentRescheduleModalProps) {
-  const isRecurringApproved = appointment.status === 'approved' && Boolean(appointment.recurrenceSeriesId);
+  const isRecurring = Boolean(appointment.recurrenceSeriesId)
+    && (appointment.status === 'approved' || appointment.status === 'pending');
+  const isRecurringApproved = isRecurring && appointment.status === 'approved';
+  const isRecurringPending = isRecurring && appointment.status === 'pending';
   const currentSlot = getAppointmentEffectiveSlot(appointment);
   const parsedDuration = Number(appointment.duration);
   const duration = isValidDuration(parsedDuration) ? parsedDuration : 60;
@@ -198,15 +201,17 @@ export function AppointmentRescheduleModal({
   const selectedTrainerName = trainerSelection.kind === 'trainer'
     ? trainers.find((trainer) => trainer.id === selectedTrainerId)?.name ?? selectedTrainerId
     : null;
-  const futureSeriesAppointments = useMemo(() => {
+  const managedSeriesAppointments = useMemo(() => {
     if (!appointment.recurrenceSeriesId) return [];
     return appointments
       .filter((item) => item.recurrenceSeriesId === appointment.recurrenceSeriesId)
-      .filter((item) => isFutureApprovedOccurrence(item, now))
+      .filter((item) => isRecurringPending
+        ? item.status === 'pending'
+        : isFutureApprovedOccurrence(item, now))
       .sort((left, right) => (left.recurrenceIndex ?? 0) - (right.recurrenceIndex ?? 0));
-  }, [appointment.recurrenceSeriesId, appointments, now]);
-  const isSeriesFlow = isRecurringApproved && scope === 'series';
-  const futureApprovedCount = futureSeriesAppointments.length;
+  }, [appointment.recurrenceSeriesId, appointments, isRecurringPending, now]);
+  const isSeriesFlow = isRecurring && scope === 'series';
+  const managedSeriesCount = managedSeriesAppointments.length;
   const visibleTrainers = useMemo(() => trainers.filter((trainer) =>
     trainer.active !== false
     || (!isSeriesFlow
@@ -219,7 +224,7 @@ export function AppointmentRescheduleModal({
   }, [appointment, currentIsHistorical, scope, trainers]);
 
   useEffect(() => {
-    if (!isRecurringApproved || scope !== 'series' || !appointment.recurrenceSeriesId) {
+    if (!isRecurring || scope !== 'series' || !appointment.recurrenceSeriesId) {
       setRecurrence(null);
       setSeriesBono(null);
       setSeriesMetadataPhase('idle');
@@ -277,18 +282,18 @@ export function AppointmentRescheduleModal({
     return () => {
       cancelled = true;
     };
-  }, [appointment.recurrenceSeriesId, appointment.userId, isRecurringApproved, scope]);
+  }, [appointment.recurrenceSeriesId, appointment.userId, isRecurring, scope]);
 
   useEffect(() => {
     if (!isSeriesFlow
       || seriesMetadataPhase !== 'ready'
       || !recurrence
       || trainerSelection.kind !== 'pending') return;
-    setTrainerSelection(getSeriesTrainerSelection(recurrence, futureSeriesAppointments, trainers));
-  }, [futureSeriesAppointments, isSeriesFlow, recurrence, seriesMetadataPhase, trainerSelection.kind, trainers]);
+    setTrainerSelection(getSeriesTrainerSelection(recurrence, managedSeriesAppointments, trainers));
+  }, [managedSeriesAppointments, isSeriesFlow, recurrence, seriesMetadataPhase, trainerSelection.kind, trainers]);
 
   useEffect(() => {
-    if (!isRecurringApproved || scope !== 'series' || futureApprovedCount > 0) return;
+    if (!isRecurring || scope !== 'series' || managedSeriesCount > 0) return;
     setScope(null);
     setSelectedDate(null);
     setSelectedSlot(null);
@@ -297,18 +302,18 @@ export function AppointmentRescheduleModal({
     setHastaOptionStatuses([]);
     setAvailabilityState({ status: 'loading', message: null });
     setError('');
-  }, [futureApprovedCount, isRecurringApproved, scope]);
+  }, [isRecurring, managedSeriesCount, scope]);
 
-  const seriesExcludedIds = useMemo(() => isRecurringApproved
+  const seriesExcludedIds = useMemo(() => isRecurring
     ? getRecurringRescheduleExcludedAppointmentIds(appointments, appointment, 'series', now)
-    : new Set<string>(), [appointment, appointments, isRecurringApproved, now]);
+    : new Set<string>(), [appointment, appointments, isRecurring, now]);
   const excludedIds = useMemo(() => {
-    if (!isRecurringApproved) return new Set([appointment.id]);
+    if (!isRecurring) return new Set([appointment.id]);
     if (!scope) return new Set<string>();
     return scope === 'series'
       ? seriesExcludedIds
       : new Set([appointment.id]);
-  }, [appointment.id, isRecurringApproved, scope, seriesExcludedIds]);
+  }, [appointment.id, isRecurring, scope, seriesExcludedIds]);
   const calendarContext = useMemo(() => {
     if (isSeriesFlow) {
       if (seriesMetadataPhase !== 'ready' || !recurrence?.userId) {
@@ -318,19 +323,19 @@ export function AppointmentRescheduleModal({
     }
     return buildRescheduleCalendarContext(appointments, appointment.userId, excludedIds);
   }, [appointment.userId, appointments, excludedIds, isSeriesFlow, recurrence?.userId, seriesMetadataPhase]);
-  const currentFutureReservedMinutes = useMemo(() => futureSeriesAppointments.reduce(
-    (total, item) => total + (hasValidFutureReservation(item, duration, recurrence?.bonoId) ? duration : 0),
+  const currentFutureReservedMinutes = useMemo(() => managedSeriesAppointments.reduce(
+    (total, item) => total + (hasValidSeriesReservation(item, duration, recurrence?.bonoId) ? duration : 0),
     0,
-  ), [duration, futureSeriesAppointments, recurrence?.bonoId]);
+  ), [duration, managedSeriesAppointments, recurrence?.bonoId]);
   const recurringHasta = useMemo(() => getAdminRecurringHastaViewModel({
     startDate: isSeriesFlow ? selectedDate : null,
     intervalDays: recurrence?.intervalDays ?? 0,
     durationMinutes: duration,
     remainingMinutes: (seriesBono ? getBonoMinutosRestantes(seriesBono) : 0) + currentFutureReservedMinutes,
-    futureReservedCount: futureApprovedCount,
+    futureReservedCount: managedSeriesCount,
     bonoExpirationDate: seriesBono?.fechaExpiracion,
     now,
-  }), [currentFutureReservedMinutes, duration, futureApprovedCount, isSeriesFlow, now, recurrence?.intervalDays, selectedDate, seriesBono]);
+  }), [currentFutureReservedMinutes, duration, isSeriesFlow, managedSeriesCount, now, recurrence?.intervalDays, selectedDate, seriesBono]);
 
   useEffect(() => {
     if (!isSeriesFlow) {
@@ -421,7 +426,7 @@ export function AppointmentRescheduleModal({
   }, [busy, onClose]);
 
   const handleScopeChange = (nextScope: RecurringRescheduleScope) => {
-    if (nextScope === scope || (nextScope === 'series' && futureApprovedCount === 0)) return;
+    if (nextScope === scope || (nextScope === 'series' && managedSeriesCount === 0)) return;
     setScope(nextScope);
     setSelectedDate(null);
     setSelectedSlot(null);
@@ -445,7 +450,9 @@ export function AppointmentRescheduleModal({
 
   const effectiveSlot = selectedSlot ?? currentSlot;
   const selectedIsHistorical = Boolean(effectiveSlot && !classifyMadridCivilSlot(effectiveSlot, now).isFuture);
-  const showHistoricalNotice = !isSeriesFlow && (currentIsHistorical || selectedIsHistorical);
+  const showHistoricalNotice = isRecurringApproved || !isRecurring
+    ? !isSeriesFlow && (currentIsHistorical || selectedIsHistorical)
+    : false;
   const targetSlotChanged = !slotsMatch(effectiveSlot, currentSlot);
   const calendarReady = availabilityState.status === 'ready';
   const selectedEndOption = endDate
@@ -455,7 +462,7 @@ export function AppointmentRescheduleModal({
     ? hastaOptionStatuses.find((status) => status.option.endDate === endDate)
     : undefined;
   const seriesReady = Boolean(
-    futureApprovedCount > 0
+    managedSeriesCount > 0
     && seriesMetadataPhase === 'ready'
     && selectedSlot
     && endDate
@@ -468,18 +475,18 @@ export function AppointmentRescheduleModal({
     !busy
     && effectiveSlot
     && trainerDecisionReady
-    && (!isRecurringApproved || Boolean(scope))
-    && (!isSeriesFlow || futureApprovedCount > 0)
+    && (!isRecurring || Boolean(scope))
+    && (!isSeriesFlow || managedSeriesCount > 0)
     && (isSeriesFlow
       ? calendarReady && seriesReady
-      : (!isRecurringApproved || scope === 'single' || scope === null)
+      : (!isRecurring || scope === 'single' || scope === null)
         && singleAvailabilityReady
         && (targetSlotChanged || trainerChanged)),
   );
 
   const handleSubmit = async () => {
     if (busy) return;
-    if (isRecurringApproved && !scope) {
+    if (isRecurring && !scope) {
       setError('Elige qué citas quieres modificar.');
       return;
     }
@@ -505,7 +512,7 @@ export function AppointmentRescheduleModal({
     try {
       await onSave({
         slot: effectiveSlot,
-        scope: isSeriesFlow ? 'series' : isRecurringApproved ? 'single' : null,
+        scope: isSeriesFlow ? 'series' : isRecurring ? 'single' : null,
         assignedTrainer: selectedTrainerId,
         ...(isSeriesFlow ? { endDate } : {}),
       });
@@ -516,9 +523,9 @@ export function AppointmentRescheduleModal({
     }
   };
 
-  const canShowCalendar = !isRecurringApproved
+  const canShowCalendar = !isRecurring
     || Boolean(scope && (!isSeriesFlow || seriesMetadataPhase === 'ready'));
-  const seriesOptionDisabled = isRecurringApproved && futureApprovedCount === 0;
+  const seriesOptionDisabled = isRecurring && managedSeriesCount === 0;
   const seriesMetadataMessage = seriesMetadataPhase === 'loading'
     ? 'Cargando la serie y el bono reservado...'
     : seriesMetadataPhase === 'error' || seriesMetadataPhase === 'unavailable' ? error : null;
@@ -557,7 +564,7 @@ export function AppointmentRescheduleModal({
             <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.28em] text-[var(--color-accent-val)]">Agenda Focus Club</p>
             <h2 id="appointment-reschedule-title" className="text-xl font-bold text-[var(--color-text-primary)] sm:text-2xl">Modificar cita</h2>
             <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-              {isRecurringApproved ? 'Elige el alcance y después una nueva franja.' : 'Elige una nueva fecha y hora para esta sesión.'}
+              {isRecurring ? 'Elige el alcance y después una nueva franja.' : 'Elige una nueva fecha y hora para esta sesión.'}
             </p>
           </div>
           <button
@@ -635,7 +642,7 @@ export function AppointmentRescheduleModal({
               )}
             </section>
 
-            {isRecurringApproved && (
+            {isRecurring && (
               <section aria-labelledby="reschedule-scope-heading">
                 <div className="mb-3 flex items-center gap-2">
                   <Repeat2 className="h-4 w-4 text-[var(--color-accent-val)]" />
@@ -666,12 +673,18 @@ export function AppointmentRescheduleModal({
                         </span>
                         {option.scope === 'series' && (
                           <span className="mt-2 block text-xs font-bold uppercase tracking-wider text-[var(--color-accent-val)]">
-                            {futureApprovedCount} {futureApprovedCount === 1 ? 'sesión futura' : 'sesiones futuras'}
+                            {managedSeriesCount} {isRecurringPending
+                              ? managedSeriesCount === 1 ? 'sesión pendiente' : 'sesiones pendientes'
+                              : managedSeriesCount === 1 ? 'sesión futura' : 'sesiones futuras'}
                           </span>
                         )}
                         <span className="mt-2 block text-sm leading-relaxed text-[var(--color-text-secondary)]">{option.description}</span>
                         {option.scope === 'series' && seriesOptionDisabled && (
-                          <span className="mt-2 block text-xs text-amber-400">No hay sesiones futuras aprobadas para modificar.</span>
+                          <span className="mt-2 block text-xs text-amber-400">
+                            {isRecurringPending
+                              ? 'No hay sesiones pendientes para modificar.'
+                              : 'No hay sesiones futuras aprobadas para modificar.'}
+                          </span>
                         )}
                       </button>
                     );
@@ -680,7 +693,7 @@ export function AppointmentRescheduleModal({
               </section>
             )}
 
-            {seriesMetadataMessage && isRecurringApproved && scope === 'series' && (
+            {seriesMetadataMessage && isRecurring && scope === 'series' && (
               <p role={seriesMetadataPhase === 'loading' ? 'status' : 'alert'} className="rounded-xl border border-border bg-white/[0.025] p-3 text-sm text-[var(--color-text-secondary)]">
                 {seriesMetadataMessage}
               </p>
@@ -688,7 +701,7 @@ export function AppointmentRescheduleModal({
 
             {canShowCalendar && (
               <motion.section
-                key={isRecurringApproved ? scope : 'single-appointment'}
+                key={isRecurring ? scope : 'single-appointment'}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
@@ -717,7 +730,7 @@ export function AppointmentRescheduleModal({
                   selectedDuration={duration}
                   userBookedSlotKeys={calendarContext.userBookedSlotKeys}
                   occupancyCreditsByKey={calendarContext.occupancyCreditsByKey}
-                  allowPastDates={!isSeriesFlow}
+                  allowPastDates={!isSeriesFlow && !isRecurringPending}
                   disabled={busy}
                   showSelectedSlotSummary={false}
                   availabilityLabelMode="occupancy"
@@ -803,7 +816,7 @@ export function AppointmentRescheduleModal({
                           <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{selectedSlot.time} · {duration} min</p>
                         </>
                       )}
-                      {isRecurringApproved && scope === 'single' && (
+                      {isRecurring && scope === 'single' && (
                         <p className="mt-3 text-xs leading-relaxed text-[var(--color-text-secondary)]">Se modificará únicamente esta sesión.</p>
                       )}
                     </div>
@@ -812,7 +825,7 @@ export function AppointmentRescheduleModal({
               </motion.section>
             )}
 
-            {error && !(seriesMetadataMessage && isRecurringApproved && scope === 'series') && (
+            {error && !(seriesMetadataMessage && isRecurring && scope === 'series') && (
               <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</p>
             )}
           </div>
