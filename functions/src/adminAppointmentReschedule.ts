@@ -14,6 +14,7 @@ import {
   type LifecycleBono,
 } from "./appointmentLifecycle.js";
 import {
+  civilDateFromExpiration,
   generateRecurringOccurrenceDates,
   MAX_RECURRING_OCCURRENCES,
 } from "./recurringAppointments.js";
@@ -601,13 +602,17 @@ async function rescheduleAppointmentFromAdmin(
       transaction.set(recurrenceSeriesRef, seriesPatch, { merge: true });
     }
     transaction.create(deps.db.collection("activity_logs").doc(), {
-      action: targetState.isFuture ? "admin_appointment_rescheduled_future" : "admin_appointment_rescheduled_historical",
+      action: targetState.isFuture ? "appointment_rescheduled_by_admin" : "appointment_corrected_by_admin",
       adminUid,
       appointmentId: selectedRef.id,
       recurrenceSeriesId: appointment.recurrenceSeriesId ?? null,
-      slot: input.slot,
+      oldSlot: currentSlot && isSlot(currentSlot) ? currentSlot : null,
+      newSlot: input.slot,
+      oldTrainer: currentTrainer,
+      newTrainer: input.assignedTrainer,
+      slotChanged,
+      trainerChanged,
       createdAt: now,
-      timestamp: now,
     });
     return { success: true, appointmentId: selectedRef.id };
   });
@@ -693,7 +698,13 @@ async function replaceRecurringSeriesScheduleFromAdmin(
       throwHttps("failed-precondition", "No se ha encontrado el bono reservado de la serie.", "invalid_bono");
     }
     const bono = { id: bonoSnap.id, ...bonoSnap.data() } as BonoData & { id: string };
-    if (typeof bono.userId !== "string" || bono.userId !== series.userId || !hasValidReservedBonoData(bono)) {
+    if (typeof bono.userId !== "string" || bono.userId !== series.userId) {
+      throwHttps("failed-precondition", "La reserva financiera de la serie no es valida.", "invalid_bono");
+    }
+    if (bono.estado === "eliminado") {
+      throwHttps("failed-precondition", "El bono reservado no esta disponible.", "bono_unavailable");
+    }
+    if (!hasValidReservedBonoData(bono)) {
       throwHttps("failed-precondition", "La reserva financiera de la serie no es valida.", "invalid_bono");
     }
     const usableRemainingMinutes = getUsableBonoRemainingMinutes(bono);
@@ -773,6 +784,11 @@ async function replaceRecurringSeriesScheduleFromAdmin(
     }
     if (generatedDates.at(-1) !== input.endDate) {
       throwHttps("failed-precondition", "La fecha final debe coincidir con la cadencia de la serie.", "invalid_end_date");
+    }
+    const expirationDate = civilDateFromExpiration(bono.fechaExpiracion);
+    const bonoAlreadyExpired = bono.estado === "expirado" || isBonoExpiredAt(bono, nowDate);
+    if (!bonoAlreadyExpired && expirationDate && input.endDate > expirationDate) {
+      throwHttps("failed-precondition", "El bono reservado no esta disponible.", "bono_unavailable");
     }
     const desired = generatedDates.map((date) => {
       const slot = { date, time: input.startSlot.time };
@@ -1036,8 +1052,11 @@ async function replaceRecurringSeriesScheduleFromAdmin(
       oldFutureReservedMinutes,
       newFutureMinutes,
       minutesDelta,
+      newStartSlot: input.startSlot,
+      newEndDate: input.endDate,
+      oldTrainer: typeof series.assignedTrainer === "string" ? series.assignedTrainer : null,
+      newTrainer: input.assignedTrainer,
       createdAt: now,
-      timestamp: now,
     });
     return {
       success: true,

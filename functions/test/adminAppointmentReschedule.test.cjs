@@ -6,6 +6,7 @@ const {
 } = require("../lib/adminAppointmentReschedule.js");
 const {
   getSlotBlocks,
+  reconcileAppointmentMinutes,
   slotOccupancyDocId,
 } = require("../lib/appointmentLifecycle.js");
 
@@ -331,6 +332,17 @@ test("admin single reschedule updates a future pending record without consuming 
   assert.deepEqual(db.documents.get("bonos/bono-1"), documents["bonos/bono-1"]);
   assert.equal(db.operations.some((operation) => operation.target.startsWith("slot_occupancy/") && operation.type === "write"), false);
   const log = [...db.documents.entries()].find(([path]) => path.startsWith("activity_logs/"))[1];
+  assert.equal(log.action, "appointment_rescheduled_by_admin");
+  assert.equal(log.adminUid, "admin-1");
+  assert.equal(log.appointmentId, "pending-1");
+  assert.equal(log.recurrenceSeriesId, null);
+  assert.deepEqual(log.oldSlot, { date: "2026-09-07", time: "10:00" });
+  assert.deepEqual(log.newSlot, { date: "2026-09-08", time: "11:00" });
+  assert.equal(log.oldTrainer, "trainer-1");
+  assert.equal(log.newTrainer, "trainer-1");
+  assert.equal(log.slotChanged, true);
+  assert.equal(log.trainerChanged, false);
+  assert.equal(log.createdAt, fixedNow.toISOString());
   assert.equal("email" in log, false);
   assert.equal("name" in log, false);
   assert.equal("phone" in log, false);
@@ -480,7 +492,13 @@ test("admin single approved correction aggregates old and historical occupancy w
   });
   assert.deepEqual(db.documents.get("bonos/bono-1"), documents["bonos/bono-1"]);
   const log = [...db.documents.entries()].find(([path]) => path.startsWith("activity_logs/"))[1];
-  assert.equal(log.action, "admin_appointment_rescheduled_historical");
+  assert.equal(log.action, "appointment_corrected_by_admin");
+  assert.deepEqual(log.oldSlot, { date: "2026-09-07", time: "10:00" });
+  assert.deepEqual(log.newSlot, { date: "2026-08-20", time: "11:00" });
+  assert.equal(log.oldTrainer, "trainer-1");
+  assert.equal(log.newTrainer, "trainer-1");
+  assert.equal(log.slotChanged, true);
+  assert.equal(log.trainerChanged, false);
 });
 
 test("admin single future validation treats a later Madrid-today target as future and leaves failed transactions unchanged", async () => {
@@ -800,7 +818,13 @@ test("admin series replacement uses a cancelled selected occurrence only to iden
   assert.deepEqual(log.reusedAppointmentIds, ["future-1", "future-2", "future-3"]);
   assert.equal(log.oldFutureCount, 3);
   assert.equal(log.newFutureCount, 3);
+  assert.equal(log.oldFutureReservedMinutes, 180);
+  assert.equal(log.newFutureMinutes, 180);
   assert.equal(log.minutesDelta, 0);
+  assert.deepEqual(log.newStartSlot, { date: "2026-09-07", time: "10:00" });
+  assert.equal(log.newEndDate, "2026-09-21");
+  assert.equal(log.oldTrainer, "trainer-1");
+  assert.equal(log.newTrainer, "trainer-2");
   assert.equal("email" in log, false);
   assert.equal("name" in log, false);
   assert.equal("phone" in log, false);
@@ -976,6 +1000,22 @@ test("admin series reduction cancels only surplus future approved records, unass
   const log = activityLog(db, "recurring_series_schedule_replaced");
   assert.deepEqual(log.cancelledAppointmentIds, ["future-3"]);
   assert.equal(log.minutesDelta, -60);
+
+  let secondBonoPatch;
+  let secondAppointmentPatch;
+  const secondRefund = reconcileAppointmentMinutes({
+    action: "refund",
+    appointment: cancelled,
+    bono: { id: "bono-1", ...bono },
+    now: "2026-09-01T09:00:00.000Z",
+    transaction: {
+      setBono: (_bonoId, patch) => { secondBonoPatch = patch; },
+      setAppointment: (patch) => { secondAppointmentPatch = patch; },
+    },
+  });
+  assert.deepEqual(secondRefund, { ok: false, reason: "not-refundable" });
+  assert.equal(secondBonoPatch, undefined);
+  assert.equal(secondAppointmentPatch, undefined);
 });
 
 test("admin series finance updates retain every existing bono history entry", async () => {
@@ -1018,6 +1058,111 @@ test("admin series replacement rejects malformed reserved-bono data even when it
       assertNoWrites(db, before);
     });
   }
+});
+
+test("admin series replacement rejects an eliminated bono before every financial shape without writes", async (t) => {
+  const cases = [
+    ["same count", "2026-09-07", "2026-09-21"],
+    ["reduction", "2026-09-08", "2026-09-15"],
+    ["expansion", "2026-09-08", "2026-09-29"],
+  ];
+
+  for (const [label, startDate, endDate] of cases) {
+    await t.test(label, async () => {
+      const db = new FakeFirestore(recurringSeriesFixture({ bono: { estado: "eliminado" } }));
+      const before = snapshotDocuments(db);
+
+      await assert.rejects(
+        createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+          auth: { uid: "admin-1", token: {} },
+          data: {
+            appointmentId: "future-1",
+            startSlot: { date: startDate, time: "10:00" },
+            endDate,
+            assignedTrainer: "trainer-1",
+          },
+        }),
+        (error) => error.code === "failed-precondition" && error.details.reason === "bono_unavailable",
+      );
+      assertNoWrites(db, before);
+    });
+  }
+});
+
+test("admin series replacement enforces civil bono expiration only while the bono is still current", async (t) => {
+  await t.test("active bono rejects a final occurrence after its civil expiration", async () => {
+    const db = new FakeFirestore(recurringSeriesFixture({
+      bono: { fechaExpiracion: "2026-09-30T23:59:59.000Z", estado: "activo" },
+    }));
+    const before = snapshotDocuments(db);
+    await assert.rejects(
+      createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+        auth: { uid: "admin-1", token: {} },
+        data: {
+          appointmentId: "future-1",
+          startSlot: { date: "2026-09-08", time: "11:00" },
+          endDate: "2026-10-06",
+          assignedTrainer: "trainer-1",
+        },
+      }),
+      (error) => error.code === "failed-precondition" && error.details.reason === "bono_unavailable",
+    );
+    assertNoWrites(db, before);
+  });
+
+  await t.test("active bono accepts a final occurrence within its civil expiration", async () => {
+    const db = new FakeFirestore(recurringSeriesFixture({
+      bono: { fechaExpiracion: "2026-09-30T23:59:59.000Z", estado: "activo" },
+    }));
+    const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+      auth: { uid: "admin-1", token: {} },
+      data: {
+        appointmentId: "future-1",
+        startSlot: { date: "2026-09-08", time: "11:00" },
+        endDate: "2026-09-29",
+        assignedTrainer: "trainer-1",
+      },
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.newFutureCount, 4);
+  });
+
+  await t.test("already expired bono can still reduce existing reservations", async () => {
+    const db = new FakeFirestore(recurringSeriesFixture({
+      bono: { fechaExpiracion: "2026-08-31T23:59:59.000Z", estado: "expirado" },
+    }));
+    const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+      auth: { uid: "admin-1", token: {} },
+      data: {
+        appointmentId: "future-1",
+        startSlot: { date: "2026-09-08", time: "11:00" },
+        endDate: "2026-09-15",
+        assignedTrainer: "trainer-1",
+      },
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.minutesDelta, -60);
+  });
+
+  await t.test("already expired bono still rejects expansion", async () => {
+    const db = new FakeFirestore(recurringSeriesFixture({
+      bono: { fechaExpiracion: "2026-08-31T23:59:59.000Z", estado: "expirado" },
+    }));
+    const before = snapshotDocuments(db);
+    await assert.rejects(
+      createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+        auth: { uid: "admin-1", token: {} },
+        data: {
+          appointmentId: "future-1",
+          startSlot: { date: "2026-09-08", time: "11:00" },
+          endDate: "2026-09-29",
+          assignedTrainer: "trainer-1",
+        },
+      }),
+      (error) => error.code === "failed-precondition" && error.details.reason === "bono_unavailable",
+    );
+    assertNoWrites(db, before);
+  });
 });
 
 test("admin series replacement rejects missing and over-total usable bono balances without writes", async (t) => {

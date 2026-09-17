@@ -68,6 +68,14 @@ export interface AppointmentRescheduleModalProps {
   onSave: (input: AppointmentRescheduleSubmit) => Promise<void>;
 }
 
+const TRAINER_PENDING_VALUE = '__trainer_pending__';
+const TRAINER_UNASSIGNED_VALUE = '__trainer_unassigned__';
+
+type TrainerSelection =
+  | { kind: 'pending' }
+  | { kind: 'unassigned' }
+  | { kind: 'trainer'; trainerId: string };
+
 function formatCivilDate(date: string): string {
   const [year, month, day] = date.split('-').map(Number);
   return new Intl.DateTimeFormat('es-ES', {
@@ -90,6 +98,46 @@ function isFutureApprovedOccurrence(appointment: Appointment, now: Date): boolea
   if (appointment.status !== 'approved') return false;
   const slot = getAppointmentEffectiveSlot(appointment);
   return Boolean(slot && classifyMadridCivilSlot(slot, now).isFuture);
+}
+
+function activeTrainerIds(trainers: Trainer[]): Set<string> {
+  return new Set(trainers.filter((trainer) => trainer.active !== false).map((trainer) => trainer.id));
+}
+
+function getSingleTrainerSelection(
+  appointment: Appointment,
+  trainers: Trainer[],
+  currentIsHistorical: boolean,
+): TrainerSelection {
+  const trainerId = appointment.assignedTrainer;
+  if (!trainerId) return { kind: 'unassigned' };
+  const trainer = trainers.find((item) => item.id === trainerId);
+  if (trainer?.active !== false && trainer) return { kind: 'trainer', trainerId };
+  if (trainer && currentIsHistorical) return { kind: 'trainer', trainerId };
+  return { kind: 'pending' };
+}
+
+function getSeriesTrainerSelection(
+  recurrence: AppointmentRecurrence,
+  futureAppointments: Appointment[],
+  trainers: Trainer[],
+): TrainerSelection {
+  const activeIds = activeTrainerIds(trainers);
+  if (recurrence.assignedTrainer && activeIds.has(recurrence.assignedTrainer)) {
+    return { kind: 'trainer', trainerId: recurrence.assignedTrainer };
+  }
+  const futureTrainerIds = new Set(futureAppointments.map((item) => item.assignedTrainer ?? null));
+  if (futureTrainerIds.size !== 1) return { kind: 'pending' };
+  const [onlyTrainerId] = futureTrainerIds;
+  return typeof onlyTrainerId === 'string' && activeIds.has(onlyTrainerId)
+    ? { kind: 'trainer', trainerId: onlyTrainerId }
+    : { kind: 'pending' };
+}
+
+function trainerSelectionValue(selection: TrainerSelection): string {
+  if (selection.kind === 'pending') return TRAINER_PENDING_VALUE;
+  if (selection.kind === 'unassigned') return TRAINER_UNASSIGNED_VALUE;
+  return selection.trainerId;
 }
 
 function hasValidFutureReservation(
@@ -118,8 +166,11 @@ export function AppointmentRescheduleModal({
   const currentSlot = getAppointmentEffectiveSlot(appointment);
   const parsedDuration = Number(appointment.duration);
   const duration = isValidDuration(parsedDuration) ? parsedDuration : 60;
-  const originalTrainerId = appointment.assignedTrainer ?? '';
-  const [selectedTrainerId, setSelectedTrainerId] = useState(originalTrainerId);
+  const originalTrainerId = appointment.assignedTrainer ?? null;
+  const [now] = useState(() => new Date());
+  const currentIsHistorical = Boolean(currentSlot && !classifyMadridCivilSlot(currentSlot, now).isFuture);
+  const [trainerSelection, setTrainerSelection] = useState<TrainerSelection>(() =>
+    getSingleTrainerSelection(appointment, trainers, currentIsHistorical));
   const [scope, setScope] = useState<RecurringRescheduleScope | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
@@ -132,24 +183,39 @@ export function AppointmentRescheduleModal({
   const [hastaOptionStatuses, setHastaOptionStatuses] = useState<RecurringHastaOptionStatus[]>([]);
   const [recurrence, setRecurrence] = useState<AppointmentRecurrence | null>(null);
   const [seriesBono, setSeriesBono] = useState<Bono | null>(null);
-  const [seriesMetadataPhase, setSeriesMetadataPhase] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [seriesMetadataPhase, setSeriesMetadataPhase] = useState<'idle' | 'loading' | 'ready' | 'unavailable' | 'error'>('idle');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const [now] = useState(() => new Date());
-  const trainerChanged = selectedTrainerId !== originalTrainerId;
+  const selectedTrainerId = trainerSelection.kind === 'trainer' ? trainerSelection.trainerId : null;
+  const trainerDecisionReady = trainerSelection.kind !== 'pending';
+  const trainerChanged = trainerDecisionReady && selectedTrainerId !== originalTrainerId;
   const trainerName = appointment.assignedTrainer
     ? trainers.find((trainer) => trainer.id === appointment.assignedTrainer)?.name
       ?? appointment.assignedTrainer
     : null;
-  const selectedTrainerName = selectedTrainerId
+  const selectedTrainerName = trainerSelection.kind === 'trainer'
     ? trainers.find((trainer) => trainer.id === selectedTrainerId)?.name ?? selectedTrainerId
     : null;
-  const currentIsHistorical = Boolean(currentSlot && !classifyMadridCivilSlot(currentSlot, now).isFuture);
+  const futureSeriesAppointments = useMemo(() => {
+    if (!appointment.recurrenceSeriesId) return [];
+    return appointments
+      .filter((item) => item.recurrenceSeriesId === appointment.recurrenceSeriesId)
+      .filter((item) => isFutureApprovedOccurrence(item, now))
+      .sort((left, right) => (left.recurrenceIndex ?? 0) - (right.recurrenceIndex ?? 0));
+  }, [appointment.recurrenceSeriesId, appointments, now]);
+  const isSeriesFlow = isRecurringApproved && scope === 'series';
+  const futureApprovedCount = futureSeriesAppointments.length;
+  const visibleTrainers = useMemo(() => trainers.filter((trainer) =>
+    trainer.active !== false
+    || (!isSeriesFlow
+      && currentIsHistorical
+      && trainer.id === appointment.assignedTrainer)), [appointment.assignedTrainer, currentIsHistorical, isSeriesFlow, trainers]);
 
   useEffect(() => {
-    setSelectedTrainerId(appointment.assignedTrainer ?? '');
-  }, [appointment.id, appointment.assignedTrainer]);
+    if (scope === 'series') return;
+    setTrainerSelection(getSingleTrainerSelection(appointment, trainers, currentIsHistorical));
+  }, [appointment, currentIsHistorical, scope, trainers]);
 
   useEffect(() => {
     if (!isRecurringApproved || scope !== 'series' || !appointment.recurrenceSeriesId) {
@@ -161,6 +227,7 @@ export function AppointmentRescheduleModal({
 
     let cancelled = false;
     setSeriesMetadataPhase('loading');
+    setTrainerSelection({ kind: 'pending' });
     setError('');
     getAppointmentRecurrence(appointment.recurrenceSeriesId)
       .then(async (rawRecurrence) => {
@@ -175,14 +242,26 @@ export function AppointmentRescheduleModal({
           setRecurrence(null);
           setSeriesBono(null);
           setSeriesMetadataPhase('error');
+          setTrainerSelection({ kind: 'pending' });
           setError('No se ha podido cargar la serie recurrente.');
           return;
         }
         const exactBono = bonos.find((bono) => bono.id === loadedRecurrence.bonoId) ?? null;
         setRecurrence(loadedRecurrence);
         setSeriesBono(exactBono);
-        setSeriesMetadataPhase(exactBono ? 'ready' : 'error');
-        if (!exactBono) setError('No se ha podido cargar el bono reservado de la serie.');
+        if (!exactBono) {
+          setSeriesMetadataPhase('error');
+          setTrainerSelection({ kind: 'pending' });
+          setError('No se ha podido cargar el bono reservado de la serie.');
+          return;
+        }
+        if (exactBono.estado === 'eliminado') {
+          setSeriesMetadataPhase('unavailable');
+          setTrainerSelection({ kind: 'pending' });
+          setError('El bono asociado a esta serie está eliminado y la programación no puede modificarse.');
+          return;
+        }
+        setSeriesMetadataPhase('ready');
       })
       .catch((loadError: unknown) => {
         if (cancelled) return;
@@ -190,6 +269,7 @@ export function AppointmentRescheduleModal({
         setRecurrence(null);
         setSeriesBono(null);
         setSeriesMetadataPhase('error');
+        setTrainerSelection({ kind: 'pending' });
         setError('No se ha podido cargar la serie recurrente.');
       });
 
@@ -198,16 +278,13 @@ export function AppointmentRescheduleModal({
     };
   }, [appointment.recurrenceSeriesId, appointment.userId, isRecurringApproved, scope]);
 
-  const futureSeriesAppointments = useMemo(() => {
-    if (!appointment.recurrenceSeriesId) return [];
-    return appointments
-      .filter((item) => item.recurrenceSeriesId === appointment.recurrenceSeriesId)
-      .filter((item) => isFutureApprovedOccurrence(item, now))
-      .sort((left, right) => (left.recurrenceIndex ?? 0) - (right.recurrenceIndex ?? 0));
-  }, [appointment.recurrenceSeriesId, appointments, now]);
-
-  const isSeriesFlow = isRecurringApproved && scope === 'series';
-  const futureApprovedCount = futureSeriesAppointments.length;
+  useEffect(() => {
+    if (!isSeriesFlow
+      || seriesMetadataPhase !== 'ready'
+      || !recurrence
+      || trainerSelection.kind !== 'pending') return;
+    setTrainerSelection(getSeriesTrainerSelection(recurrence, futureSeriesAppointments, trainers));
+  }, [futureSeriesAppointments, isSeriesFlow, recurrence, seriesMetadataPhase, trainerSelection.kind, trainers]);
 
   useEffect(() => {
     if (!isRecurringApproved || scope !== 'series' || futureApprovedCount > 0) return;
@@ -353,10 +430,12 @@ export function AppointmentRescheduleModal({
     setAvailabilityState({ status: 'loading', message: null });
     setError('');
     if (nextScope === 'series') {
+      setTrainerSelection({ kind: 'pending' });
       setRecurrence(null);
       setSeriesBono(null);
       setSeriesMetadataPhase('loading');
     } else {
+      setTrainerSelection(getSingleTrainerSelection(appointment, trainers, currentIsHistorical));
       setRecurrence(null);
       setSeriesBono(null);
       setSeriesMetadataPhase('idle');
@@ -365,9 +444,12 @@ export function AppointmentRescheduleModal({
 
   const effectiveSlot = selectedSlot ?? currentSlot;
   const selectedIsHistorical = Boolean(effectiveSlot && !classifyMadridCivilSlot(effectiveSlot, now).isFuture);
-  const showHistoricalNotice = currentIsHistorical || selectedIsHistorical;
+  const showHistoricalNotice = !isSeriesFlow && (currentIsHistorical || selectedIsHistorical);
   const targetSlotChanged = !slotsMatch(effectiveSlot, currentSlot);
   const calendarReady = availabilityState.status === 'ready';
+  const selectedEndOption = endDate
+    ? recurringHasta.options.find((option) => option.endDate === endDate)
+    : undefined;
   const selectedSeriesStatus = endDate
     ? hastaOptionStatuses.find((status) => status.option.endDate === endDate)
     : undefined;
@@ -377,30 +459,40 @@ export function AppointmentRescheduleModal({
     && selectedSlot
     && endDate
     && hastaAvailabilityPhase === 'ready'
-    && selectedSeriesStatus?.availability === 'available',
+    && selectedSeriesStatus?.availability === 'available'
+    && trainerDecisionReady,
   );
+  const singleAvailabilityReady = !targetSlotChanged || calendarReady;
   const canSave = Boolean(
     !busy
-    && calendarReady
     && effectiveSlot
+    && trainerDecisionReady
     && (!isRecurringApproved || Boolean(scope))
     && (!isSeriesFlow || futureApprovedCount > 0)
     && (isSeriesFlow
-      ? seriesReady
+      ? calendarReady && seriesReady
       : (!isRecurringApproved || scope === 'single' || scope === null)
+        && singleAvailabilityReady
         && (targetSlotChanged || trainerChanged)),
   );
 
   const handleSubmit = async () => {
-    if (busy || !calendarReady) return;
+    if (busy) return;
     if (isRecurringApproved && !scope) {
       setError('Elige qué citas quieres modificar.');
+      return;
+    }
+    if (!trainerDecisionReady) {
+      setError(isSeriesFlow
+        ? 'Selecciona el entrenador del nuevo tramo o elige Sin asignar.'
+        : 'Selecciona un entrenador activo o elige Sin asignar.');
       return;
     }
     if (!effectiveSlot) {
       setError('Elige una nueva fecha y hora.');
       return;
     }
+    if ((isSeriesFlow || targetSlotChanged) && !calendarReady) return;
     if (isSeriesFlow && !seriesReady) {
       setError('Elige una fecha final disponible para la serie.');
       return;
@@ -413,7 +505,7 @@ export function AppointmentRescheduleModal({
       await onSave({
         slot: effectiveSlot,
         scope: isSeriesFlow ? 'series' : isRecurringApproved ? 'single' : null,
-        assignedTrainer: selectedTrainerId || null,
+        assignedTrainer: selectedTrainerId,
         ...(isSeriesFlow ? { endDate } : {}),
       });
     } catch (saveError) {
@@ -428,7 +520,16 @@ export function AppointmentRescheduleModal({
   const seriesOptionDisabled = isRecurringApproved && futureApprovedCount === 0;
   const seriesMetadataMessage = seriesMetadataPhase === 'loading'
     ? 'Cargando la serie y el bono reservado...'
-    : seriesMetadataPhase === 'error' ? error : null;
+    : seriesMetadataPhase === 'error' || seriesMetadataPhase === 'unavailable' ? error : null;
+  const trainerAssignmentMessage = trainerDecisionReady && (isSeriesFlow || trainerChanged)
+    ? trainerSelection.kind === 'unassigned'
+      ? isSeriesFlow
+        ? 'El nuevo tramo quedará sin entrenador asignado.'
+        : 'La sesión quedará sin entrenador asignado.'
+      : isSeriesFlow
+        ? `El nuevo tramo quedará asignado a ${selectedTrainerName}.`
+        : `Se asignará a ${selectedTrainerName}.`
+    : null;
 
   return (
     <motion.div
@@ -500,21 +601,32 @@ export function AppointmentRescheduleModal({
               <select
                 id="appointment-reschedule-trainer"
                 aria-label="Entrenador asignado"
-                value={selectedTrainerId}
-                disabled={busy}
+                value={trainerSelectionValue(trainerSelection)}
+                disabled={busy || (isSeriesFlow && seriesMetadataPhase !== 'ready')}
                 onChange={(event) => {
-                  setSelectedTrainerId(event.target.value);
+                  if (event.target.value === TRAINER_UNASSIGNED_VALUE) {
+                    setTrainerSelection({ kind: 'unassigned' });
+                  } else if (event.target.value !== TRAINER_PENDING_VALUE) {
+                    setTrainerSelection({ kind: 'trainer', trainerId: event.target.value });
+                  }
                   setError('');
                 }}
                 className="w-full rounded-xl border border-border bg-input px-4 py-3 text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
               >
-                <option value="">Sin asignar</option>
-                {trainers.map((trainer) => (
-                  <option key={trainer.id} value={trainer.id}>{trainer.name}</option>
+                {trainerSelection.kind === 'pending' && (
+                  <option value={TRAINER_PENDING_VALUE} disabled>
+                    {isSeriesFlow ? 'Selecciona el entrenador del nuevo tramo' : 'Selecciona un entrenador activo'}
+                  </option>
+                )}
+                <option value={TRAINER_UNASSIGNED_VALUE}>Sin asignar</option>
+                {visibleTrainers.map((trainer) => (
+                  <option key={trainer.id} value={trainer.id}>
+                    {trainer.name}{trainer.active === false ? ' (inactivo)' : ''}
+                  </option>
                 ))}
               </select>
-              {selectedTrainerName && selectedTrainerId !== originalTrainerId && (
-                <p className="mt-2 text-xs text-[var(--color-text-secondary)]">Se asignará a {selectedTrainerName} sin cambiar la franja.</p>
+              {trainerAssignmentMessage && (
+                <p className="mt-2 text-xs text-[var(--color-text-secondary)]">{trainerAssignmentMessage}</p>
               )}
             </section>
 
@@ -609,7 +721,7 @@ export function AppointmentRescheduleModal({
               </motion.section>
             )}
 
-            {isSeriesFlow && recurrence && (
+            {isSeriesFlow && recurrence && seriesMetadataPhase === 'ready' && (
               <section aria-labelledby="series-schedule-heading" className="space-y-4">
                 <div className="rounded-2xl border border-border bg-white/[0.025] p-4 sm:p-5">
                   <p id="series-schedule-heading" className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--color-text-secondary)]">Programación de la serie</p>
@@ -645,29 +757,49 @@ export function AppointmentRescheduleModal({
               </div>
             )}
 
-            {selectedSlot && (
+            {selectedSlot && (!isSeriesFlow || seriesMetadataPhase === 'ready') && (
               <motion.section
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 aria-labelledby="selected-slot-heading"
               >
-                <p id="selected-slot-heading" className="mb-2 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent-val)]">Nueva franja</p>
+                <p id="selected-slot-heading" className="mb-2 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent-val)]">
+                  {isSeriesFlow ? 'Nueva programación' : 'Nueva franja'}
+                </p>
                 <div className="rounded-2xl border border-[var(--color-accent-border)] bg-[var(--color-accent-dim)] p-4 sm:p-5">
                   <div className="flex items-start gap-3">
                     <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--color-accent-val)]/15">
                       <CalendarClock className="h-4 w-4 text-[var(--color-accent-val)]" />
                     </span>
-                    <div>
-                      <p className="font-semibold capitalize text-[var(--color-text-primary)]">{formatCivilDate(selectedSlot.date)}</p>
-                      <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{selectedSlot.time} · {duration} min</p>
+                    <div className="min-w-0">
+                      {isSeriesFlow && selectedEndOption ? (
+                        <>
+                          <p className="font-semibold text-[var(--color-text-primary)]">
+                            {selectedEndOption.occurrenceCount} {selectedEndOption.occurrenceCount === 1 ? 'sesión' : 'sesiones'}
+                          </p>
+                          <p className="mt-1 text-sm capitalize text-[var(--color-text-secondary)]">
+                            {formatCivilDate(selectedSlot.date)} → {formatCivilDate(selectedEndOption.endDate)}
+                          </p>
+                          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+                            {selectedSlot.time} · {duration} min · Cada {recurrence?.intervalDays ?? 0} días
+                          </p>
+                          {trainerDecisionReady && (
+                            <p className="mt-2 text-xs text-[var(--color-text-secondary)]">
+                              {trainerSelection.kind === 'unassigned'
+                                ? 'Sin entrenador asignado'
+                                : selectedTrainerName}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <p className="font-semibold capitalize text-[var(--color-text-primary)]">{formatCivilDate(selectedSlot.date)}</p>
+                          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{selectedSlot.time} · {duration} min</p>
+                        </>
+                      )}
                       {isRecurringApproved && scope === 'single' && (
                         <p className="mt-3 text-xs leading-relaxed text-[var(--color-text-secondary)]">Se modificará únicamente esta sesión.</p>
-                      )}
-                      {isSeriesFlow && (
-                        <p className="mt-3 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-                           Este horario se utilizará como referencia para recolocar {futureApprovedCount === 1 ? 'la sesión futura' : `las ${futureApprovedCount} sesiones futuras`} de la serie.
-                        </p>
                       )}
                     </div>
                   </div>
