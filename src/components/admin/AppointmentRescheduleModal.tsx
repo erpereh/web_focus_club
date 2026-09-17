@@ -2,14 +2,40 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { CalendarClock, Check, Clock3, Repeat2, UserRound, X } from 'lucide-react';
+import {
+  CalendarClock,
+  Check,
+  Clock3,
+  Repeat2,
+  UserRound,
+  X,
+} from 'lucide-react';
 import {
   InteractiveCalendar,
   type CalendarAvailabilityState,
 } from '@/components/ui/interactive-calendar';
+import { RecurringHastaSelect } from '@/components/ui/recurring-hasta-select';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
-import { getAppointmentEffectiveSlot } from '@/lib/madrid-date';
+import {
+  getAppointmentRecurrence,
+  getAvailabilityForDates,
+  getBonosByUser,
+  getSiteConfig,
+} from '@/lib/firestore';
+import { classifyMadridCivilSlot, getAppointmentEffectiveSlot } from '@/lib/madrid-date';
+import {
+  formatRecurringSeriesPreview,
+  generateRecurringOccurrenceDates,
+  getAdminRecurringHastaViewModel,
+  sanitizeRecurringEndDate,
+} from '@/lib/recurring-appointments';
+import {
+  evaluateRecurringHastaOptions,
+  sanitizeRecurringEndDateByAvailability,
+  type RecurringHastaAvailabilityPhase,
+  type RecurringHastaOptionStatus,
+} from '@/lib/recurring-hasta-availability';
 import {
   buildRescheduleCalendarContext,
   getRecurringRescheduleErrorMessage,
@@ -18,14 +44,23 @@ import {
   type RecurringRescheduleScope,
 } from '@/lib/recurring-reschedule';
 import { cn } from '@/lib/utils';
-import type { Appointment, TimeSlot, Trainer } from '@/types';
+import {
+  getBonoMinutosRestantes,
+  type Appointment,
+  type AppointmentRecurrence,
+  type Bono,
+  type TimeSlot,
+  type Trainer,
+} from '@/types';
 
 export interface AppointmentRescheduleSubmit {
   slot: TimeSlot;
   scope: RecurringRescheduleScope | null;
+  assignedTrainer: string | null;
+  endDate?: string;
 }
 
-interface AppointmentRescheduleModalProps {
+export interface AppointmentRescheduleModalProps {
   appointment: Appointment;
   appointments: Appointment[];
   trainers: Trainer[];
@@ -43,6 +78,35 @@ function formatCivilDate(date: string): string {
   }).format(new Date(Date.UTC(year, month - 1, day)));
 }
 
+function slotsMatch(left: TimeSlot | undefined, right: TimeSlot | undefined): boolean {
+  return Boolean(left && right && left.date === right.date && left.time === right.time);
+}
+
+function isValidDuration(value: number): value is 30 | 45 | 60 {
+  return value === 30 || value === 45 || value === 60;
+}
+
+function isFutureApprovedOccurrence(appointment: Appointment, now: Date): boolean {
+  if (appointment.status !== 'approved') return false;
+  const slot = getAppointmentEffectiveSlot(appointment);
+  return Boolean(slot && classifyMadridCivilSlot(slot, now).isFuture);
+}
+
+function hasValidFutureReservation(
+  appointment: Appointment,
+  duration: 30 | 45 | 60,
+  seriesBonoId?: string,
+): boolean {
+  return appointment.status === 'approved'
+    && (!seriesBonoId || appointment.bonoId === seriesBonoId)
+    && appointment.minutesDeducted === true
+    && appointment.minutesDeductedAmount === duration
+    && typeof appointment.minutesDeductedAt === 'string'
+    && appointment.minutesDeductedAt.length > 0
+    && appointment.minutesRefunded !== true
+    && !appointment.minutesRefundedAt;
+}
+
 export function AppointmentRescheduleModal({
   appointment,
   appointments,
@@ -51,38 +115,221 @@ export function AppointmentRescheduleModal({
   onSave,
 }: AppointmentRescheduleModalProps) {
   const isRecurringApproved = appointment.status === 'approved' && Boolean(appointment.recurrenceSeriesId);
+  const currentSlot = getAppointmentEffectiveSlot(appointment);
+  const parsedDuration = Number(appointment.duration);
+  const duration = isValidDuration(parsedDuration) ? parsedDuration : 60;
+  const originalTrainerId = appointment.assignedTrainer ?? '';
+  const [selectedTrainerId, setSelectedTrainerId] = useState(originalTrainerId);
   const [scope, setScope] = useState<RecurringRescheduleScope | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
+  const [endDate, setEndDate] = useState('');
   const [availabilityState, setAvailabilityState] = useState<CalendarAvailabilityState>({
     status: 'loading',
     message: null,
   });
+  const [hastaAvailabilityPhase, setHastaAvailabilityPhase] = useState<RecurringHastaAvailabilityPhase>('idle');
+  const [hastaOptionStatuses, setHastaOptionStatuses] = useState<RecurringHastaOptionStatus[]>([]);
+  const [recurrence, setRecurrence] = useState<AppointmentRecurrence | null>(null);
+  const [seriesBono, setSeriesBono] = useState<Bono | null>(null);
+  const [seriesMetadataPhase, setSeriesMetadataPhase] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const currentSlot = getAppointmentEffectiveSlot(appointment);
-  const duration = Number(appointment.duration) as 30 | 45 | 60;
+  const [now] = useState(() => new Date());
+  const trainerChanged = selectedTrainerId !== originalTrainerId;
   const trainerName = appointment.assignedTrainer
     ? trainers.find((trainer) => trainer.id === appointment.assignedTrainer)?.name
       ?? appointment.assignedTrainer
     : null;
+  const selectedTrainerName = selectedTrainerId
+    ? trainers.find((trainer) => trainer.id === selectedTrainerId)?.name ?? selectedTrainerId
+    : null;
+  const currentIsHistorical = Boolean(currentSlot && !classifyMadridCivilSlot(currentSlot, now).isFuture);
+
+  useEffect(() => {
+    setSelectedTrainerId(appointment.assignedTrainer ?? '');
+  }, [appointment.id, appointment.assignedTrainer]);
+
+  useEffect(() => {
+    if (!isRecurringApproved || scope !== 'series' || !appointment.recurrenceSeriesId) {
+      setRecurrence(null);
+      setSeriesBono(null);
+      setSeriesMetadataPhase('idle');
+      return;
+    }
+
+    let cancelled = false;
+    setSeriesMetadataPhase('loading');
+    setError('');
+    getAppointmentRecurrence(appointment.recurrenceSeriesId)
+      .then(async (rawRecurrence) => {
+        const loadedRecurrence = rawRecurrence as AppointmentRecurrence | null;
+        if (!loadedRecurrence) return { loadedRecurrence: null, bonos: [] as Bono[] };
+        const bonos = await getBonosByUser(loadedRecurrence.userId);
+        return { loadedRecurrence, bonos };
+      })
+      .then(({ loadedRecurrence, bonos }) => {
+        if (cancelled) return;
+        if (!loadedRecurrence) {
+          setRecurrence(null);
+          setSeriesBono(null);
+          setSeriesMetadataPhase('error');
+          setError('No se ha podido cargar la serie recurrente.');
+          return;
+        }
+        const exactBono = bonos.find((bono) => bono.id === loadedRecurrence.bonoId) ?? null;
+        setRecurrence(loadedRecurrence);
+        setSeriesBono(exactBono);
+        setSeriesMetadataPhase(exactBono ? 'ready' : 'error');
+        if (!exactBono) setError('No se ha podido cargar el bono reservado de la serie.');
+      })
+      .catch((loadError: unknown) => {
+        if (cancelled) return;
+        console.error('Error cargando la serie para modificarla:', loadError);
+        setRecurrence(null);
+        setSeriesBono(null);
+        setSeriesMetadataPhase('error');
+        setError('No se ha podido cargar la serie recurrente.');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appointment.recurrenceSeriesId, appointment.userId, isRecurringApproved, scope]);
+
+  const futureSeriesAppointments = useMemo(() => {
+    if (!appointment.recurrenceSeriesId) return [];
+    return appointments
+      .filter((item) => item.recurrenceSeriesId === appointment.recurrenceSeriesId)
+      .filter((item) => isFutureApprovedOccurrence(item, now))
+      .sort((left, right) => (left.recurrenceIndex ?? 0) - (right.recurrenceIndex ?? 0));
+  }, [appointment.recurrenceSeriesId, appointments, now]);
+
+  const isSeriesFlow = isRecurringApproved && scope === 'series';
+  const futureApprovedCount = futureSeriesAppointments.length;
+
+  useEffect(() => {
+    if (!isRecurringApproved || scope !== 'series' || futureApprovedCount > 0) return;
+    setScope(null);
+    setSelectedDate(null);
+    setSelectedSlot(null);
+    setEndDate('');
+    setHastaAvailabilityPhase('idle');
+    setHastaOptionStatuses([]);
+    setAvailabilityState({ status: 'loading', message: null });
+    setError('');
+  }, [futureApprovedCount, isRecurringApproved, scope]);
 
   const seriesExcludedIds = useMemo(() => isRecurringApproved
-    ? getRecurringRescheduleExcludedAppointmentIds(appointments, appointment, 'series', new Date())
-    : new Set<string>(), [appointment, appointments, isRecurringApproved]);
+    ? getRecurringRescheduleExcludedAppointmentIds(appointments, appointment, 'series', now)
+    : new Set<string>(), [appointment, appointments, isRecurringApproved, now]);
   const excludedIds = useMemo(() => {
     if (!isRecurringApproved) return new Set([appointment.id]);
     if (!scope) return new Set<string>();
-    return getRecurringRescheduleExcludedAppointmentIds(appointments, appointment, scope, new Date());
-  }, [appointment, appointments, isRecurringApproved, scope]);
-  const calendarContext = useMemo(() => buildRescheduleCalendarContext(
-    appointments,
-    appointment.userId,
-    excludedIds,
-  ), [appointment.userId, appointments, excludedIds]);
+    return scope === 'series'
+      ? seriesExcludedIds
+      : new Set([appointment.id]);
+  }, [appointment.id, isRecurringApproved, scope, seriesExcludedIds]);
+  const calendarContext = useMemo(() => {
+    if (isSeriesFlow) {
+      if (seriesMetadataPhase !== 'ready' || !recurrence?.userId) {
+        return { userBookedSlotKeys: new Set<string>(), occupancyCreditsByKey: new Map<string, number>() };
+      }
+      return buildRescheduleCalendarContext(appointments, recurrence.userId, excludedIds);
+    }
+    return buildRescheduleCalendarContext(appointments, appointment.userId, excludedIds);
+  }, [appointment.userId, appointments, excludedIds, isSeriesFlow, recurrence?.userId, seriesMetadataPhase]);
+  const currentFutureReservedMinutes = useMemo(() => futureSeriesAppointments.reduce(
+    (total, item) => total + (hasValidFutureReservation(item, duration, recurrence?.bonoId) ? duration : 0),
+    0,
+  ), [duration, futureSeriesAppointments, recurrence?.bonoId]);
+  const recurringHasta = useMemo(() => getAdminRecurringHastaViewModel({
+    startDate: isSeriesFlow ? selectedDate : null,
+    intervalDays: recurrence?.intervalDays ?? 0,
+    durationMinutes: duration,
+    remainingMinutes: (seriesBono ? getBonoMinutosRestantes(seriesBono) : 0) + currentFutureReservedMinutes,
+    futureReservedCount: futureApprovedCount,
+    bonoExpirationDate: seriesBono?.fechaExpiracion,
+    now,
+  }), [currentFutureReservedMinutes, duration, futureApprovedCount, isSeriesFlow, now, recurrence?.intervalDays, selectedDate, seriesBono]);
 
-  const clearSelectedSlot = useCallback(() => setSelectedSlot(null), []);
+  useEffect(() => {
+    if (!isSeriesFlow) {
+      if (endDate) setEndDate('');
+      if (hastaAvailabilityPhase !== 'idle') setHastaAvailabilityPhase('idle');
+      if (hastaOptionStatuses.length > 0) setHastaOptionStatuses([]);
+      return;
+    }
+    const mathSanitized = sanitizeRecurringEndDate(endDate, recurringHasta.options);
+    const nextEndDate = sanitizeRecurringEndDateByAvailability(
+      mathSanitized,
+      hastaOptionStatuses,
+      hastaAvailabilityPhase,
+    );
+    if (nextEndDate !== endDate) setEndDate(nextEndDate);
+  }, [endDate, hastaAvailabilityPhase, hastaOptionStatuses, isSeriesFlow, recurringHasta.options]);
+
+  useEffect(() => {
+    if (!isSeriesFlow
+      || seriesMetadataPhase !== 'ready'
+      || !selectedDate
+      || !selectedSlot?.time
+      || recurringHasta.options.length === 0) {
+      if (hastaAvailabilityPhase !== 'idle') setHastaAvailabilityPhase('idle');
+      if (hastaOptionStatuses.length > 0) setHastaOptionStatuses([]);
+      return;
+    }
+
+    let cancelled = false;
+    setHastaAvailabilityPhase('loading');
+    const lastEndDate = recurringHasta.options.at(-1)?.endDate;
+    if (!lastEndDate) return () => { cancelled = true; };
+    const dates = generateRecurringOccurrenceDates(
+      selectedDate,
+      recurrence?.intervalDays ?? 0,
+      lastEndDate,
+    );
+
+    Promise.all([getAvailabilityForDates(dates), getSiteConfig()])
+      .then(([availability, config]) => {
+        if (cancelled) return;
+        const blockedKeys = new Set(
+          availability.blockedSlots.map((slot) => `${slot.date}_${slot.time}`),
+        );
+        setHastaOptionStatuses(evaluateRecurringHastaOptions({
+          startDate: selectedDate,
+          startTime: selectedSlot.time,
+          intervalDays: recurrence?.intervalDays ?? 0,
+          durationMinutes: duration,
+          options: recurringHasta.options,
+          occupancy: availability.occupancy,
+          occupancyCreditsByKey: calendarContext.occupancyCreditsByKey,
+          blockedKeys,
+          userBookedSlotKeys: calendarContext.userBookedSlotKeys,
+          siteConfig: config,
+          now: new Date(),
+        }));
+        setHastaAvailabilityPhase('ready');
+      })
+      .catch((loadError: unknown) => {
+        if (cancelled) return;
+        console.error('Error comprobando la disponibilidad de la serie:', loadError);
+        setHastaOptionStatuses([]);
+        setHastaAvailabilityPhase('error');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [calendarContext, duration, isSeriesFlow, recurrence?.intervalDays, recurringHasta.options, selectedDate, selectedSlot?.time, seriesMetadataPhase]);
+
+  const clearSelectedSlot = useCallback(() => {
+    setSelectedSlot(null);
+    setEndDate('');
+    setHastaAvailabilityPhase('idle');
+    setHastaOptionStatuses([]);
+  }, []);
   const handleAvailabilityStateChange = useCallback((state: CalendarAvailabilityState) => {
     setAvailabilityState(state);
   }, []);
@@ -96,24 +343,79 @@ export function AppointmentRescheduleModal({
   }, [busy, onClose]);
 
   const handleScopeChange = (nextScope: RecurringRescheduleScope) => {
-    if (nextScope === scope) return;
+    if (nextScope === scope || (nextScope === 'series' && futureApprovedCount === 0)) return;
     setScope(nextScope);
     setSelectedDate(null);
     setSelectedSlot(null);
+    setEndDate('');
+    setHastaAvailabilityPhase('idle');
+    setHastaOptionStatuses([]);
     setAvailabilityState({ status: 'loading', message: null });
     setError('');
+    if (nextScope === 'series') {
+      setRecurrence(null);
+      setSeriesBono(null);
+      setSeriesMetadataPhase('loading');
+    } else {
+      setRecurrence(null);
+      setSeriesBono(null);
+      setSeriesMetadataPhase('idle');
+    }
   };
 
+  const effectiveSlot = selectedSlot ?? currentSlot;
+  const selectedIsHistorical = Boolean(effectiveSlot && !classifyMadridCivilSlot(effectiveSlot, now).isFuture);
+  const showHistoricalNotice = currentIsHistorical || selectedIsHistorical;
+  const targetSlotChanged = !slotsMatch(effectiveSlot, currentSlot);
+  const calendarReady = availabilityState.status === 'ready';
+  const selectedSeriesStatus = endDate
+    ? hastaOptionStatuses.find((status) => status.option.endDate === endDate)
+    : undefined;
+  const seriesReady = Boolean(
+    futureApprovedCount > 0
+    && seriesMetadataPhase === 'ready'
+    && selectedSlot
+    && endDate
+    && hastaAvailabilityPhase === 'ready'
+    && selectedSeriesStatus?.availability === 'available',
+  );
+  const canSave = Boolean(
+    !busy
+    && calendarReady
+    && effectiveSlot
+    && (!isRecurringApproved || Boolean(scope))
+    && (!isSeriesFlow || futureApprovedCount > 0)
+    && (isSeriesFlow
+      ? seriesReady
+      : (!isRecurringApproved || scope === 'single' || scope === null)
+        && (targetSlotChanged || trainerChanged)),
+  );
+
   const handleSubmit = async () => {
-    if (!selectedSlot || busy || availabilityState.status !== 'ready') return;
+    if (busy || !calendarReady) return;
     if (isRecurringApproved && !scope) {
       setError('Elige qué citas quieres modificar.');
       return;
     }
+    if (!effectiveSlot) {
+      setError('Elige una nueva fecha y hora.');
+      return;
+    }
+    if (isSeriesFlow && !seriesReady) {
+      setError('Elige una fecha final disponible para la serie.');
+      return;
+    }
+    if (!isSeriesFlow && !targetSlotChanged && !trainerChanged) return;
+
     setBusy(true);
     setError('');
     try {
-      await onSave({ slot: selectedSlot, scope });
+      await onSave({
+        slot: effectiveSlot,
+        scope: isSeriesFlow ? 'series' : isRecurringApproved ? 'single' : null,
+        assignedTrainer: selectedTrainerId || null,
+        ...(isSeriesFlow ? { endDate } : {}),
+      });
     } catch (saveError) {
       setError(getRecurringRescheduleErrorMessage(saveError, 'Error al modificar la franja.'));
     } finally {
@@ -121,14 +423,12 @@ export function AppointmentRescheduleModal({
     }
   };
 
-  const futureCount = seriesExcludedIds.size;
-  const canShowCalendar = !isRecurringApproved || Boolean(scope);
-  const canSave = Boolean(
-    selectedSlot
-    && availabilityState.status === 'ready'
-    && (!isRecurringApproved || scope)
-    && !busy,
-  );
+  const canShowCalendar = !isRecurringApproved
+    || Boolean(scope && (!isSeriesFlow || seriesMetadataPhase === 'ready'));
+  const seriesOptionDisabled = isRecurringApproved && futureApprovedCount === 0;
+  const seriesMetadataMessage = seriesMetadataPhase === 'loading'
+    ? 'Cargando la serie y el bono reservado...'
+    : seriesMetadataPhase === 'error' ? error : null;
 
   return (
     <motion.div
@@ -195,6 +495,29 @@ export function AppointmentRescheduleModal({
               </GlassCard>
             </section>
 
+            <section aria-labelledby="trainer-heading">
+              <label id="trainer-heading" htmlFor="appointment-reschedule-trainer" className="mb-2 block text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--color-text-secondary)]">Entrenador asignado</label>
+              <select
+                id="appointment-reschedule-trainer"
+                aria-label="Entrenador asignado"
+                value={selectedTrainerId}
+                disabled={busy}
+                onChange={(event) => {
+                  setSelectedTrainerId(event.target.value);
+                  setError('');
+                }}
+                className="w-full rounded-xl border border-border bg-input px-4 py-3 text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+              >
+                <option value="">Sin asignar</option>
+                {trainers.map((trainer) => (
+                  <option key={trainer.id} value={trainer.id}>{trainer.name}</option>
+                ))}
+              </select>
+              {selectedTrainerName && selectedTrainerId !== originalTrainerId && (
+                <p className="mt-2 text-xs text-[var(--color-text-secondary)]">Se asignará a {selectedTrainerName} sin cambiar la franja.</p>
+              )}
+            </section>
+
             {isRecurringApproved && (
               <section aria-labelledby="reschedule-scope-heading">
                 <div className="mb-3 flex items-center gap-2">
@@ -204,15 +527,17 @@ export function AppointmentRescheduleModal({
                 <div className="grid gap-3 md:grid-cols-2">
                   {RECURRING_RESCHEDULE_SCOPE_OPTIONS.map((option) => {
                     const selected = scope === option.scope;
+                    const disabledOption = busy || (option.scope === 'series' && seriesOptionDisabled);
                     return (
                       <button
                         key={option.scope}
                         type="button"
-                        disabled={busy}
+                        disabled={disabledOption}
                         onClick={() => handleScopeChange(option.scope)}
                         aria-pressed={selected}
                         className={cn(
                           'relative min-h-32 rounded-2xl border p-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-val)]',
+                          disabledOption && 'cursor-not-allowed opacity-60',
                           selected
                             ? 'border-[var(--color-accent-val)] bg-[var(--color-accent-dim)] shadow-emerald-glow'
                             : 'border-border bg-white/[0.025] hover:border-[var(--color-accent-border)] hover:bg-white/[0.04]',
@@ -224,10 +549,13 @@ export function AppointmentRescheduleModal({
                         </span>
                         {option.scope === 'series' && (
                           <span className="mt-2 block text-xs font-bold uppercase tracking-wider text-[var(--color-accent-val)]">
-                            {futureCount} {futureCount === 1 ? 'sesión futura' : 'sesiones futuras'}
+                            {futureApprovedCount} {futureApprovedCount === 1 ? 'sesión futura' : 'sesiones futuras'}
                           </span>
                         )}
                         <span className="mt-2 block text-sm leading-relaxed text-[var(--color-text-secondary)]">{option.description}</span>
+                        {option.scope === 'series' && seriesOptionDisabled && (
+                          <span className="mt-2 block text-xs text-amber-400">No hay sesiones futuras aprobadas para modificar.</span>
+                        )}
                       </button>
                     );
                   })}
@@ -235,70 +563,121 @@ export function AppointmentRescheduleModal({
               </section>
             )}
 
+            {seriesMetadataMessage && isRecurringApproved && scope === 'series' && (
+              <p role={seriesMetadataPhase === 'loading' ? 'status' : 'alert'} className="rounded-xl border border-border bg-white/[0.025] p-3 text-sm text-[var(--color-text-secondary)]">
+                {seriesMetadataMessage}
+              </p>
+            )}
+
             {canShowCalendar && (
-                <motion.section
-                  key={isRecurringApproved ? scope : 'single-appointment'}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  aria-labelledby="new-slot-heading"
-                >
-                  <h3 id="new-slot-heading" className="mb-3 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--color-text-secondary)]">Nueva fecha y hora</h3>
-                  <InteractiveCalendar
-                    selectedSlot={selectedSlot}
-                    onSelectSlot={(slot) => {
-                      setSelectedDate(slot.date);
-                      setSelectedSlot(slot);
-                      setError('');
-                    }}
-                    onClearSlot={clearSelectedSlot}
-                    selectedDate={selectedDate}
-                    onSelectDate={(date) => {
-                      setSelectedDate(date);
-                      setSelectedSlot(null);
-                    }}
-                    selectedDuration={duration}
-                    userBookedSlotKeys={calendarContext.userBookedSlotKeys}
-                    occupancyCreditsByKey={calendarContext.occupancyCreditsByKey}
-                    disabled={busy}
-                    showSelectedSlotSummary={false}
-                    availabilityLabelMode="occupancy"
-                    onAvailabilityStateChange={handleAvailabilityStateChange}
+              <motion.section
+                key={isRecurringApproved ? scope : 'single-appointment'}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                aria-labelledby="new-slot-heading"
+              >
+                <h3 id="new-slot-heading" className="mb-3 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--color-text-secondary)]">Nueva fecha y hora</h3>
+                <InteractiveCalendar
+                  selectedSlot={selectedSlot}
+                  onSelectSlot={(slot) => {
+                    setSelectedDate(slot.date);
+                    setSelectedSlot(slot);
+                    setHastaAvailabilityPhase('idle');
+                    setHastaOptionStatuses([]);
+                    setError('');
+                  }}
+                  onClearSlot={clearSelectedSlot}
+                  selectedDate={selectedDate}
+                  onSelectDate={(date) => {
+                    setSelectedDate(date);
+                    setSelectedSlot(null);
+                    setEndDate('');
+                    setHastaAvailabilityPhase('idle');
+                    setHastaOptionStatuses([]);
+                    setError('');
+                  }}
+                  selectedDuration={duration}
+                  userBookedSlotKeys={calendarContext.userBookedSlotKeys}
+                  occupancyCreditsByKey={calendarContext.occupancyCreditsByKey}
+                  allowPastDates={!isSeriesFlow}
+                  disabled={busy}
+                  showSelectedSlotSummary={false}
+                  availabilityLabelMode="occupancy"
+                  onAvailabilityStateChange={handleAvailabilityStateChange}
+                />
+              </motion.section>
+            )}
+
+            {isSeriesFlow && recurrence && (
+              <section aria-labelledby="series-schedule-heading" className="space-y-4">
+                <div className="rounded-2xl border border-border bg-white/[0.025] p-4 sm:p-5">
+                  <p id="series-schedule-heading" className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--color-text-secondary)]">Programación de la serie</p>
+                  <p className="mt-2 text-sm font-semibold text-[var(--color-text-primary)]">Cada {recurrence.intervalDays} días</p>
+                  {selectedSlot && recurringHasta.options.some((option) => option.endDate === endDate) && (
+                    <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+                      {formatRecurringSeriesPreview(
+                        recurringHasta.options.find((option) => option.endDate === endDate)?.occurrenceCount ?? 0,
+                        duration,
+                      )}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--color-text-secondary)]">Hasta</label>
+                  <RecurringHastaSelect
+                    options={recurringHasta.options}
+                    value={endDate}
+                    onChange={setEndDate}
+                    emptyReason={recurringHasta.emptyReason}
+                    optionStatuses={hastaAvailabilityPhase === 'ready' ? hastaOptionStatuses : undefined}
+                    availabilityLoading={hastaAvailabilityPhase === 'loading'}
+                    availabilityError={hastaAvailabilityPhase === 'error'}
                   />
-                </motion.section>
+                </div>
+              </section>
+            )}
+
+            {showHistoricalNotice && (
+              <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4">
+                <p className="font-semibold text-amber-200">Corrección histórica</p>
+                <p className="mt-1 text-sm text-amber-100/80">Los cambios solo afectan al registro de esta sesión.</p>
+              </div>
             )}
 
             {selectedSlot && (
-                <motion.section
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  aria-labelledby="selected-slot-heading"
-                >
-                  <p id="selected-slot-heading" className="mb-2 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent-val)]">Nueva franja</p>
-                  <div className="rounded-2xl border border-[var(--color-accent-border)] bg-[var(--color-accent-dim)] p-4 sm:p-5">
-                    <div className="flex items-start gap-3">
-                      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--color-accent-val)]/15">
-                        <CalendarClock className="h-4 w-4 text-[var(--color-accent-val)]" />
-                      </span>
-                      <div>
-                        <p className="font-semibold capitalize text-[var(--color-text-primary)]">{formatCivilDate(selectedSlot.date)}</p>
-                        <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{selectedSlot.time} · {duration} min</p>
-                        {isRecurringApproved && scope === 'single' && (
-                          <p className="mt-3 text-xs leading-relaxed text-[var(--color-text-secondary)]">Se modificará únicamente esta sesión.</p>
-                        )}
-                        {isRecurringApproved && scope === 'series' && (
-                          <p className="mt-3 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-                            Este horario se utilizará como referencia para recolocar {futureCount === 1 ? 'la sesión futura' : `las ${futureCount} sesiones futuras`} de la serie.
-                          </p>
-                        )}
-                      </div>
+              <motion.section
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                aria-labelledby="selected-slot-heading"
+              >
+                <p id="selected-slot-heading" className="mb-2 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--color-accent-val)]">Nueva franja</p>
+                <div className="rounded-2xl border border-[var(--color-accent-border)] bg-[var(--color-accent-dim)] p-4 sm:p-5">
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--color-accent-val)]/15">
+                      <CalendarClock className="h-4 w-4 text-[var(--color-accent-val)]" />
+                    </span>
+                    <div>
+                      <p className="font-semibold capitalize text-[var(--color-text-primary)]">{formatCivilDate(selectedSlot.date)}</p>
+                      <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{selectedSlot.time} · {duration} min</p>
+                      {isRecurringApproved && scope === 'single' && (
+                        <p className="mt-3 text-xs leading-relaxed text-[var(--color-text-secondary)]">Se modificará únicamente esta sesión.</p>
+                      )}
+                      {isSeriesFlow && (
+                        <p className="mt-3 text-xs leading-relaxed text-[var(--color-text-secondary)]">
+                           Este horario se utilizará como referencia para recolocar {futureApprovedCount === 1 ? 'la sesión futura' : `las ${futureApprovedCount} sesiones futuras`} de la serie.
+                        </p>
+                      )}
                     </div>
                   </div>
-                </motion.section>
+                </div>
+              </motion.section>
             )}
 
-            {error && <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</p>}
+            {error && !(seriesMetadataMessage && isRecurringApproved && scope === 'series') && (
+              <p role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</p>
+            )}
           </div>
         </div>
 

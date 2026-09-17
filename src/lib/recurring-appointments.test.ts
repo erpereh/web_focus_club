@@ -5,6 +5,7 @@ import {
     getRecurringEndDateOptions,
     formatRecurringHastaOptionLabel,
     getRecurringHastaViewModel,
+    getAdminRecurringHastaViewModel,
     sanitizeRecurringEndDate,
     MAX_RECURRING_OCCURRENCES,
 } from './recurring-appointments';
@@ -142,6 +143,54 @@ describe('getRecurringHastaViewModel', () => {
             remainingMinutes: 30,
             bonoExpirationDate: '2026-10-31',
         }).emptyReason).toBe('no-valid-end');
+    });
+});
+
+describe('getAdminRecurringHastaViewModel', () => {
+    const now = new Date('2026-09-17T12:00:00.000Z');
+
+    it('keeps valid 2..oldFutureCount replacements available after bono expiry', () => {
+        const view = getAdminRecurringHastaViewModel({
+            startDate: '2026-09-20',
+            intervalDays: 7,
+            durationMinutes: 60,
+            remainingMinutes: 240,
+            futureReservedCount: 4,
+            bonoExpirationDate: '2026-09-01',
+            now,
+        });
+
+        expect(view.options.map((option) => option.occurrenceCount)).toEqual([2, 3, 4]);
+        expect(view.options.at(-1)?.endDate).toBe('2026-10-11');
+    });
+
+    it('does not expose expired-bono expansion beyond the old future count', () => {
+        const view = getAdminRecurringHastaViewModel({
+            startDate: '2026-09-20',
+            intervalDays: 7,
+            durationMinutes: 60,
+            remainingMinutes: 600,
+            futureReservedCount: 2,
+            bonoExpirationDate: '2026-09-01',
+            now,
+        });
+
+        expect(view.options.map((option) => option.occurrenceCount)).toEqual([2]);
+    });
+
+    it('preserves active-bono options and expiry cutoff', () => {
+        const view = getAdminRecurringHastaViewModel({
+            startDate: '2026-09-20',
+            intervalDays: 7,
+            durationMinutes: 60,
+            remainingMinutes: 240,
+            futureReservedCount: 2,
+            bonoExpirationDate: '2026-10-04',
+            now,
+        });
+
+        expect(view.options.map((option) => option.occurrenceCount)).toEqual([2, 3]);
+        expect(view.options.at(-1)?.endDate).toBe('2026-10-04');
     });
 });
 

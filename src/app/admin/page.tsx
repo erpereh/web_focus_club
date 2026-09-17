@@ -156,8 +156,8 @@ import {
   generateTimeSlots,
   normalizeSiteConfig,
   doesSessionFitWithinSchedule,
-  updateAppointmentSlot as updateAppointmentSlotFS,
-  rescheduleRecurringAppointmentFromAdmin as rescheduleRecurringAppointmentFromAdminFS,
+  rescheduleAppointmentFromAdmin as rescheduleAppointmentFromAdminFS,
+  replaceRecurringSeriesScheduleFromAdmin as replaceRecurringSeriesScheduleFromAdminFS,
   getAllActiveBonos,
   getActiveBonoByUser,
   getBonosByUser,
@@ -186,9 +186,6 @@ import {
   subscribeUsers,
 
 } from '@/lib/firestore';
-import {
-  buildRecurringRescheduleRequest,
-} from '@/lib/recurring-reschedule';
 import { DEFAULT_SITE_CONFIG, MAX_MAX_CAPACITY, MIN_MAX_CAPACITY, normalizeMaxCapacity } from '@/lib/site-config';
 import type { AdminUserAccessMethod, AdminUserRole } from '@/lib/firestore';
 import { auth } from '@/lib/firebase';
@@ -8324,35 +8321,22 @@ export default function AdminPage() {
                       setShowEditSlotModal(false);
                       setSelectedAppointmentId(null);
                     }}
-                    onSave={async ({ slot, scope }) => {
-                      const isApproved = appointment.status === 'approved';
-                      const isRecurringApproved = Boolean(isApproved && appointment.recurrenceSeriesId);
-                      if (isRecurringApproved && scope) {
-                        await rescheduleRecurringAppointmentFromAdminFS(
-                          buildRecurringRescheduleRequest(selectedAppointmentId, slot, scope),
-                        );
-                        setShowEditSlotModal(false);
-                        setSelectedAppointmentId(null);
-                        return;
+                    onSave={async ({ slot, scope, assignedTrainer, endDate }) => {
+                      if (scope === 'series') {
+                        if (!endDate) throw new Error('Elige una fecha final disponible para la serie.');
+                        await replaceRecurringSeriesScheduleFromAdminFS({
+                          appointmentId: selectedAppointmentId,
+                          startSlot: slot,
+                          endDate,
+                          assignedTrainer,
+                        });
+                      } else {
+                        await rescheduleAppointmentFromAdminFS({
+                          appointmentId: selectedAppointmentId,
+                          slot,
+                          assignedTrainer,
+                        });
                       }
-
-                      // Preserve the existing non-recurring persistence flow exactly.
-                      if (isApproved && appointment.approvedSlot) {
-                        const duration = parseInt(appointment.duration || '60', 10);
-                        await decrementSlotOccupancy(
-                          appointment.approvedSlot.date,
-                          appointment.approvedSlot.time,
-                          duration,
-                        );
-                        await incrementSlotOccupancy(slot.date, slot.time, duration);
-                      }
-                      await updateAppointmentSlotFS(selectedAppointmentId, appointment.status, slot);
-                      await addActivityLog({
-                        action: 'appointment_slot_modified',
-                        adminEmail: user?.email || 'unknown',
-                        details: `Cita ID: ${selectedAppointmentId} → ${slot.date} ${slot.time}`,
-                      });
-                      await refreshData();
                       setShowEditSlotModal(false);
                       setSelectedAppointmentId(null);
                     }}

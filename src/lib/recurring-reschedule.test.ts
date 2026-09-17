@@ -103,6 +103,20 @@ describe('recurring reschedule UI helpers', () => {
         }, 'fallback')).toMatch(/bloqueada/i);
     });
 
+    it.each([
+        ['invalid_interval', /intervalo.*válido/i],
+        ['not_recurring', /no pertenece.*serie/i],
+        ['user_not_found', /encontrado.*cliente/i],
+        ['series_owner_mismatch', /datos.*serie.*coinciden|propietario.*serie/i],
+        ['duplicate_recurrence_index', /índices.*duplicados/i],
+        ['invalid_occurrence_slot', /sesión futura.*franja.*válida/i],
+        ['admin_required', /permisos.*administrador|admin/i],
+        ['unauthenticated', /iniciar sesión/i],
+    ] as const)('maps the new Admin reason %s', (reason, expected) => {
+        expect(getRecurringRescheduleErrorMessage({ details: { reason } }, 'fallback')).toMatch(expected);
+        expect(getRecurringRescheduleErrorMessage({ customData: { details: { reason } } }, 'fallback')).toMatch(expected);
+    });
+
     it('excludes a pending appointment from its own conflict without granting occupancy credit', () => {
         const pending = {
             ...appointment('pending-self', 0, '2026-09-20', 'pending'),

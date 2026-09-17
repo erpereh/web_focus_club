@@ -33,6 +33,7 @@ function evaluate(overrides: Partial<Parameters<typeof evaluateRecurringHastaOpt
         durationMinutes: 60,
         options: baseOptions,
         occupancy: {},
+        occupancyCreditsByKey: new Map(),
         blockedKeys: new Set(),
         userBookedSlotKeys: new Set(),
         siteConfig,
@@ -116,6 +117,25 @@ describe('evaluateRecurringHastaOptions', () => {
         expect(atCapacity[1].problemDate).toBe('2026-09-25');
     });
 
+    it('applies occupancy credits before deciding whether a recurring option is full', () => {
+        const statuses = evaluate({
+            occupancy: {
+                '2026-09-23_11:00': 5,
+                '2026-09-23_11:15': 5,
+                '2026-09-23_11:30': 5,
+                '2026-09-23_11:45': 5,
+            },
+            occupancyCreditsByKey: new Map([
+                ['2026-09-23_11:00', 1],
+                ['2026-09-23_11:15', 1],
+                ['2026-09-23_11:30', 1],
+                ['2026-09-23_11:45', 1],
+            ]),
+        });
+
+        expect(statuses[0].availability).toBe('available');
+    });
+
     it('marks a prefix invalid for outside_schedule and past', () => {
         const outside = evaluate({ startTime: '19:45' });
         expect(outside[0].availability).toBe('outside_schedule');
@@ -127,6 +147,56 @@ describe('evaluateRecurringHastaOptions', () => {
         expect(past[0].problemDate).toBe('2026-09-23');
         expect(past[2].availability).toBe('past');
         expect(past[2].problemDate).toBe('2026-09-23');
+    });
+});
+
+describe('evaluateRecurringHastaOptions Madrid civil time', () => {
+    it('treats a winter CET wall-clock slot as past', () => {
+        const options = getRecurringEndDateOptions({
+            startDate: '2026-01-15',
+            intervalDays: 2,
+            durationMinutes: 60,
+            remainingMinutes: 180,
+        });
+        const statuses = evaluateRecurringHastaOptions({
+            startDate: '2026-01-15',
+            startTime: '10:00',
+            intervalDays: 2,
+            durationMinutes: 60,
+            options,
+            occupancy: {},
+            occupancyCreditsByKey: new Map(),
+            blockedKeys: new Set(),
+            userBookedSlotKeys: new Set(),
+            siteConfig,
+            now: new Date('2026-01-15T09:30:00.000Z'),
+        });
+
+        expect(statuses[0]).toMatchObject({ availability: 'past', problemDate: '2026-01-15' });
+    });
+
+    it('treats a summer CEST wall-clock slot as past', () => {
+        const options = getRecurringEndDateOptions({
+            startDate: '2026-07-15',
+            intervalDays: 2,
+            durationMinutes: 60,
+            remainingMinutes: 180,
+        });
+        const statuses = evaluateRecurringHastaOptions({
+            startDate: '2026-07-15',
+            startTime: '11:00',
+            intervalDays: 2,
+            durationMinutes: 60,
+            options,
+            occupancy: {},
+            occupancyCreditsByKey: new Map(),
+            blockedKeys: new Set(),
+            userBookedSlotKeys: new Set(),
+            siteConfig,
+            now: new Date('2026-07-15T09:30:00.000Z'),
+        });
+
+        expect(statuses[0]).toMatchObject({ availability: 'past', problemDate: '2026-07-15' });
     });
 });
 

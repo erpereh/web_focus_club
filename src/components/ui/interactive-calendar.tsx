@@ -29,6 +29,8 @@ export interface InteractiveCalendarProps {
   userBookedSlotKeys?: Set<string>;
   minDate?: string;
   occupancyCreditsByKey?: Map<string, number>;
+  /** Allows Admin historical corrections while keeping Portal defaults unchanged. */
+  allowPastDates?: boolean;
   disabled?: boolean;
   showSelectedSlotSummary?: boolean;
   availabilityLabelMode?: 'remaining' | 'occupancy';
@@ -75,6 +77,7 @@ export function InteractiveCalendar({
   userBookedSlotKeys,
   minDate,
   occupancyCreditsByKey,
+  allowPastDates = false,
   disabled = false,
   showSelectedSlotSummary = true,
   availabilityLabelMode = 'remaining',
@@ -170,7 +173,7 @@ export function InteractiveCalendar({
   };
 
   const todayMonthKey = todayKey.slice(0, 7);
-  const canGoBack = currentMonthKey > todayMonthKey;
+  const canGoBack = allowPastDates || currentMonthKey > todayMonthKey;
   const calendarDisabled = disabled || availabilityState.status !== 'ready';
 
   const goNextMonth = () => {
@@ -204,6 +207,19 @@ export function InteractiveCalendar({
     maxCapacity: siteConfig.maxCapacity,
   });
 
+  const isHistoricalSlot = (day: number, time: string): boolean => !classifyMadridCivilSlot({
+    date: formatDateKey(currentYear, currentMonth, day),
+    time,
+  }, new Date()).isFuture;
+
+  const getDisplayAvailability = (day: number, time: string): SlotAvailabilityResult => {
+    const availability = getAvailability(day, time);
+    if (allowPastDates && isHistoricalSlot(day, time)) {
+      return { disabled: false, reason: null, occupancy: 0 };
+    }
+    return availability;
+  };
+
   const isPastDay = (day: number): boolean => formatDateKey(currentYear, currentMonth, day) < todayKey;
   const isPastTime = (day: number, time: string): boolean => !classifyMadridCivilSlot({
     date: formatDateKey(currentYear, currentMonth, day),
@@ -212,15 +228,15 @@ export function InteractiveCalendar({
 
   const dayHasAvailability = (day: number): boolean => {
     const dateKey = formatDateKey(currentYear, currentMonth, day);
-    if (dateKey < todayKey || (minDate && dateKey < minDate) || availabilityState.status !== 'ready') return false;
-    return timeSlots.some((time) => !isPastTime(day, time) && !getAvailability(day, time).disabled);
+    if ((!allowPastDates && dateKey < todayKey) || (minDate && dateKey < minDate) || availabilityState.status !== 'ready') return false;
+    return timeSlots.some((time) => (allowPastDates || !isPastTime(day, time)) && !getDisplayAvailability(day, time).disabled);
   };
 
   const getDayOccupancySummary = (day: number): { hasPartial: boolean; hasFull: boolean } => {
     let hasPartial = false;
     let hasFull = false;
     timeSlots.forEach((time) => {
-      const result = getAvailability(day, time);
+      const result = getDisplayAvailability(day, time);
       if (result.reason === 'slot_full') hasFull = true;
       if (!result.disabled && result.occupancy > 0) hasPartial = true;
     });
@@ -237,8 +253,8 @@ export function InteractiveCalendar({
   const handleSlotClick = (time: string) => {
     if (!selectedDay || calendarDisabled) return;
     const date = formatDateKey(currentYear, currentMonth, selectedDay);
-    const result = getAvailability(selectedDay, time);
-    if (isPastTime(selectedDay, time) || result.disabled) return;
+    const result = getDisplayAvailability(selectedDay, time);
+    if ((!allowPastDates && isPastTime(selectedDay, time)) || result.disabled) return;
     if (selectedSlot?.date === date && selectedSlot.time === time) {
       onClearSlot();
       return;
@@ -299,7 +315,7 @@ export function InteractiveCalendar({
           {Array.from({ length: daysInMonth }).map((_, index) => {
             const day = index + 1;
             const dateKey = formatDateKey(currentYear, currentMonth, day);
-            const past = isPastDay(day) || Boolean(minDate && dateKey < minDate);
+            const past = (!allowPastDates && isPastDay(day)) || Boolean(minDate && dateKey < minDate);
             const isToday = dateKey === todayKey;
             const isSelected = selectedDate ? selectedDate === dateKey : selectedDay === day;
             const hasAvailability = !past && dayHasAvailability(day);
@@ -355,7 +371,7 @@ export function InteractiveCalendar({
         )}
       </div>
 
-      {selectedDay && !isPastDay(selectedDay) && availabilityState.status === 'ready' && (
+      {selectedDay && (allowPastDates || !isPastDay(selectedDay)) && availabilityState.status === 'ready' && (
           <motion.div
             key={`slots-${currentYear}-${currentMonth}-${selectedDay}`}
             initial={{ opacity: 0, y: 10 }}
@@ -379,16 +395,16 @@ export function InteractiveCalendar({
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
               {timeSlots.map((time) => {
                 const past = isPastTime(selectedDay, time);
-                const availability = getAvailability(selectedDay, time);
+                const availability = getDisplayAvailability(selectedDay, time);
                 const date = formatDateKey(currentYear, currentMonth, selectedDay);
                 const selected = selectedSlot?.date === date && selectedSlot.time === time;
                 const isBlocked = availability.reason === 'slot_blocked';
                 const isConflict = availability.reason === 'appointment_conflict';
                 const isFull = availability.reason === 'slot_full';
                 const isPartial = !availability.disabled && availability.occupancy > 0;
-                const unavailable = disabled || past || availability.disabled;
+                const unavailable = disabled || (!allowPastDates && past) || availability.disabled;
                 const remaining = Math.max(0, siteConfig.maxCapacity - availability.occupancy);
-                const availabilityLabel = past || isConflict
+                const availabilityLabel = (!allowPastDates && past) || isConflict
                   ? 'No disponible'
                   : isBlocked
                     ? 'Bloqueada'

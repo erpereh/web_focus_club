@@ -746,6 +746,61 @@ export async function updateOwnAppointmentSlot(input: {
     await callable(input);
 }
 
+export interface AdminAppointmentRescheduleInput {
+    appointmentId: string;
+    slot: TimeSlot;
+    assignedTrainer: string | null;
+}
+
+export interface AdminAppointmentRescheduleResult {
+    success: true;
+    appointmentId: string;
+    changed?: boolean;
+}
+
+/** Authoritative Admin reschedule for one pending/approved appointment. */
+export async function rescheduleAppointmentFromAdmin(
+    input: AdminAppointmentRescheduleInput,
+): Promise<AdminAppointmentRescheduleResult> {
+    const callable = httpsCallable<
+        AdminAppointmentRescheduleInput,
+        AdminAppointmentRescheduleResult
+    >(firebaseFunctions, 'rescheduleAppointmentFromAdmin');
+    const result = await callable(input);
+    return result.data;
+}
+
+export interface AdminRecurringSeriesScheduleReplacementInput {
+    appointmentId: string;
+    startSlot: TimeSlot;
+    endDate: string;
+    assignedTrainer: string | null;
+}
+
+export interface AdminRecurringSeriesScheduleReplacementResult {
+    success: true;
+    seriesId: string;
+    appointmentId: string;
+    reusedAppointmentIds: string[];
+    cancelledAppointmentIds: string[];
+    createdAppointmentIds: string[];
+    oldFutureCount: number;
+    newFutureCount: number;
+    minutesDelta: number;
+}
+
+/** Authoritative Admin replacement for all future appointments in a series. */
+export async function replaceRecurringSeriesScheduleFromAdmin(
+    input: AdminRecurringSeriesScheduleReplacementInput,
+): Promise<AdminRecurringSeriesScheduleReplacementResult> {
+    const callable = httpsCallable<
+        AdminRecurringSeriesScheduleReplacementInput,
+        AdminRecurringSeriesScheduleReplacementResult
+    >(firebaseFunctions, 'replaceRecurringSeriesScheduleFromAdmin');
+    const result = await callable(input);
+    return result.data;
+}
+
 export interface RecurringRescheduleInput {
     appointmentId: string;
     preferredSlot: TimeSlot;

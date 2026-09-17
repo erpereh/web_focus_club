@@ -100,6 +100,42 @@ describe('InteractiveCalendar', () => {
     expect(screen.getByRole('button', { name: /17 de Septiembre/i })).toBeEnabled();
   });
 
+  it('allows historical days and times only when allowPastDates is enabled', async () => {
+    subscribeMonthAvailability.mockImplementation((
+      _year: number,
+      _month: number,
+      callback: (data: { occupancy: Record<string, number>; blockedSlots: unknown[] }) => void,
+    ) => {
+      callback({
+        occupancy: {
+          '2026-09-15_08:00': 4,
+          '2026-09-15_10:00': 4,
+          '2026-09-15_18:00': 4,
+        },
+        blockedSlots: [{ id: 'blocked', date: '2026-09-15', time: '18:00', createdBy: '', createdAt: '' }],
+      });
+      return vi.fn();
+    });
+
+    render(
+      <InteractiveCalendar
+        selectedSlot={null}
+        onSelectSlot={vi.fn()}
+        onClearSlot={vi.fn()}
+        selectedDuration={60}
+        allowPastDates
+      />,
+    );
+    await waitFor(() => expect(screen.queryByText('Cargando disponibilidad...')).not.toBeInTheDocument());
+
+    expect(screen.getByRole('button', { name: /15 de Septiembre/i })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /15 de Septiembre/i }));
+
+    expect(screen.getByRole('button', { name: /08:00, Libre/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /10:00, Libre/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /18:00, Libre/i })).toBeEnabled();
+  });
+
   it('shows partial occupancy and disables full, blocked and customer-conflict slots', async () => {
     subscribeMonthAvailability.mockImplementation((
       _year: number,

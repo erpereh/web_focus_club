@@ -105,6 +105,7 @@ export function getRecurringHastaViewModel(input: {
     durationMinutes: number;
     remainingMinutes: number;
     bonoExpirationDate?: string | null;
+    maxOccurrences?: number;
 }): {
     startDate: string | null;
     options: RecurringEndDateOption[];
@@ -120,12 +121,44 @@ export function getRecurringHastaViewModel(input: {
         durationMinutes: input.durationMinutes,
         remainingMinutes: input.remainingMinutes,
         bonoExpirationDate: input.bonoExpirationDate,
+        maxOccurrences: input.maxOccurrences,
     });
     return {
         startDate,
         options,
         emptyReason: options.length === 0 ? 'no-valid-end' : null,
     };
+}
+
+/**
+ * Builds the Admin preview for replacing a recurring schedule. An expired bono
+ * can still support keeping/reducing already-reserved future sessions; only
+ * expansion needs fresh, unexpired minutes and remains capped by the old set.
+ */
+export function getAdminRecurringHastaViewModel(input: {
+    startDate?: string | null;
+    intervalDays: number;
+    durationMinutes: number;
+    remainingMinutes: number;
+    futureReservedCount: number;
+    bonoExpirationDate?: string | null;
+    now: Date;
+}): ReturnType<typeof getRecurringHastaViewModel> {
+    const expiration = input.bonoExpirationDate ? new Date(input.bonoExpirationDate) : undefined;
+    const expirationIsValid = expiration && !Number.isNaN(expiration.getTime());
+    const bonoExpired = Boolean(expirationIsValid && expiration && expiration < input.now);
+    const reservedCount = Number.isFinite(input.futureReservedCount)
+        ? Math.max(0, Math.floor(input.futureReservedCount))
+        : 0;
+
+    return getRecurringHastaViewModel({
+        startDate: input.startDate,
+        intervalDays: input.intervalDays,
+        durationMinutes: input.durationMinutes,
+        remainingMinutes: input.remainingMinutes,
+        bonoExpirationDate: bonoExpired ? null : input.bonoExpirationDate,
+        maxOccurrences: bonoExpired ? reservedCount : undefined,
+    });
 }
 
 export function sanitizeRecurringEndDate(
