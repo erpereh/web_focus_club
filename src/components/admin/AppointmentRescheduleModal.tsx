@@ -14,6 +14,7 @@ import {
   InteractiveCalendar,
   type CalendarAvailabilityState,
 } from '@/components/ui/interactive-calendar';
+import { PremiumSelect } from '@/components/ui/premium-select';
 import { RecurringHastaSelect } from '@/components/ui/recurring-hasta-select';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
@@ -598,33 +599,37 @@ export function AppointmentRescheduleModal({
 
             <section aria-labelledby="trainer-heading">
               <label id="trainer-heading" htmlFor="appointment-reschedule-trainer" className="mb-2 block text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--color-text-secondary)]">Entrenador asignado</label>
-              <select
+              <PremiumSelect
                 id="appointment-reschedule-trainer"
-                aria-label="Entrenador asignado"
+                ariaLabel="Entrenador asignado"
                 value={trainerSelectionValue(trainerSelection)}
                 disabled={busy || (isSeriesFlow && seriesMetadataPhase !== 'ready')}
-                onChange={(event) => {
-                  if (event.target.value === TRAINER_UNASSIGNED_VALUE) {
+                onChange={(value) => {
+                  if (value === TRAINER_UNASSIGNED_VALUE) {
                     setTrainerSelection({ kind: 'unassigned' });
-                  } else if (event.target.value !== TRAINER_PENDING_VALUE) {
-                    setTrainerSelection({ kind: 'trainer', trainerId: event.target.value });
+                  } else if (value !== TRAINER_PENDING_VALUE) {
+                    setTrainerSelection({ kind: 'trainer', trainerId: value });
                   }
                   setError('');
                 }}
-                className="w-full rounded-xl border border-border bg-input px-4 py-3 text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-              >
-                {trainerSelection.kind === 'pending' && (
-                  <option value={TRAINER_PENDING_VALUE} disabled>
-                    {isSeriesFlow ? 'Selecciona el entrenador del nuevo tramo' : 'Selecciona un entrenador activo'}
-                  </option>
-                )}
-                <option value={TRAINER_UNASSIGNED_VALUE}>Sin asignar</option>
-                {visibleTrainers.map((trainer) => (
-                  <option key={trainer.id} value={trainer.id}>
-                    {trainer.name}{trainer.active === false ? ' (inactivo)' : ''}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  ...(trainerSelection.kind === 'pending'
+                    ? [{
+                      value: TRAINER_PENDING_VALUE,
+                      label: isSeriesFlow
+                        ? 'Selecciona el entrenador del nuevo tramo'
+                        : 'Selecciona un entrenador activo',
+                      disabled: true,
+                    }]
+                    : []),
+                  { value: TRAINER_UNASSIGNED_VALUE, label: 'Sin asignar' },
+                  ...visibleTrainers.map((trainer) => ({
+                    value: trainer.id,
+                    label: `${trainer.name}${trainer.active === false ? ' (inactivo)' : ''}`,
+                    muted: trainer.active === false,
+                  })),
+                ]}
+              />
               {trainerAssignmentMessage && (
                 <p className="mt-2 text-xs text-[var(--color-text-secondary)]">{trainerAssignmentMessage}</p>
               )}

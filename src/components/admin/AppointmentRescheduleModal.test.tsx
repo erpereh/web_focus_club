@@ -106,9 +106,13 @@ function trainer(id: string, name: string, active = true): Trainer {
 }
 
 function chooseUnassigned(): void {
-  const select = screen.getByRole('combobox', { name: /Entrenador asignado/i });
-  const option = screen.getByRole('option', { name: 'Sin asignar' }) as HTMLOptionElement;
-  fireEvent.change(select, { target: { value: option.value } });
+  fireEvent.click(screen.getByRole('button', { name: /Entrenador asignado/i }));
+  fireEvent.click(screen.getByRole('option', { name: 'Sin asignar' }));
+}
+
+function chooseTrainer(name: string): void {
+  fireEvent.click(screen.getByRole('button', { name: /Entrenador asignado/i }));
+  fireEvent.click(screen.getByRole('option', { name }));
 }
 
 async function chooseEndDateOption(name: RegExp): Promise<void> {
@@ -308,7 +312,7 @@ describe('AppointmentRescheduleModal', () => {
     );
 
     await waitFor(() => expect(screen.getByRole('button', { name: /Guardar cambio/i })).toBeDisabled());
-    fireEvent.change(screen.getByRole('combobox', { name: /Entrenador asignado/i }), { target: { value: 'trainer-2' } });
+    chooseTrainer('Entrenador Dos');
     expect(screen.getByRole('button', { name: /Guardar cambio/i })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: /Guardar cambio/i }));
 
@@ -335,7 +339,7 @@ describe('AppointmentRescheduleModal', () => {
     );
 
     await waitFor(() => expect(screen.getByRole('button', { name: /Guardar cambio/i })).toBeDisabled());
-    fireEvent.change(screen.getByRole('combobox', { name: /Entrenador asignado/i }), { target: { value: 'trainer-2' } });
+    chooseTrainer('Entrenador Dos');
     expect(screen.getByRole('button', { name: /Guardar cambio/i })).toBeDisabled();
   });
 
@@ -494,13 +498,13 @@ describe('AppointmentRescheduleModal', () => {
       />,
     );
 
-    const select = screen.getByRole('combobox', { name: /Entrenador asignado/i });
-    expect(select).toHaveValue('trainer-old');
+    const select = screen.getByRole('button', { name: /Entrenador asignado/i });
+    expect(select).toHaveTextContent('Entrenador histórico');
     fireEvent.click(screen.getByRole('button', { name: /Toda la serie/i }));
-    await waitFor(() => expect(select).toHaveValue('trainer-current'));
+    await waitFor(() => expect(select).toHaveTextContent('Entrenador actual'));
     expect(screen.getByText('El nuevo tramo quedará asignado a Entrenador actual.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Solo esta cita/i }));
-    expect(select).toHaveValue('trainer-old');
+    expect(select).toHaveTextContent('Entrenador histórico');
   });
 
   it('requires an explicit series trainer decision for mixed, inactive, or unassigned schedules', async () => {
@@ -523,8 +527,8 @@ describe('AppointmentRescheduleModal', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Toda la serie/i }));
-    const select = screen.getByRole('combobox', { name: /Entrenador asignado/i }) as HTMLSelectElement;
-    await waitFor(() => expect(select.selectedOptions[0]).toHaveTextContent('Selecciona el entrenador del nuevo tramo'));
+    const select = screen.getByRole('button', { name: /Entrenador asignado/i });
+    await waitFor(() => expect(select).toHaveTextContent('Selecciona el entrenador del nuevo tramo'));
     fireEvent.click(screen.getByRole('button', { name: 'Elegir fecha' }));
     fireEvent.click(screen.getByRole('button', { name: 'Elegir hora' }));
     fireEvent.click(screen.getByRole('button', { name: /Selecciona la última sesión/i }));
@@ -548,7 +552,7 @@ describe('AppointmentRescheduleModal', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Toda la serie/i }));
-    await waitFor(() => expect(screen.getByRole('combobox', { name: /Entrenador asignado/i })).toHaveValue('trainer-current'));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Entrenador asignado/i })).toHaveTextContent('Entrenador actual'));
   });
 
   it('does not treat an inactive recurrence trainer as a valid series decision', async () => {
@@ -566,8 +570,8 @@ describe('AppointmentRescheduleModal', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Toda la serie/i }));
-    const select = screen.getByRole('combobox', { name: /Entrenador asignado/i }) as HTMLSelectElement;
-    await waitFor(() => expect(select.selectedOptions[0]).toHaveTextContent('Selecciona el entrenador del nuevo tramo'));
+    const select = screen.getByRole('button', { name: /Entrenador asignado/i });
+    await waitFor(() => expect(select).toHaveTextContent('Selecciona el entrenador del nuevo tramo'));
     expect(screen.getByRole('button', { name: /Guardar cambio/i })).toBeDisabled();
   });
 
@@ -585,8 +589,8 @@ describe('AppointmentRescheduleModal', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Toda la serie/i }));
-    const select = screen.getByRole('combobox', { name: /Entrenador asignado/i }) as HTMLSelectElement;
-    await waitFor(() => expect(select.selectedOptions[0]).toHaveTextContent('Selecciona el entrenador del nuevo tramo'));
+    const select = screen.getByRole('button', { name: /Entrenador asignado/i });
+    await waitFor(() => expect(select).toHaveTextContent('Selecciona el entrenador del nuevo tramo'));
     expect(screen.getByRole('button', { name: /Guardar cambio/i })).toBeDisabled();
   });
 
@@ -693,7 +697,7 @@ describe('AppointmentRescheduleModal', () => {
       />,
     );
 
-    fireEvent.change(screen.getByRole('combobox', { name: /Entrenador asignado/i }), { target: { value: 'trainer-2' } });
+    chooseTrainer('Entrenador Dos');
     expect(screen.getByRole('button', { name: /Guardar cambio/i })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: /Guardar cambio/i }));
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({
@@ -762,6 +766,7 @@ describe('AppointmentRescheduleModal', () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: /Entrenador asignado/i }));
     expect(screen.getByRole('option', { name: 'Entrenador activo' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Entrenador histórico (inactivo)' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Otro inactivo (inactivo)' })).not.toBeInTheDocument();
@@ -783,8 +788,9 @@ describe('AppointmentRescheduleModal', () => {
       />,
     );
 
-    const select = screen.getByRole('combobox', { name: /Entrenador asignado/i }) as HTMLSelectElement;
-    expect(select.selectedOptions[0]).toHaveTextContent('Selecciona un entrenador activo');
+    const select = screen.getByRole('button', { name: /Entrenador asignado/i });
+    expect(select).toHaveTextContent('Selecciona un entrenador activo');
+    fireEvent.click(select);
     expect(screen.queryByRole('option', { name: 'Entrenador inactivo (inactivo)' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Guardar cambio/i })).toBeDisabled();
   });
@@ -805,7 +811,7 @@ describe('AppointmentRescheduleModal', () => {
       />,
     );
 
-    fireEvent.change(screen.getByRole('combobox', { name: /Entrenador asignado/i }), { target: { value: 'trainer-2' } });
+    chooseTrainer('Entrenador Dos');
     fireEvent.click(screen.getByRole('button', { name: 'Elegir fecha' }));
     fireEvent.click(screen.getByRole('button', { name: 'Elegir hora' }));
     expect(screen.getByText('Se asignará a Entrenador Dos.')).toBeInTheDocument();
