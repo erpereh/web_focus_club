@@ -65,6 +65,7 @@ import {
 } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
+import { PremiumSelect } from '@/components/ui/premium-select';
 import { ContextualImageManager } from '@/components/ui/ContextualImageManager';
 import { GalleryManager } from '@/components/admin/GalleryManager';
 import { MediaPicker } from '@/components/admin/MediaPicker';
@@ -813,14 +814,17 @@ function SortableGaleriaTrainingItem({
             placeholder="Titulo de entrenamiento"
             className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
           />
-          <select
+          <PremiumSelect
+            id={`training-media-type-${index}`}
+            ariaLabel={`Tipo de contenido para ${training.title || `Entrenamiento ${index + 1}`}`}
+            size="compact"
             value={training.mediaType ?? 'image'}
-            onChange={(e) => onUpdate('mediaType', e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)] text-sm"
-          >
-            <option value="image">Imagen</option>
-            <option value="video">Video</option>
-          </select>
+            onChange={(value) => onUpdate('mediaType', value)}
+            options={[
+              { value: 'image', label: 'Imagen' },
+              { value: 'video', label: 'Video' },
+            ]}
+          />
         </div>
       </div>
       <div className="flex items-center justify-end gap-2">
@@ -3763,23 +3767,23 @@ export default function AdminPage() {
                               Unido el {client.createdAt ? new Date(client.createdAt).toLocaleDateString() : 'Fecha desconocida'}
                             </div>
                             {/* Role dropdown */}
-                            <select
+                            <PremiumSelect
+                              id={`client-role-${client.uid}`}
+                              ariaLabel={`Rol de ${client.name}`}
+                              size="compact"
                               value={client.role}
                               disabled={roleUpdatingUid === client.uid}
-                              onChange={(e) => handleClientRoleChange(client, e.target.value as AdminUserRole)}
+                              onChange={(value) => handleClientRoleChange(client, value as AdminUserRole)}
+                              options={CLIENT_ROLE_OPTIONS}
                               className={cn(
-                                "px-2 py-1 rounded-lg text-xs font-medium uppercase tracking-tight border bg-input focus:outline-none focus:border-[var(--color-accent-val)] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed",
+                                "w-auto min-w-28 font-medium uppercase tracking-tight",
                                 client.role === 'admin'
                                   ? "text-[var(--color-accent-val)] border-accent/30"
                                   : client.role === 'trainer'
                                     ? "text-[var(--color-accent-val)] border-[var(--color-accent-border)]"
                                     : "text-[var(--color-text-primary)] border-border"
                               )}
-                            >
-                              {CLIENT_ROLE_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>{option.label}</option>
-                              ))}
-                            </select>
+                            />
                             <button
                               type="button"
                               onClick={() => openEditClientModal(client)}
@@ -5303,15 +5307,17 @@ export default function AdminPage() {
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                           <div>
-                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Tipo de fondo</label>
-                            <select
+                            <label htmlFor="hero-background-type" className="block text-sm text-[var(--color-text-secondary)] mb-2">Tipo de fondo</label>
+                            <PremiumSelect
+                              id="hero-background-type"
+                              ariaLabel="Tipo de fondo"
                               value={editedContent?.heroBackgroundType ?? 'video'}
-                              onChange={(e) => setEditedContent(prev => prev ? { ...prev, heroBackgroundType: e.target.value === 'image' ? 'image' : 'video' } as CMSContent : prev)}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            >
-                              <option value="video">Video</option>
-                              <option value="image">Imagen</option>
-                            </select>
+                              onChange={(value) => setEditedContent(prev => prev ? { ...prev, heroBackgroundType: value === 'image' ? 'image' : 'video' } as CMSContent : prev)}
+                              options={[
+                                { value: 'video', label: 'Video' },
+                                { value: 'image', label: 'Imagen' },
+                              ]}
+                            />
                           </div>
                           <div className="sm:col-span-2">
                             <label className="block text-sm text-[var(--color-text-secondary)] mb-2">URL fondo hero</label>
@@ -6500,16 +6506,20 @@ export default function AdminPage() {
 
                         {/* Slot Interval */}
                         <div>
-                          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Intervalo de Slots</label>
-                          <select
-                            value={editConfig.slotInterval ?? 30}
-                            onChange={(e) => setEditConfig(prev => ({ ...prev, slotInterval: parseInt(e.target.value) }))}
-                            className="w-48 px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-[var(--color-text-primary)] focus:border-[var(--color-accent-val)] focus:outline-none"
-                          >
-                            <option value={30}>30 minutos</option>
-                            <option value={45}>45 minutos</option>
-                            <option value={60}>60 minutos</option>
-                          </select>
+                          <label htmlFor="site-slot-interval" className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Intervalo de Slots</label>
+                          <PremiumSelect
+                            id="site-slot-interval"
+                            ariaLabel="Intervalo de slots"
+                            size="compact"
+                            value={String(editConfig.slotInterval ?? 30)}
+                            onChange={(value) => setEditConfig(prev => ({ ...prev, slotInterval: parseInt(value) }))}
+                            options={[
+                              { value: '30', label: '30 minutos' },
+                              { value: '45', label: '45 minutos' },
+                              { value: '60', label: '60 minutos' },
+                            ]}
+                            className="w-48"
+                          />
                           <p className="text-xs text-[var(--color-text-secondary)] mt-1">Cada cuánto tiempo empieza un nuevo slot en el calendario.</p>
                         </div>
                       </div>
@@ -7129,16 +7139,18 @@ export default function AdminPage() {
                             />
                           </div>
                           <div>
-                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Duracion *</label>
-                            <select
-                              value={createAppointmentForm.durationMinutes}
-                              onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, durationMinutes: Number(e.target.value) as 30 | 45 | 60, time: '', endDate: '' }))}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            >
-                              <option value={30}>30 minutos</option>
-                              <option value={45}>45 minutos</option>
-                              <option value={60}>60 minutos</option>
-                            </select>
+                            <label htmlFor="create-appointment-duration" className="block text-sm text-[var(--color-text-secondary)] mb-2">Duracion *</label>
+                            <PremiumSelect
+                              id="create-appointment-duration"
+                              ariaLabel="Duracion"
+                              value={String(createAppointmentForm.durationMinutes)}
+                              onChange={(value) => setCreateAppointmentForm(prev => ({ ...prev, durationMinutes: Number(value) as 30 | 45 | 60, time: '', endDate: '' }))}
+                              options={[
+                                { value: '30', label: '30 minutos' },
+                                { value: '45', label: '45 minutos' },
+                                { value: '60', label: '60 minutos' },
+                              ]}
+                            />
                           </div>
                         </div>
 
@@ -7153,17 +7165,17 @@ export default function AdminPage() {
                             />
                           </div>
                           <div>
-                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Entrenador *</label>
-                            <select
+                            <label htmlFor="create-appointment-trainer" className="block text-sm text-[var(--color-text-secondary)] mb-2">Entrenador *</label>
+                            <PremiumSelect
+                              id="create-appointment-trainer"
+                              ariaLabel="Entrenador"
                               value={createAppointmentForm.assignedTrainer}
-                              onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, assignedTrainer: e.target.value }))}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            >
-                              <option value="">Seleccionar entrenador</option>
-                              {activeTrainers.map((trainer) => (
-                                <option key={trainer.id} value={trainer.id}>{trainer.name}</option>
-                              ))}
-                            </select>
+                              onChange={(value) => setCreateAppointmentForm(prev => ({ ...prev, assignedTrainer: value }))}
+                              options={[
+                                { value: '', label: 'Seleccionar entrenador' },
+                                ...activeTrainers.map((trainer) => ({ value: trainer.id, label: trainer.name })),
+                              ]}
+                            />
                           </div>
                         </div>
 
@@ -7440,29 +7452,29 @@ export default function AdminPage() {
                               />
                             </div>
                             <div>
-                              <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Rol *</label>
-                              <select
+                              <label htmlFor="create-client-role" className="block text-sm text-[var(--color-text-secondary)] mb-2">Rol *</label>
+                              <PremiumSelect
+                                id="create-client-role"
+                                ariaLabel="Rol"
                                 value={createClientForm.role}
-                                onChange={(e) => setCreateClientForm(prev => ({ ...prev, role: e.target.value as AdminUserRole }))}
-                                className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                              >
-                                {CLIENT_ROLE_OPTIONS.map((option) => (
-                                  <option key={option.value} value={option.value}>{option.label}</option>
-                                ))}
-                              </select>
+                                onChange={(value) => setCreateClientForm(prev => ({ ...prev, role: value as AdminUserRole }))}
+                                options={CLIENT_ROLE_OPTIONS}
+                              />
                             </div>
                           </div>
 
                           <div>
-                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Metodo de acceso *</label>
-                            <select
+                            <label htmlFor="create-client-access-method" className="block text-sm text-[var(--color-text-secondary)] mb-2">Metodo de acceso *</label>
+                            <PremiumSelect
+                              id="create-client-access-method"
+                              ariaLabel="Metodo de acceso"
                               value={createClientForm.accessMethod}
-                              onChange={(e) => setCreateClientForm(prev => ({ ...prev, accessMethod: e.target.value as AdminUserAccessMethod, password: '', confirmPassword: '' }))}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            >
-                              <option value="password">Crear con contrasena temporal</option>
-                              <option value="email-reset">Enviar email para establecer contrasena</option>
-                            </select>
+                              onChange={(value) => setCreateClientForm(prev => ({ ...prev, accessMethod: value as AdminUserAccessMethod, password: '', confirmPassword: '' }))}
+                              options={[
+                                { value: 'password', label: 'Crear con contrasena temporal' },
+                                { value: 'email-reset', label: 'Enviar email para establecer contrasena' },
+                              ]}
+                            />
                           </div>
 
                           {createClientForm.accessMethod === 'password' && (
@@ -7578,16 +7590,14 @@ export default function AdminPage() {
                             />
                           </div>
                           <div>
-                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Rol</label>
-                            <select
+                            <label htmlFor="edit-client-role" className="block text-sm text-[var(--color-text-secondary)] mb-2">Rol</label>
+                            <PremiumSelect
+                              id="edit-client-role"
+                              ariaLabel="Rol"
                               value={editClientForm.role}
-                              onChange={(e) => setEditClientForm(prev => ({ ...prev, role: e.target.value as AdminUserRole }))}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            >
-                              {CLIENT_ROLE_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>{option.label}</option>
-                              ))}
-                            </select>
+                              onChange={(value) => setEditClientForm(prev => ({ ...prev, role: value as AdminUserRole }))}
+                              options={CLIENT_ROLE_OPTIONS}
+                            />
                           </div>
                         </div>
 
@@ -8144,17 +8154,20 @@ export default function AdminPage() {
                       </p>
                       <div className="space-y-4 mb-6">
                         <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Entrenador asignado</label>
-                          <select
+                          <label htmlFor="series-approval-trainer" className="block text-sm text-[var(--color-text-secondary)] mb-2">Entrenador asignado</label>
+                          <PremiumSelect
+                            id="series-approval-trainer"
+                            ariaLabel="Entrenador asignado"
                             value={seriesApprovalTrainer}
-                            onChange={(e) => setSeriesApprovalTrainer(e.target.value)}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          >
-                            <option value="">Sin asignar</option>
-                            {trainers.filter(trainer => trainer.active).map((trainer) => (
-                              <option key={trainer.id} value={trainer.id}>{trainer.name}</option>
-                            ))}
-                          </select>
+                            onChange={setSeriesApprovalTrainer}
+                            options={[
+                              { value: '', label: 'Sin asignar' },
+                              ...trainers.filter((trainer) => trainer.active).map((trainer) => ({
+                                value: trainer.id,
+                                label: trainer.name,
+                              })),
+                            ]}
+                          />
                         </div>
                       </div>
                       <div className="flex gap-3 justify-end">
@@ -8242,17 +8255,20 @@ export default function AdminPage() {
 
                       <div className="space-y-4 mb-6">
                         <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Entrenador asignado</label>
-                          <select
+                          <label htmlFor="appointment-approval-trainer" className="block text-sm text-[var(--color-text-secondary)] mb-2">Entrenador asignado</label>
+                          <PremiumSelect
+                            id="appointment-approval-trainer"
+                            ariaLabel="Entrenador asignado"
                             value={approvalData.assignedTrainer}
-                            onChange={(e) => setApprovalData({ ...approvalData, assignedTrainer: e.target.value })}
-                            className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                          >
-                            <option value="">Sin asignar</option>
-                            {trainers.filter(t => t.active).map((t) => (
-                              <option key={t.id} value={t.id}>{t.name}</option>
-                            ))}
-                          </select>
+                            onChange={(value) => setApprovalData({ ...approvalData, assignedTrainer: value })}
+                            options={[
+                              { value: '', label: 'Sin asignar' },
+                              ...trainers.filter((trainer) => trainer.active).map((trainer) => ({
+                                value: trainer.id,
+                                label: trainer.name,
+                              })),
+                            ]}
+                          />
                         </div>
                         <div>
                           <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Tipo de sesión</label>

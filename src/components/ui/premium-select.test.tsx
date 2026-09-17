@@ -110,4 +110,24 @@ describe('PremiumSelect', () => {
     fireEvent.click(option);
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it('supports a compact custom-styled disabled trigger', () => {
+    render(
+      <PremiumSelect
+        value="trainer-1"
+        onChange={vi.fn()}
+        options={OPTIONS}
+        ariaLabel="Entrenador asignado"
+        disabled
+        size="compact"
+        className="w-48 uppercase"
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Entrenador asignado' });
+    expect(trigger).toBeDisabled();
+    expect(trigger).toHaveClass('min-h-9', 'w-48', 'uppercase');
+    fireEvent.click(trigger);
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
 });

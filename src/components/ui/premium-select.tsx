@@ -25,6 +25,8 @@ export interface PremiumSelectProps {
   ariaLabel: string;
   disabled?: boolean;
   placeholder?: string;
+  size?: 'default' | 'compact';
+  className?: string;
 }
 
 function firstEnabledOption(options: PremiumSelectOption[]): number {
@@ -59,6 +61,8 @@ export function PremiumSelect({
   ariaLabel,
   disabled = false,
   placeholder = 'Selecciona una opción',
+  size = 'default',
+  className,
 }: PremiumSelectProps) {
   const generatedId = useId();
   const listboxId = `${id ?? generatedId}-listbox`;
@@ -139,10 +143,14 @@ export function PremiumSelect({
           aria-controls={open ? listboxId : undefined}
           onKeyDown={handleTriggerKeyDown}
           className={cn(
-            'group flex min-h-12 w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#111] px-4 py-3 text-left text-sm text-[var(--color-text-primary)] shadow-sm transition-all duration-200',
+            'group flex w-full items-center justify-between gap-3 border border-white/10 bg-[#111] text-left text-[var(--color-text-primary)] shadow-sm transition-all duration-200',
+            size === 'compact'
+              ? 'min-h-9 rounded-lg px-3 py-2 text-xs'
+              : 'min-h-12 rounded-xl px-4 py-3 text-sm',
             'hover:border-white/20 focus-visible:outline-none focus-visible:border-[var(--color-accent-val)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent-val)]/30',
             'data-[state=open]:border-[var(--color-accent-val)] data-[state=open]:ring-2 data-[state=open]:ring-[var(--color-accent-val)]/20',
             disabled && 'cursor-not-allowed opacity-50',
+            className,
           )}
         >
           <span className={cn(
@@ -172,7 +180,10 @@ export function PremiumSelect({
           event.preventDefault();
           triggerRef.current?.focus();
         }}
-        className="z-[500] w-[var(--radix-popover-trigger-width)] max-h-64 overflow-y-auto rounded-2xl border border-white/10 bg-[#111]/95 p-1.5 shadow-[0_24px_80px_rgba(0,0,0,0.65)] backdrop-blur-xl outline-none"
+        className={cn(
+          'z-[500] w-[var(--radix-popover-trigger-width)] max-h-64 overflow-y-auto border border-white/10 bg-[#111]/95 shadow-[0_24px_80px_rgba(0,0,0,0.65)] backdrop-blur-xl outline-none',
+          size === 'compact' ? 'rounded-xl p-1' : 'rounded-2xl p-1.5',
+        )}
       >
         <div
           id={listboxId}
@@ -198,7 +209,10 @@ export function PremiumSelect({
                 onFocus={() => setActiveIndex(index)}
                 onClick={() => selectOption(option)}
                 className={cn(
-                  'flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-transparent px-3 py-2.5 text-left text-sm transition-colors duration-150',
+                  'flex w-full items-center justify-between gap-3 border border-transparent text-left transition-colors duration-150',
+                  size === 'compact'
+                    ? 'min-h-9 rounded-lg px-2.5 py-2 text-xs'
+                    : 'min-h-11 rounded-xl px-3 py-2.5 text-sm',
                   'focus-visible:outline-none focus-visible:border-[var(--color-accent-border)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent-val)]/25',
                   selected
                     ? 'border-[var(--color-accent-border)] bg-[var(--color-accent-dim)] text-[var(--color-text-primary)]'
