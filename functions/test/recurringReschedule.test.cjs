@@ -9,7 +9,7 @@ const {
   prepareRecurringReschedule,
   validateRecurringRescheduleAvailability,
 } = require("../lib/recurringReschedule.js");
-const { getSlotBlocks } = require("../lib/appointmentLifecycle.js");
+const { getCanonicalSlotBlocks } = require("../lib/appointmentLifecycle.js");
 
 const now = new Date("2026-09-01T08:00:00.000Z"); // 10:00 Europe/Madrid
 const siteConfig = { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 };
@@ -869,8 +869,8 @@ async function runHandlerTests() {
 
   const approvedSingleDocs = transactionDocuments();
   const approvedSingleBefore = structuredClone(approvedSingleDocs["appointments/a1"]);
-  const approvedSingleOldKeys = getSlotBlocks("10:00", 60).map((time) => `2026-09-14_${time}`);
-  const approvedSingleNewKeys = getSlotBlocks("19:00", 60).map((time) => `2026-09-20_${time}`);
+  const approvedSingleOldKeys = getCanonicalSlotBlocks("10:00", 60).map((time) => `2026-09-14_${time}`);
+  const approvedSingleNewKeys = getCanonicalSlotBlocks("19:00", 60).map((time) => `2026-09-20_${time}`);
   const approvedSingleDb = new FakeFirestore(approvedSingleDocs);
   const approvedSingleHandlers = createRecurringRescheduleHandlers({
     db: approvedSingleDb,

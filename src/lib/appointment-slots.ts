@@ -1,25 +1,23 @@
 import type { SiteConfig } from '@/types';
 import { normalizeSiteConfig } from '@/lib/site-config';
 
-/**
- * 15-minute blocks plus legacy 30-minute floors.
- * Same algorithm as functions/src/appointmentLifecycle.ts getSlotBlocks.
- */
-export function getSlotBlocks(startTime: string, durationMinutes: number): string[] {
+export const INTERNAL_SLOT_MINUTES = 15;
+
+/** Canonical occupancy blocks. Never rounds a session to an earlier start. */
+export function getCanonicalSlotBlocks(startTime: string, durationMinutes: number): string[] {
     const [h, m] = startTime.split(':').map(Number);
+    if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) return [];
+    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return [];
     const startTotal = h * 60 + m;
-    const numBlocks = Math.ceil(durationMinutes / 15);
-    const blocks = new Set<string>();
+    const numBlocks = Math.ceil(durationMinutes / INTERNAL_SLOT_MINUTES);
+    const blocks: string[] = [];
 
     for (let i = 0; i < numBlocks; i += 1) {
-        const total = startTotal + i * 15;
-        const legacyTotal = Math.floor(total / 30) * 30;
-        [total, legacyTotal].forEach((blockTotal) => {
-            blocks.add(`${String(Math.floor(blockTotal / 60)).padStart(2, '0')}:${String(blockTotal % 60).padStart(2, '0')}`);
-        });
+        const total = startTotal + i * INTERNAL_SLOT_MINUTES;
+        blocks.push(`${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`);
     }
 
-    return Array.from(blocks);
+    return blocks;
 }
 
 export function slotOccupancyKey(date: string, time: string): string {
@@ -47,7 +45,7 @@ export function getSlotAvailability(input: {
     occupancyCreditsByKey?: Map<string, number>;
     maxCapacity: number;
 }): SlotAvailabilityResult {
-    const coveredKeys = getSlotBlocks(input.slot.time, input.durationMinutes)
+    const coveredKeys = getCanonicalSlotBlocks(input.slot.time, input.durationMinutes)
         .map((time) => slotOccupancyKey(input.slot.date, time));
 
     if (coveredKeys.some((key) => input.blockedSlotKeys.has(key))) {

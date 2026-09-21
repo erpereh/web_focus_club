@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const {
   DEFAULT_SITE_CONFIG,
+  generateTimeSlots,
   normalizeMaxCapacity,
   normalizeSiteConfig,
 } = require("../lib/siteConfig.js");
@@ -31,5 +32,15 @@ assert.equal(legacyConfig.bonoExpirationMonths, 1);
 assert.equal(DEFAULT_SITE_CONFIG.maxCapacity, 2);
 assert.equal(normalizeSiteConfig().maxCapacity, 2);
 assert.equal(normalizeSiteConfig({ maxCapacity: 5 }).maxCapacity, 5);
+
+for (const interval of [15, 30, 45, 60]) {
+  assert.equal(normalizeSiteConfig({ slotInterval: interval }).slotInterval, interval);
+}
+assert.equal(normalizeSiteConfig({ slotInterval: 20 }).slotInterval, 30);
+
+assert.deepEqual(generateTimeSlots({ startHour: 7, endHour: 20, slotInterval: 15 }).slice(0, 5), ["07:00", "07:15", "07:30", "07:45", "08:00"]);
+assert.deepEqual(generateTimeSlots({ startHour: 7, endHour: 20, slotInterval: 30 }).slice(0, 5), ["07:00", "07:30", "08:00", "08:30", "09:00"]);
+assert.deepEqual(generateTimeSlots({ startHour: 7, endHour: 20, slotInterval: 45 }).slice(0, 5), ["07:00", "07:45", "08:30", "09:15", "10:00"]);
+assert.deepEqual(generateTimeSlots({ startHour: 7, endHour: 20, slotInterval: 60 }).slice(0, 5), ["07:00", "08:00", "09:00", "10:00", "11:00"]);
 
 console.log("site config tests passed");

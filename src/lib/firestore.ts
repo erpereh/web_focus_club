@@ -62,7 +62,11 @@ import {
     normalizeSiteConfig,
     sanitizeSiteConfigUpdate,
 } from './site-config';
-import { getSlotBlocks } from './appointment-slots';
+import { getCanonicalSlotBlocks } from './appointment-slots';
+import {
+    buildCanonicalBlockedSlotDocuments,
+    type BuildBlockedSlotGroupsInput,
+} from './blocked-slots';
 
 export { normalizeSiteConfig };
 export { doesSessionFitWithinSchedule, generateTimeSlots } from './appointment-slots';
@@ -1299,22 +1303,32 @@ export function subscribeBlockedSlotsForMonth(
     );
 }
 
-export async function addBlockedSlot(
-    data: Omit<BlockedSlot, 'id' | 'createdAt'>
-): Promise<string> {
-    // Filter out undefined values — Firestore rejects them
-    const cleanData = Object.fromEntries(
-        Object.entries(data).filter(([, v]) => v !== undefined)
-    );
-    const docRef = await addDoc(collection(db, 'blocked_slots'), {
-        ...cleanData,
+export async function addBlockedSlotGroups(
+    data: Omit<BuildBlockedSlotGroupsInput, 'createdAt'>,
+): Promise<string[]> {
+    const documents = buildCanonicalBlockedSlotDocuments({
+        ...data,
         createdAt: new Date().toISOString(),
     });
-    return docRef.id;
+
+    await runTransaction(db, async (transaction) => {
+        const refs = documents.map((blockedSlot) => doc(db, 'blocked_slots', blockedSlot.id));
+        const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
+        if (snapshots.some((snapshot) => snapshot.exists())) {
+            throw new Error('Una de las franjas seleccionadas ya está bloqueada.');
+        }
+        documents.forEach(({ id: _id, ...blockedSlot }, index) => transaction.set(refs[index], blockedSlot));
+    });
+
+    return documents.map((blockedSlot) => blockedSlot.id);
 }
 
-export async function deleteBlockedSlot(id: string): Promise<void> {
-    await deleteDoc(doc(db, 'blocked_slots', id));
+export async function deleteBlockedSlotDocuments(ids: string[]): Promise<void> {
+    const uniqueIds = [...new Set(ids)].sort();
+    if (uniqueIds.length === 0) return;
+    const batch = writeBatch(db);
+    uniqueIds.forEach((id) => batch.delete(doc(db, 'blocked_slots', id)));
+    await batch.commit();
 }
 
 // ============================================
@@ -1357,7 +1371,7 @@ async function decrementSingleSlot(date: string, time: string): Promise<void> {
  * Llamar cuando se aprueba una cita.
  */
 export async function incrementSlotOccupancy(date: string, startTime: string, durationMinutes: number): Promise<void> {
-    const blocks = getSlotBlocks(startTime, durationMinutes);
+    const blocks = getCanonicalSlotBlocks(startTime, durationMinutes);
     await Promise.all(blocks.map((time) => incrementSingleSlot(date, time)));
 }
 
@@ -1366,7 +1380,7 @@ export async function incrementSlotOccupancy(date: string, startTime: string, du
  * Llamar cuando se revierte una cita aprobada.
  */
 export async function decrementSlotOccupancy(date: string, startTime: string, durationMinutes: number): Promise<void> {
-    const blocks = getSlotBlocks(startTime, durationMinutes);
+    const blocks = getCanonicalSlotBlocks(startTime, durationMinutes);
     await Promise.all(blocks.map((time) => decrementSingleSlot(date, time)));
 }
 

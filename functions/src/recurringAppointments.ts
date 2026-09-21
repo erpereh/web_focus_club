@@ -2,7 +2,7 @@ import {
   calculateAppointmentDeduction,
   calculateAppointmentRefund,
   getBonoRemainingMinutes,
-  getSlotBlocks,
+  getCanonicalSlotBlocks,
   isBonoExpiredAt,
   isSlotAtCapacity,
   selectExactlyOneActiveBono,
@@ -183,7 +183,7 @@ export function collectRecurringOccupancyKeys(
   startTime: string,
   durationMinutes: number,
 ): string[] {
-  const blocks = getSlotBlocks(startTime, durationMinutes);
+  const blocks = getCanonicalSlotBlocks(startTime, durationMinutes);
   return dates.flatMap((date) => blocks.map((time) => slotOccupancyDocId(date, time)));
 }
 
@@ -310,7 +310,7 @@ export function planRecurringAppointments(input: PlanRecurringAppointmentsInput)
 
   const config = normalizeSiteConfig(input.siteConfig);
   const validTimes = new Set(generateTimeSlots(config));
-  const slotBlocks = getSlotBlocks(input.startTime, input.durationMinutes);
+  const slotBlocks = getCanonicalSlotBlocks(input.startTime, input.durationMinutes);
   const occupancyByKey = new Map(input.occupancyByKey);
   const userSlotKeys = new Set(input.userSlotKeys);
 

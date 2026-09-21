@@ -487,22 +487,23 @@ export function slotOccupancyDocId(date: string, time: string): string {
   return `${date}_${time}`;
 }
 
-/** 15-minute blocks plus legacy 30-minute floors. Same helper used by occupancy writes. */
-export function getSlotBlocks(startTime: string, durationMinutes: number): string[] {
+export const INTERNAL_SLOT_MINUTES = 15;
+
+/** Canonical occupancy blocks. Never rounds a session to an earlier start. */
+export function getCanonicalSlotBlocks(startTime: string, durationMinutes: number): string[] {
   const [hours, minutes] = startTime.split(":").map(Number);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return [];
+  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) return [];
   const startTotal = hours * 60 + minutes;
-  const numBlocks = Math.ceil(durationMinutes / 15);
-  const blocks = new Set<string>();
+  const numBlocks = Math.ceil(durationMinutes / INTERNAL_SLOT_MINUTES);
+  const blocks: string[] = [];
 
   for (let index = 0; index < numBlocks; index += 1) {
-    const total = startTotal + index * 15;
-    const legacyTotal = Math.floor(total / 30) * 30;
-    [total, legacyTotal].forEach((blockTotal) => {
-      blocks.add(`${String(Math.floor(blockTotal / 60)).padStart(2, "0")}:${String(blockTotal % 60).padStart(2, "0")}`);
-    });
+    const total = startTotal + index * INTERNAL_SLOT_MINUTES;
+    blocks.push(`${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`);
   }
 
-  return Array.from(blocks);
+  return blocks;
 }
 
 export function isSlotAtCapacity(currentCount: number, maxCapacity: number): boolean {

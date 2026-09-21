@@ -1,6 +1,6 @@
 import type { Appointment, TimeSlot } from '@/types';
 import { classifyMadridCivilSlot, getAppointmentEffectiveSlot } from './madrid-date';
-import { getSlotAvailability, getSlotBlocks, slotOccupancyKey } from './appointment-slots';
+import { getCanonicalSlotBlocks, getSlotAvailability, slotOccupancyKey } from './appointment-slots';
 
 export type RecurringRescheduleScope = 'single' | 'series';
 export type RecurringRescheduleBackendScope = RecurringRescheduleScope | 'following';
@@ -121,13 +121,13 @@ export function buildRescheduleCalendarContext(
         if (appointment.userId === userId
             && !excludedAppointmentIds.has(appointment.id)
             && (appointment.status === 'pending' || appointment.status === 'approved')) {
-            getSlotBlocks(slot.time, duration).forEach((time) => {
+            getCanonicalSlotBlocks(slot.time, duration).forEach((time) => {
                 userBookedSlotKeys.add(slotOccupancyKey(slot.date, time));
             });
         }
 
         if (excludedAppointmentIds.has(appointment.id) && appointment.status === 'approved') {
-            getSlotBlocks(slot.time, duration).forEach((time) => {
+            getCanonicalSlotBlocks(slot.time, duration).forEach((time) => {
                 const key = slotOccupancyKey(slot.date, time);
                 occupancyCreditsByKey.set(key, (occupancyCreditsByKey.get(key) ?? 0) + 1);
             });

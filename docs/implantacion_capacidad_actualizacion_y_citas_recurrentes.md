@@ -623,3 +623,51 @@ Objetivo final:
 ```
 
 Esta aproximación permite evolucionar Focus Club sin romper las reservas ya existentes ni duplicar la lógica crítica de negocio.
+
+---
+
+# 10. Contrato de intervalos y ocupación canónica
+
+## Separación de conceptos
+
+`site_config/main.slotInterval` controla únicamente cada cuánto se ofrece un nuevo inicio. Los valores compatibles son `15`, `30`, `45` y `60`, con fallback y valor de producción actual en `30`.
+
+La ocupación, la capacidad, los conflictos y los bloqueos se representan siempre mediante bloques internos canónicos de 15 minutos. Cambiar la parrilla no reconstruye citas, series, bonos ni occupancy y tampoco modifica citas ya almacenadas que dejen de pertenecer a la parrilla de nuevos inicios.
+
+El contrato que debe implementar la app móvil es:
+
+- aceptar `slotInterval` 15/30/45/60 y generar nuevos inicios con ese valor;
+- calcular occupancy, bloqueos y conflictos en bloques canónicos de 15 minutos;
+- no generar floors legacy de 30 minutos ni bloques anteriores al inicio real.
+
+## Herramientas manuales de transición
+
+Las Functions `reconcileSlotOccupancyFromApprovedAppointments` y `migrateLegacyBlockedSlots` son callables manuales, admin-only y desplegadas en `europe-west1`.
+
+Ambas aceptan `mode: dryRun | apply`, un rango opcional y requieren `confirmApply: true` para aplicar. El inicio predeterminado es el día actual de Europe/Madrid. Primero completan todas las lecturas y validaciones; después ordenan el plan y ejecutan escrituras absolutas en batches, sin nuevas lecturas entre batches.
+
+La reconciliación de occupancy obtiene el slot efectivo de una cita aprobada en este orden: `approvedSlot`, `preferredSlots[0]`, `date/time` legacy. Un dry-run con cero diferencias es correcto y no fuerza escrituras.
+
+La migración de bloqueos interpreta un documento legacy creado bajo la parrilla histórica de 30 minutos como una ventana de 30 minutos. Por ejemplo, `16:00` se materializa como `16:00` y `16:15`, preservando motivo, autor y trazabilidad.
+
+Estas herramientas nunca se ejecutan al guardar la configuración ni al cambiar `slotInterval`.
+
+## Secuencia obligatoria de producción
+
+A. Desplegar web y Functions manteniendo `site_config/main.slotInterval` exactamente en `30`.
+
+B. Ejecutar `reconcileSlotOccupancyFromApprovedAppointments` en `dryRun`.
+
+C. Ejecutar `migrateLegacyBlockedSlots` en `dryRun`.
+
+D. Revisar los resultados.
+
+E. Ejecutar `apply` únicamente si corresponde.
+
+F. Actualizar y publicar `app_focus_club`.
+
+G. Verificar que la versión móvil publicada soporta bloques canónicos y las parrillas 15/30/45/60.
+
+H. Solo entonces cambiar `slotInterval` desde Admin a 15, 45, 60 o volver a 30.
+
+Hasta completar el paso G, producción debe permanecer exclusivamente en `30`. La parrilla de 45 minutos también produce inicios en `:15` y `:45`, incompatibles con el comportamiento legacy del móvil actual. El selector web puede mostrar todas las opciones, pero ninguna parrilla distinta de 30 debe activarse antes de publicar y verificar el móvil nuevo.

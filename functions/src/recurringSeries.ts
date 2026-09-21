@@ -1,7 +1,7 @@
 import { FieldValue, Firestore, Transaction } from "firebase-admin/firestore";
 import { CallableRequest, HttpsError } from "firebase-functions/v2/https";
 import {
-  getSlotBlocks,
+  getCanonicalSlotBlocks,
   madridCivilSlotToInstant,
   slotOccupancyDocId,
   SAME_DAY_CHANGE_MESSAGE,
@@ -21,7 +21,6 @@ import {
 } from "./recurringAppointments.js";
 import {
   doesSessionFitWithinSchedule,
-  generateTimeSlots,
   normalizeSiteConfig,
   type SiteConfig,
 } from "./siteConfig.js";
@@ -672,7 +671,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           const slot = pendingOccurrenceSlot(occurrence.data);
           const instant = slot ? madridCivilSlotToInstant(slot) : undefined;
           if (!slot || !instant || instant <= nowDate) return [];
-          const keys = getSlotBlocks(slot.time, durationMinutes).map((time) => slotOccupancyDocId(slot.date, time));
+          const keys = getCanonicalSlotBlocks(slot.time, durationMinutes).map((time) => slotOccupancyDocId(slot.date, time));
           if (keys.length === 0) {
             throwHttps("failed-precondition", "La ocupacion de una cita de la serie no es valida.", {
               reason: "invalid_occupancy",
@@ -731,7 +730,6 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         const config = siteConfigSnap.exists
           ? normalizeSiteConfig(siteConfigSnap.data() as Partial<SiteConfig>)
           : normalizeSiteConfig();
-        const validStartTimes = new Set(generateTimeSlots(config));
         const blockedKeys = new Set<string>();
         blockedSlotsSnap.docs.forEach((docSnap) => {
           const blocked = docSnap.data() as TimeSlot;
@@ -753,8 +751,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         });
         const internalKeys = new Set<string>();
         prepared.forEach((occurrence) => {
-          if (!validStartTimes.has(occurrence.slot.time)
-            || !doesSessionFitWithinSchedule(config, occurrence.slot.time, durationMinutes)) {
+          if (!doesSessionFitWithinSchedule(config, occurrence.slot.time, durationMinutes)) {
             throwHttps("failed-precondition", "Una cita de la serie queda fuera del horario disponible.");
           }
           occurrence.keys.forEach((key) => {

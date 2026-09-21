@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getSlotBlocks } from './appointment-slots';
+import { getCanonicalSlotBlocks } from './appointment-slots';
 import { getRecurringEndDateOptions } from './recurring-appointments';
 import {
     evaluateRecurringHastaOptions,
@@ -88,7 +88,7 @@ describe('evaluateRecurringHastaOptions', () => {
     });
 
     it('invalidates a 60 min session when a later duration block is blocked or full', () => {
-        expect(getSlotBlocks('11:00', 60)).toEqual(['11:00', '11:15', '11:30', '11:45']);
+        expect(getCanonicalSlotBlocks('11:00', 60)).toEqual(['11:00', '11:15', '11:30', '11:45']);
 
         const blockedLaterBlock = evaluate({
             blockedKeys: new Set(['2026-09-27_11:30']),

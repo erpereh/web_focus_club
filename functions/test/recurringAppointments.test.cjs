@@ -4,7 +4,7 @@ const path = require("node:path");
 
 const {
   calculateAppointmentRefund,
-  getSlotBlocks,
+  getCanonicalSlotBlocks,
 } = require("../lib/appointmentLifecycle.js");
 const {
   FIRESTORE_TRANSACTION_MAX_WRITES,
@@ -188,7 +188,7 @@ assert.equal(exactMinutes.writes.bono.bonoId, "bono-a");
 assert.equal(exactMinutes.writes.dates.length, 4);
 
 const occupancyKeys = collectRecurringOccupancyKeys(["2026-09-07"], "10:00", 60);
-assert.deepEqual(occupancyKeys, getSlotBlocks("10:00", 60).map((time) => `2026-09-07_${time}`));
+assert.deepEqual(occupancyKeys, getCanonicalSlotBlocks("10:00", 60).map((time) => `2026-09-07_${time}`));
 assert.equal(occupancyKeys.length, 4);
 
 const allFree = basePlan({ siteConfig: { ...siteConfig, maxCapacity: 5 } });

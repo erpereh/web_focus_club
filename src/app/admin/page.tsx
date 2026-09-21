@@ -74,6 +74,12 @@ import { AppointmentsCalendar } from '@/components/admin/appointments/Appointmen
 import { TrainerStatsModal } from '@/components/admin/TrainerStatsModal';
 import { AppointmentRescheduleModal } from '@/components/admin/AppointmentRescheduleModal';
 import { getRecurringRescheduleErrorMessage } from '@/lib/recurring-reschedule';
+import { getCanonicalSlotBlocks } from '@/lib/appointment-slots';
+import {
+  getBlockedSelectionKeys,
+  groupBlockedSlots,
+  overlapsBlockedSelection,
+} from '@/lib/blocked-slots';
 import {
   filterAppointments,
   getTrainerIdFromFilter,
@@ -141,8 +147,8 @@ import {
   deleteUserFromAdmin as deleteUserFromAdminFS,
   addActivityLog,
   getBlockedSlots,
-  addBlockedSlot as addBlockedSlotFS,
-  deleteBlockedSlot as deleteBlockedSlotFS,
+  addBlockedSlotGroups as addBlockedSlotGroupsFS,
+  deleteBlockedSlotDocuments as deleteBlockedSlotDocumentsFS,
   incrementSlotOccupancy,
   decrementSlotOccupancy,
   getTrainers,
@@ -189,7 +195,13 @@ import {
   subscribeUsers,
 
 } from '@/lib/firestore';
-import { DEFAULT_SITE_CONFIG, MAX_MAX_CAPACITY, MIN_MAX_CAPACITY, normalizeMaxCapacity } from '@/lib/site-config';
+import {
+  DEFAULT_SITE_CONFIG,
+  MAX_MAX_CAPACITY,
+  MIN_MAX_CAPACITY,
+  normalizeMaxCapacity,
+  normalizeSlotInterval,
+} from '@/lib/site-config';
 import type { AdminUserAccessMethod, AdminUserRole } from '@/lib/firestore';
 import { auth } from '@/lib/firebase';
 import { subscribeSupportConversations } from '@/lib/support-chat';
@@ -405,23 +417,6 @@ function formatBonoDate(value: string): string {
   return date.toLocaleDateString('es-ES');
 }
 
-function getCoveredSlotBlocks(startTime: string, durationMinutes: number): string[] {
-  const [h, m] = startTime.split(':').map(Number);
-  const startTotal = h * 60 + m;
-  const numBlocks = Math.ceil(durationMinutes / 15);
-  const blocks = new Set<string>();
-
-  for (let i = 0; i < numBlocks; i += 1) {
-    const total = startTotal + i * 15;
-    const legacyTotal = Math.floor(total / 30) * 30;
-    [total, legacyTotal].forEach((blockTotal) => {
-      blocks.add(`${String(Math.floor(blockTotal / 60)).padStart(2, '0')}:${String(blockTotal % 60).padStart(2, '0')}`);
-    });
-  }
-
-  return Array.from(blocks);
-}
-
 function getAppointmentPrimarySlot(appointment: Appointment): TimeSlot | undefined {
   return appointment.approvedSlot ?? appointment.preferredSlots?.[0];
 }
@@ -430,7 +425,7 @@ function getAppointmentSlotKeys(appointment: Appointment): Set<string> {
   const slot = getAppointmentPrimarySlot(appointment);
   if (!slot) return new Set<string>();
   return new Set(
-    getCoveredSlotBlocks(slot.time, parseInt(appointment.duration, 10)).map((time) => `${slot.date}_${time}`)
+    getCanonicalSlotBlocks(slot.time, parseInt(appointment.duration, 10)).map((time) => `${slot.date}_${time}`)
   );
 }
 
@@ -1498,7 +1493,7 @@ export default function AdminPage() {
       return { disabled: true, label: 'Fuera de horario', tone: 'muted' as const, occupancy: 0 };
     }
 
-    const blocks = getCoveredSlotBlocks(time, durationMinutes);
+    const blocks = getCanonicalSlotBlocks(time, durationMinutes);
     const blockedTimes = new Set(blockedSlots.filter((slot) => slot.date === date).map((slot) => slot.time));
     const blocked = blocks.some((blockTime) => blockedTimes.has(blockTime));
     if (blocked) {
@@ -1511,7 +1506,7 @@ export default function AdminPage() {
       .forEach((appointment) => {
         const slot = getAppointmentPrimarySlot(appointment);
         if (!slot || slot.date !== date) return;
-        getCoveredSlotBlocks(slot.time, parseInt(appointment.duration, 10)).forEach((blockTime) => {
+        getCanonicalSlotBlocks(slot.time, parseInt(appointment.duration, 10)).forEach((blockTime) => {
           occupancyByTime.set(blockTime, (occupancyByTime.get(blockTime) ?? 0) + 1);
         });
       });
@@ -5976,7 +5971,9 @@ export default function AdminPage() {
 
                         // Count blocked slots per day for indicators
                         const blockedByDate: Record<string, number> = {};
-                        blockedSlots.forEach(s => { blockedByDate[s.date] = (blockedByDate[s.date] || 0) + 1; });
+                        groupBlockedSlots(blockedSlots).forEach((group) => {
+                          blockedByDate[group.date] = (blockedByDate[group.date] || 0) + 1;
+                        });
 
                         return (
                           <div className="grid grid-cols-7 gap-1">
@@ -5993,7 +5990,7 @@ export default function AdminPage() {
                               const blockedCount = blockedByDate[dateKey] || 0;
                               const dayBlockedSet = new Set(blockedSlots.filter(s => s.date === dateKey).map(s => s.time));
                               const allBlocked = timeSlots.length > 0 && timeSlots.every((time) => (
-                                getCoveredSlotBlocks(time, siteConfig.slotInterval ?? 30)
+                                getCanonicalSlotBlocks(time, siteConfig.slotInterval ?? 30)
                                   .some((blockTime) => dayBlockedSet.has(blockTime))
                               ));
 
@@ -6068,7 +6065,7 @@ export default function AdminPage() {
                             const blockedSet = new Set(blockedSlots.filter(s => s.date === dateKey).map(s => s.time));
                             const blockedSlotInterval = siteConfig.slotInterval ?? 30;
                             const isSlotBlockedByOverlap = (time: string) => {
-                              const coveredBlocks = getCoveredSlotBlocks(time, blockedSlotInterval);
+                              const coveredBlocks = getCanonicalSlotBlocks(time, blockedSlotInterval);
                               return coveredBlocks.some((blockTime) => blockedSet.has(blockTime));
                             };
                             const allSlotsBlocked = timeSlots.every(t => isSlotBlockedByOverlap(t));
@@ -6249,21 +6246,17 @@ export default function AdminPage() {
                                         disabled={savingBlocks}
                                         onClick={async () => {
                                           const slotsArray = Array.from(pendingBlocks).sort();
+                                          const selectedBlockedKeys = getBlockedSelectionKeys(
+                                            dateKey,
+                                            slotsArray,
+                                            siteConfig.slotInterval,
+                                          );
+                                          const affectedAppointments = appointments.filter((appointment) => (
+                                            overlapsBlockedSelection(appointment, selectedBlockedKeys)
+                                          ));
 
                                           // Si deleteOnBlock está activo, buscar citas afectadas
                                           if (deleteOnBlock) {
-                                            const affectedAppointments = appointments.filter(appt => {
-                                              // Buscar en preferredSlots
-                                              const matchesPreferred = appt.preferredSlots?.some(
-                                                ps => ps.date === dateKey && slotsArray.includes(ps.time)
-                                              );
-                                              // Buscar en approvedSlot
-                                              const matchesApproved = appt.approvedSlot &&
-                                                appt.approvedSlot.date === dateKey &&
-                                                slotsArray.includes(appt.approvedSlot.time);
-                                              return matchesPreferred || matchesApproved;
-                                            });
-
                                             if (affectedAppointments.length > 0) {
                                               const approvedOnes = affectedAppointments.filter(a => a.status === 'approved');
                                               let msg = `Se eliminarán ${affectedAppointments.length} cita(s) en estas franjas.`;
@@ -6280,15 +6273,7 @@ export default function AdminPage() {
                                           try {
                                             // 1. Eliminar citas si deleteOnBlock
                                             if (deleteOnBlock) {
-                                              const toDelete = appointments.filter(appt => {
-                                                const matchesPreferred = appt.preferredSlots?.some(
-                                                  ps => ps.date === dateKey && slotsArray.includes(ps.time)
-                                                );
-                                                const matchesApproved = appt.approvedSlot &&
-                                                  appt.approvedSlot.date === dateKey &&
-                                                  slotsArray.includes(appt.approvedSlot.time);
-                                                return matchesPreferred || matchesApproved;
-                                              });
+                                              const toDelete = affectedAppointments;
                                               for (const appt of toDelete) {
                                                 // Decrement slot_occupancy for approved appointments before deleting
                                                 if (appt.status === 'approved' && appt.approvedSlot) {
@@ -6305,15 +6290,14 @@ export default function AdminPage() {
                                               }
                                             }
 
-                                            // 2. Crear blocked_slots
-                                            for (const time of slotsArray) {
-                                              await addBlockedSlotFS({
-                                                date: dateKey,
-                                                time,
-                                                ...(blockReasonInput ? { reason: blockReasonInput } : {}),
-                                                createdBy: user?.uid || 'unknown',
-                                              });
-                                            }
+                                            // 2. Crear blocked_slots canónicos agrupados
+                                            await addBlockedSlotGroupsFS({
+                                              date: dateKey,
+                                              startTimes: slotsArray,
+                                              groupDurationMinutes: siteConfig.slotInterval,
+                                              ...(blockReasonInput ? { reason: blockReasonInput } : {}),
+                                              createdBy: user?.uid || 'unknown',
+                                            });
                                             await addActivityLog({
                                               action: 'blocked_slot_added',
                                               adminEmail: user?.email || 'unknown',
@@ -6368,14 +6352,15 @@ export default function AdminPage() {
                       </GlassCard>
                     ) : (
                       (() => {
-                        const grouped: Record<string, BlockedSlot[]> = {};
-                        blockedSlots
-                          .sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`))
-                          .forEach((slot) => {
-                            if (!grouped[slot.date]) grouped[slot.date] = [];
-                            grouped[slot.date].push(slot);
+                        const logicalGroups = groupBlockedSlots(blockedSlots);
+                        const grouped: Record<string, typeof logicalGroups> = {};
+                        logicalGroups
+                          .sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`))
+                          .forEach((group) => {
+                            if (!grouped[group.date]) grouped[group.date] = [];
+                            grouped[group.date].push(group);
                           });
-                        return Object.entries(grouped).map(([date, slots]) => {
+                        return Object.entries(grouped).map(([date, groups]) => {
                           const slotDate = new Date(date + 'T00:00:00');
                           const isPast = slotDate < new Date(new Date().toDateString());
                           return (
@@ -6394,7 +6379,7 @@ export default function AdminPage() {
                                         weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
                                       })}
                                     </p>
-                                    <p className="text-xs text-[var(--color-text-secondary)]">{slots.length} franja{slots.length !== 1 ? 's' : ''} bloqueada{slots.length !== 1 ? 's' : ''}</p>
+                                    <p className="text-xs text-[var(--color-text-secondary)]">{groups.length} franja{groups.length !== 1 ? 's' : ''} bloqueada{groups.length !== 1 ? 's' : ''}</p>
                                   </div>
                                 </div>
                                 <PremiumButton
@@ -6403,13 +6388,11 @@ export default function AdminPage() {
                                   icon={<Trash2 className="w-4 h-4" />}
                                   onClick={async () => {
                                     if (confirm(`¿Desbloquear todas las franjas del ${slotDate.toLocaleDateString('es-ES')}?`)) {
-                                      for (const s of slots) {
-                                        await deleteBlockedSlotFS(s.id);
-                                      }
+                                      await deleteBlockedSlotDocumentsFS(groups.flatMap((group) => group.documentIds));
                                       await addActivityLog({
                                         action: 'blocked_slot_removed',
                                         adminEmail: user?.email || 'unknown',
-                                        details: `${date} (${slots.length} franjas)`,
+                                        details: `${date} (${groups.length} franjas)`,
                                       });
                                       await refreshData();
                                     }
@@ -6420,30 +6403,30 @@ export default function AdminPage() {
                                 </PremiumButton>
                               </div>
                               <div className="flex flex-wrap gap-2">
-                                {slots.map((slot) => (
+                                {groups.map((group) => (
                                   <button
-                                    key={slot.id}
+                                    key={group.id}
                                     onClick={async () => {
-                                      if (confirm(`¿Desbloquear ${slot.time}?`)) {
-                                        await deleteBlockedSlotFS(slot.id);
+                                      if (confirm(`¿Desbloquear ${group.startTime}?`)) {
+                                        await deleteBlockedSlotDocumentsFS(group.documentIds);
                                         await addActivityLog({
                                           action: 'blocked_slot_removed',
                                           adminEmail: user?.email || 'unknown',
-                                          details: `${slot.date} ${slot.time}`,
+                                          details: `${group.date} ${group.startTime}`,
                                         });
                                         await refreshData();
                                       }
                                     }}
                                     className="px-3 py-1.5 rounded-lg bg-red-500/20 text-red-400 border border-red-500/30 text-sm hover:bg-red-500/30 transition-colors flex items-center gap-1.5"
-                                    title={slot.reason || 'Sin motivo'}
+                                    title={group.reason || 'Sin motivo'}
                                   >
-                                    {slot.time}
+                                    {group.startTime}{group.durationMinutes ? ` (${group.durationMinutes} min)` : ''}
                                     <XCircle className="w-3.5 h-3.5" />
                                   </button>
                                 ))}
                               </div>
-                              {slots[0]?.reason && (
-                                <p className="text-xs text-[var(--color-text-secondary)] mt-2">Motivo: {slots[0].reason}</p>
+                              {groups[0]?.reason && (
+                                <p className="text-xs text-[var(--color-text-secondary)] mt-2">Motivo: {groups[0].reason}</p>
                               )}
                             </GlassCard>
                           );
@@ -6551,15 +6534,18 @@ export default function AdminPage() {
                             ariaLabel="Intervalo de slots"
                             size="compact"
                             value={String(editConfig.slotInterval ?? 30)}
-                            onChange={(value) => setEditConfig(prev => ({ ...prev, slotInterval: parseInt(value) }))}
+                            onChange={(value) => setEditConfig(prev => ({ ...prev, slotInterval: normalizeSlotInterval(value) }))}
                             options={[
+                              { value: '15', label: '15 minutos' },
                               { value: '30', label: '30 minutos' },
                               { value: '45', label: '45 minutos' },
                               { value: '60', label: '60 minutos' },
                             ]}
                             className="w-48"
                           />
-                          <p className="text-xs text-[var(--color-text-secondary)] mt-1">Cada cuánto tiempo empieza un nuevo slot en el calendario.</p>
+                          <p className="text-xs text-[var(--color-text-secondary)] mt-1">
+                            Define cada cuánto puede comenzar una sesión. La ocupación se calcula internamente en bloques de 15 minutos.
+                          </p>
                         </div>
                       </div>
 
@@ -6576,14 +6562,18 @@ export default function AdminPage() {
                         <button
                           disabled={savingConfig || editConfig.startHour >= editConfig.endHour}
                           onClick={async () => {
+                            const normalizedConfig = normalizeSiteConfig({
+                              ...siteConfig,
+                              startHour: editConfig.startHour,
+                              endHour: editConfig.endHour,
+                              slotInterval: editConfig.slotInterval,
+                            });
+                            if (normalizedConfig.slotInterval !== siteConfig.slotInterval && !confirm(
+                              'Antes de activar una nueva parrilla, asegúrate de que todas las aplicaciones cliente publicadas son compatibles con ella.',
+                            )) return;
+
                             setSavingConfig(true);
                             try {
-                              const normalizedConfig = normalizeSiteConfig({
-                                ...siteConfig,
-                                startHour: editConfig.startHour,
-                                endHour: editConfig.endHour,
-                                slotInterval: editConfig.slotInterval,
-                              });
                               await updateSiteConfigFS({
                                 startHour: normalizedConfig.startHour,
                                 endHour: normalizedConfig.endHour,

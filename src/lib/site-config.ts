@@ -1,4 +1,4 @@
-import type { SiteConfig } from '@/types';
+import type { SiteConfig, SlotInterval } from '@/types';
 
 export const DEFAULT_MAX_CAPACITY = 2;
 export const MIN_MAX_CAPACITY = 1;
@@ -13,7 +13,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
     maxCapacity: DEFAULT_MAX_CAPACITY,
 };
 
-const ALLOWED_SLOT_INTERVALS = [30, 45, 60] as const;
+export const ALLOWED_SLOT_INTERVALS = [15, 30, 45, 60] as const satisfies readonly SlotInterval[];
 
 export function normalizeMaxCapacity(value: unknown): number {
     if (value == null || value === '') return DEFAULT_MAX_CAPACITY;
@@ -27,8 +27,9 @@ export function normalizeMaxCapacity(value: unknown): number {
     return Math.min(MAX_MAX_CAPACITY, Math.max(MIN_MAX_CAPACITY, Math.trunc(parsed)));
 }
 
-export function normalizeSlotInterval(value: unknown): number {
-    return ALLOWED_SLOT_INTERVALS.includes(value as 30 | 45 | 60) ? Number(value) : 30;
+export function normalizeSlotInterval(value: unknown): SlotInterval {
+    const parsed = Number(value);
+    return ALLOWED_SLOT_INTERVALS.includes(parsed as SlotInterval) ? parsed as SlotInterval : 30;
 }
 
 export function normalizeHour(value: unknown, fallback: number): number {

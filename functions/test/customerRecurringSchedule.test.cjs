@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const { createRecurringRescheduleHandlers } = require("../lib/recurringReschedule.js");
-const { getSlotBlocks, slotOccupancyDocId } = require("../lib/appointmentLifecycle.js");
+const { getCanonicalSlotBlocks, slotOccupancyDocId } = require("../lib/appointmentLifecycle.js");
 const { calculateActiveSeriesMetadata } = require("../lib/recurringScheduleReplacement.js");
 
 class FakeDocumentReference {
@@ -189,7 +189,7 @@ function baseDocuments() {
       maxCapacity: 3,
     },
   };
-  getSlotBlocks("10:00", duration).forEach((time) => {
+  getCanonicalSlotBlocks("10:00", duration).forEach((time) => {
     const key = slotOccupancyDocId("2026-09-10", time);
     documents[`slot_occupancy/${key}`] = { date: "2026-09-10", time, count: 1 };
   });
@@ -264,7 +264,7 @@ test("customer replaces a mixed future series with deterministic reuse/create re
   assert.equal(db.documents.get("appointments/auto-1").status, "pending");
   assert.equal(db.documents.get("bonos/bono-1").minutosRestantes, 240);
 
-  getSlotBlocks("10:00", duration).forEach((time) => {
+  getCanonicalSlotBlocks("10:00", duration).forEach((time) => {
     assert.equal(db.documents.get(`slot_occupancy/2026-09-10_${time}`).count, 0);
   });
   const series = db.documents.get("appointment_recurrences/series-1");
@@ -310,7 +310,7 @@ test("customer series reduction refunds once and returns deterministic ordered a
   documents["appointments/future-third"] = reservation("approved", 5, "2026-09-24");
   documents["appointment_recurrences/series-1"].occurrenceCount = 4;
   documents["appointment_recurrences/series-1"].totalMinutes = 240;
-  getSlotBlocks("10:00", duration).forEach((time) => {
+  getCanonicalSlotBlocks("10:00", duration).forEach((time) => {
     const key = slotOccupancyDocId("2026-09-24", time);
     documents[`slot_occupancy/${key}`] = { date: "2026-09-24", time, count: 1 };
   });
@@ -341,7 +341,7 @@ test("expired bonos allow reduction but reject expansion", async (t) => {
     documents["appointment_recurrences/series-1"].totalMinutes = 240;
     documents["bonos/bono-1"].estado = "expirado";
     documents["bonos/bono-1"].fechaExpiracion = "2026-08-31";
-    getSlotBlocks("10:00", duration).forEach((time) => {
+    getCanonicalSlotBlocks("10:00", duration).forEach((time) => {
       const key = slotOccupancyDocId("2026-09-24", time);
       documents[`slot_occupancy/${key}`] = { date: "2026-09-24", time, count: 1 };
     });
@@ -429,7 +429,7 @@ test("customer replacement enforces blocked, capacity and own-conflict checks at
       documents["blocked_slots/blocked"] = { date: "2026-09-11", time: "12:00" };
     }, "slot_blocked"],
     ["full", (documents) => {
-      getSlotBlocks("12:00", duration).forEach((time) => {
+      getCanonicalSlotBlocks("12:00", duration).forEach((time) => {
         const key = slotOccupancyDocId("2026-09-11", time);
         documents[`slot_occupancy/${key}`] = { date: "2026-09-11", time, count: 3 };
       });

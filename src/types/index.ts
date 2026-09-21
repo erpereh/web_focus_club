@@ -90,6 +90,8 @@ export interface TimeSlot {
     time: string;
 }
 
+export type SlotInterval = 15 | 30 | 45 | 60;
+
 export interface Appointment {
     id: string;
     userId: string;
@@ -160,11 +162,22 @@ export interface BlockedSlot {
     reason?: string;
     createdBy: string;  // uid del admin
     createdAt: string;
+    blockGroupId?: string;
+    groupStartTime?: string;
+    groupDurationMinutes?: number;
+    sourceSlotInterval?: SlotInterval;
+    migratedFromLegacyIds?: string[];
+    legacySources?: Array<{
+        id: string;
+        reason?: string;
+        createdBy?: string;
+        createdAt?: string;
+    }>;
 }
 
 export interface SlotOccupancy {
     date: string;       // "YYYY-MM-DD"
-    time: string;       // "HH:MM" (intervalos de 30 min)
+    time: string;       // "HH:MM" (bloques canónicos de 15 min)
     count: number;      // número de personas aprobadas en esa franja
 }
 
@@ -277,7 +290,7 @@ export type CentroData = CentroConfig;
 export interface SiteConfig {
     startHour: number;         // ej: 8
     endHour: number;           // ej: 20
-    slotInterval: number;      // intervalo de slots en minutos (default: 30)
+    slotInterval: SlotInterval; // intervalo de inicio de sesiones (default: 30)
     bonoExpirationMonths: number; // meses de validez de los bonos (default: 1)
     maxCapacity: number;       // clientes simultáneos por franja (fallback: 2, rango: 1–10)
     maintenanceMode?: boolean; // modo mantenimiento para web pública y portal cliente

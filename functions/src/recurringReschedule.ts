@@ -7,7 +7,7 @@ import {
   getBonoTotalMinutes,
   getAppointmentEffectiveSlot,
   getMadridDateKey,
-  getSlotBlocks,
+  getCanonicalSlotBlocks,
   isBonoExpiredAt,
   isInsideCustomerRescheduleLockWindow,
   isSameDayInMadrid,
@@ -246,7 +246,7 @@ function effectiveCivilDateKey(appointment: RecurringAppointmentData): string | 
 }
 
 function slotKeys(slot: RecurringRescheduleSlot, duration: number): string[] {
-  return getSlotBlocks(slot.time, duration).map((time) => slotOccupancyDocId(slot.date, time));
+  return getCanonicalSlotBlocks(slot.time, duration).map((time) => slotOccupancyDocId(slot.date, time));
 }
 
 function firstIntersection(left: string[], right: Set<string>): string | undefined {

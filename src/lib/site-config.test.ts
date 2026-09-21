@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SITE_CONFIG, normalizeMaxCapacity, normalizeSiteConfig, sanitizeSiteConfigUpdate } from './site-config';
+import {
+    DEFAULT_SITE_CONFIG,
+    normalizeMaxCapacity,
+    normalizeSiteConfig,
+    normalizeSlotInterval,
+    sanitizeSiteConfigUpdate,
+} from './site-config';
+
+describe('normalizeSlotInterval', () => {
+    it.each([15, 30, 45, 60])('accepts the supported %i minute interval', (interval) => {
+        expect(normalizeSlotInterval(interval)).toBe(interval);
+    });
+
+    it('falls back to 30 for unsupported intervals', () => {
+        expect(normalizeSlotInterval(20)).toBe(30);
+        expect(normalizeSlotInterval(undefined)).toBe(30);
+    });
+});
 
 describe('normalizeMaxCapacity', () => {
     it('falls back to 2 when maxCapacity is missing', () => {

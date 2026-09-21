@@ -18,7 +18,8 @@ import {
 import {
   clientOwnAppointmentMutationBlockedReason,
   getAppointmentEffectiveSlot,
-  getSlotBlocks,
+  getCanonicalSlotBlocks,
+  getMadridDateKey,
   isInsideCustomerRescheduleLockWindow,
   isRescheduleCapacityAvailable,
   isSlotAtCapacity,
@@ -48,6 +49,12 @@ import {
   type CustomerSuggestionMakeEvent,
 } from "./customerSuggestions";
 import { doesSessionFitWithinSchedule, generateTimeSlots, normalizeSiteConfig, type SiteConfig } from "./siteConfig.js";
+import {
+  applyMigrationOperations,
+  createSlotMigrationHandlers,
+  type MigrationRange,
+  type StoredMigrationDocument,
+} from "./slotMigrations.js";
 import {
   createUserFromAdminCore,
   getTrainerDocsByUid,
@@ -303,7 +310,7 @@ function isTimeSlot(value: unknown): value is TimeSlot {
 }
 
 function getOverlappingSlotKeys(slot: TimeSlot, durationMinutes: number): Set<string> {
-  return new Set(getSlotBlocks(slot.time, durationMinutes).map((time) => `${slot.date}_${time}`));
+  return new Set(getCanonicalSlotBlocks(slot.time, durationMinutes).map((time) => `${slot.date}_${time}`));
 }
 
 function appointmentSlotKeys(appointment: AppointmentDoc): Set<string> {
@@ -1133,6 +1140,29 @@ async function requireAdmin(requestUid: string): Promise<UserProfile> {
   return adminProfile;
 }
 
+async function readMigrationRangeCollection(
+  collectionName: "slot_occupancy" | "blocked_slots",
+  range: MigrationRange,
+): Promise<StoredMigrationDocument[]> {
+  const startQuery = db.collection(collectionName).where("date", ">=", range.startDate);
+  const snapshot = range.endDate
+    ? await startQuery.where("date", "<=", range.endDate).get()
+    : await startQuery.get();
+  return snapshot.docs.map((document) => ({ id: document.id, data: document.data() }));
+}
+
+const slotMigrations = createSlotMigrationHandlers({
+  getTodayMadrid: () => getMadridDateKey(new Date()),
+  requireAdmin,
+  readApprovedAppointments: async () => {
+    const snapshot = await db.collection("appointments").where("status", "==", "approved").get();
+    return snapshot.docs.map((document) => ({ id: document.id, data: document.data() }));
+  },
+  readOccupancyDocuments: (range) => readMigrationRangeCollection("slot_occupancy", range),
+  readBlockedSlotDocuments: (range) => readMigrationRangeCollection("blocked_slots", range),
+  applyOperations: (operations) => applyMigrationOperations(db, operations),
+});
+
 async function deleteTrainerProfile(uid: string): Promise<void> {
   const [trainerDocSnap, trainerQuerySnap] = await Promise.all([
     db.collection("trainers").doc(uid).get(),
@@ -1172,7 +1202,7 @@ function validateAdminAppointmentSlot(
   occupancyByTime: Map<string, number>,
   userAppointments: AppointmentDoc[],
 ): void {
-  const slotBlocks = getSlotBlocks(input.slot.time, input.durationMinutes);
+  const slotBlocks = getCanonicalSlotBlocks(input.slot.time, input.durationMinutes);
   const targetSlotKeys = new Set(slotBlocks.map((time) => `${input.slot.date}_${time}`));
 
   const slotDate = slotDateTime(input.slot);
@@ -1213,7 +1243,7 @@ function applyApprovedAppointmentWrites(
   bonoDoc: QueryDocumentSnapshot | undefined,
   now: string,
 ): { bonoWarning?: string; minutesAudit?: AppointmentMinutesAudit } {
-  const slotBlocks = getSlotBlocks(input.slot.time, input.durationMinutes);
+  const slotBlocks = getCanonicalSlotBlocks(input.slot.time, input.durationMinutes);
   slotBlocks.forEach((time) => {
     transaction.set(
       db.collection("slot_occupancy").doc(slotOccupancyDocId(input.slot.date, time)),
@@ -1721,6 +1751,16 @@ export const rescheduleOwnRecurringAppointment = onCall(
   recurringReschedule.rescheduleOwnRecurringAppointment,
 );
 
+export const reconcileSlotOccupancyFromApprovedAppointments = onCall(
+  { region: REGION },
+  slotMigrations.reconcileSlotOccupancyFromApprovedAppointments,
+);
+
+export const migrateLegacyBlockedSlots = onCall(
+  { region: REGION },
+  slotMigrations.migrateLegacyBlockedSlots,
+);
+
 export const replaceOwnRecurringSeriesSchedule = onCall(
   { region: REGION },
   recurringReschedule.replaceOwnRecurringSeriesSchedule,
@@ -1940,7 +1980,7 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
     const userRef = db.collection("users").doc(userId);
     const siteConfigRef = db.collection("site_config").doc("main");
 
-    const slotBlocks = getSlotBlocks(preferredSlot.time, durationMinutes);
+    const slotBlocks = getCanonicalSlotBlocks(preferredSlot.time, durationMinutes);
     const targetSlotKeys = new Set(slotBlocks.map((time) => `${preferredSlot.date}_${time}`));
 
     const blockedSlotsQuery = db.collection("blocked_slots")
@@ -2245,7 +2285,7 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
       const config = siteConfigSnap.exists
         ? normalizeSiteConfig(siteConfigSnap.data() as Partial<SiteConfig>)
         : normalizeSiteConfig();
-      const slotBlocks = getSlotBlocks(preferredSlot.time, durationMinutes);
+      const slotBlocks = getCanonicalSlotBlocks(preferredSlot.time, durationMinutes);
       if (!new Set(generateTimeSlots(config)).has(preferredSlot.time)
         || !doesSessionFitWithinSchedule(config, preferredSlot.time, durationMinutes)) {
         throw toHttpsError("failed-precondition", "La franja seleccionada no es válida para el horario configurado.", {

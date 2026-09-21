@@ -60,7 +60,7 @@ import {
   type RecurringHastaOptionStatus,
 } from '@/lib/recurring-hasta-availability';
 import { RecurringHastaSelect } from '@/components/ui/recurring-hasta-select';
-import { getSlotBlocks } from '@/lib/appointment-slots';
+import { getCanonicalSlotBlocks } from '@/lib/appointment-slots';
 import {
   createAppointmentSecure,
   createRecurringAppointments,
@@ -360,7 +360,7 @@ export default function PortalPage() {
         const slot = a.approvedSlot || a.preferredSlots?.[0];
         if (!slot) return;
         const dur = parseInt(a.duration || '60', 10);
-        getSlotBlocks(slot.time, dur).forEach((blockTime) => {
+        getCanonicalSlotBlocks(slot.time, dur).forEach((blockTime) => {
           keys.add(`${slot.date}_${blockTime}`);
         });
       });

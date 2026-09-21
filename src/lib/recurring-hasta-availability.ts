@@ -1,5 +1,5 @@
 import type { SiteConfig } from '@/types';
-import { getSlotBlocks, slotOccupancyKey, doesSessionFitWithinSchedule, generateTimeSlots } from '@/lib/appointment-slots';
+import { getCanonicalSlotBlocks, slotOccupancyKey, doesSessionFitWithinSchedule, generateTimeSlots } from '@/lib/appointment-slots';
 import { generateRecurringOccurrenceDates, type RecurringEndDateOption } from '@/lib/recurring-appointments';
 import { classifyMadridCivilSlot } from '@/lib/madrid-date';
 import { normalizeSiteConfig } from '@/lib/site-config';
@@ -67,7 +67,7 @@ function evaluateOccurrence(input: {
         };
     }
 
-    const keys = getSlotBlocks(input.startTime, input.durationMinutes).map(
+    const keys = getCanonicalSlotBlocks(input.startTime, input.durationMinutes).map(
         (time) => slotOccupancyKey(input.date, time),
     );
 

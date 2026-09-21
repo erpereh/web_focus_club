@@ -1,3 +1,5 @@
+export type SlotInterval = 15 | 30 | 45 | 60;
+
 export const DEFAULT_MAX_CAPACITY = 2;
 export const MIN_MAX_CAPACITY = 1;
 export const MAX_MAX_CAPACITY = 10;
@@ -5,7 +7,7 @@ export const MAX_MAX_CAPACITY = 10;
 export interface SiteConfig {
   startHour: number;
   endHour: number;
-  slotInterval: number;
+  slotInterval: SlotInterval;
   bonoExpirationMonths: number;
   maxCapacity: number;
   maintenanceMode?: boolean;
@@ -21,8 +23,11 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
   maxCapacity: DEFAULT_MAX_CAPACITY,
 };
 
-function normalizeSlotInterval(value: unknown): number {
-  return value === 30 || value === 45 || value === 60 ? value : DEFAULT_SITE_CONFIG.slotInterval;
+export function normalizeSlotInterval(value: unknown): SlotInterval {
+  const parsed = Number(value);
+  return parsed === 15 || parsed === 30 || parsed === 45 || parsed === 60
+    ? parsed
+    : DEFAULT_SITE_CONFIG.slotInterval;
 }
 
 function normalizeHour(value: unknown, fallback: number): number {

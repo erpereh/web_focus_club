@@ -23,9 +23,20 @@ const {
   classifyMadridCivilSlot,
   madridCivilSlotToInstant,
   isInsideCustomerRescheduleLockWindow,
+  getCanonicalSlotBlocks,
   ONE_DAY_CHANGE_NOT_ALLOWED,
   SAME_DAY_CHANGE_NOT_ALLOWED,
 } = require("../lib/appointmentLifecycle.js");
+
+assert.deepEqual(getCanonicalSlotBlocks("10:00", 30), ["10:00", "10:15"]);
+assert.deepEqual(getCanonicalSlotBlocks("10:15", 30), ["10:15", "10:30"]);
+assert.deepEqual(getCanonicalSlotBlocks("10:30", 45), ["10:30", "10:45", "11:00"]);
+assert.deepEqual(getCanonicalSlotBlocks("10:45", 60), ["10:45", "11:00", "11:15", "11:30"]);
+assert.deepEqual(getCanonicalSlotBlocks("16:15", 45), ["16:15", "16:30", "16:45"]);
+
+const adjacentLeft = new Set(getCanonicalSlotBlocks("15:30", 45));
+assert.equal(getCanonicalSlotBlocks("16:15", 45).some((time) => adjacentLeft.has(time)), false);
+assert.equal(getCanonicalSlotBlocks("16:00", 45).some((time) => adjacentLeft.has(time)), true);
 
 class MemoryTransaction {
   constructor() {

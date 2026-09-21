@@ -5,7 +5,7 @@ const {
   createAdminAppointmentRescheduleHandlers,
 } = require("../lib/adminAppointmentReschedule.js");
 const {
-  getSlotBlocks,
+  getCanonicalSlotBlocks,
   reconcileAppointmentMinutes,
   slotOccupancyDocId,
 } = require("../lib/appointmentLifecycle.js");
@@ -138,7 +138,7 @@ function slotOccupancy(date, time, count = 0) {
 }
 
 function slotKeys(date, time, duration = 60) {
-  return getSlotBlocks(time, duration).map((block) => slotOccupancyDocId(date, block));
+  return getCanonicalSlotBlocks(time, duration).map((block) => slotOccupancyDocId(date, block));
 }
 
 function addOccupancy(documents, date, time, count, duration = 60) {

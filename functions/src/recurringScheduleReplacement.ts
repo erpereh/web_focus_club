@@ -2,7 +2,7 @@ import {
   getAppointmentEffectiveSlot,
   getBonoTotalMinutes,
   getMadridDateKey,
-  getSlotBlocks,
+  getCanonicalSlotBlocks,
   madridCivilSlotToInstant,
   slotOccupancyDocId,
 } from "./appointmentLifecycle.js";
@@ -85,7 +85,7 @@ export function replacementDurationMinutes(data: Pick<ReplacementAppointmentData
 }
 
 export function replacementOccupancyKeys(slot: ReplacementSlot, duration: number): string[] {
-  return getSlotBlocks(slot.time, duration).map((time) => slotOccupancyDocId(slot.date, time));
+  return getCanonicalSlotBlocks(slot.time, duration).map((time) => slotOccupancyDocId(slot.date, time));
 }
 
 export function validReplacementSlot(data: ReplacementAppointmentData): ReplacementSlot | undefined {

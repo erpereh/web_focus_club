@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const { createAdminAppointmentRescheduleHandlers } = require("../lib/adminAppointmentReschedule.js");
 const { createRecurringSeriesHandlers } = require("../lib/recurringSeries.js");
-const { getSlotBlocks, slotOccupancyDocId } = require("../lib/appointmentLifecycle.js");
+const { getCanonicalSlotBlocks, slotOccupancyDocId } = require("../lib/appointmentLifecycle.js");
 
 class FakeDocumentReference {
   constructor(db, path) {
@@ -103,7 +103,7 @@ class FakeFirestore {
 const fixedNow = new Date("2026-09-01T08:00:00.000Z");
 
 function slotKeys(date, time, duration = 60) {
-  return getSlotBlocks(time, duration).map((block) => slotOccupancyDocId(date, block));
+  return getCanonicalSlotBlocks(time, duration).map((block) => slotOccupancyDocId(date, block));
 }
 
 function addOccupancy(documents, date, time, count, duration = 60) {
@@ -221,6 +221,27 @@ test("approval uses each active pending occurrence real slot and non-contiguous 
   assert.equal(db.documents.get("appointment_recurrences/series-1").status, "approved");
   assert.deepEqual(db.documents.get("bonos/bono-1"), beforeBono);
   slotKeys("2026-09-15", "11:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 1));
+});
+
+test("approval keeps a stored recurring slot valid after only the start grid changes", async () => {
+  const documents = pendingFixture(1);
+  documents["appointment_recurrences/series-1"].startTime = "10:30";
+  documents["appointments/pending-0"].preferredSlots = [{ date: "2026-09-08", time: "10:30" }];
+  documents["appointments/pending-0"].date = "2026-09-08";
+  documents["appointments/pending-0"].time = "10:30";
+  documents["site_config/main"].slotInterval = 60;
+  addOccupancy(documents, "2026-09-08", "10:30", 0);
+  const db = new FakeFirestore(documents);
+
+  await recurringHandlers(db).approveRecurringAppointmentSeriesFromAdmin(adminRequest({
+    seriesId: "series-1",
+  }));
+
+  assert.equal(db.documents.get("appointments/pending-0").status, "approved");
+  assert.deepEqual(db.documents.get("appointments/pending-0").approvedSlot, {
+    date: "2026-09-08",
+    time: "10:30",
+  });
 });
 
 test("approval aborts atomically when a modified pending slot has become full", async () => {
