@@ -1,11 +1,9 @@
 import type { RenderedEmail } from "../types.js";
 import {
-  button,
   type DetailRow,
   detailsTable,
   formatDisplayDate,
   paragraph,
-  PORTAL_URL,
   textDetails,
 } from "./components.js";
 import { renderLayout, renderTextLayout } from "./layout.js";
@@ -127,21 +125,18 @@ function adminCopy(data: AppointmentEmailData): Copy {
 export function appointmentCustomerEmail(data: AppointmentEmailData): RenderedEmail {
   const copy = customerCopy(data);
   const rows = sessionRows(data);
-  const cta = data.action === "deleted" && data.status === "rejected"
-    ? "Elegir otro horario"
-    : "Ver mis citas";
   const footerNote = "Recibes este email porque tienes una cita en Focus Club.";
 
   const html = renderLayout({
     preheader: copy.preheader,
     eyebrow: "Tu cita",
     heading: copy.heading,
-    bodyHtml: [paragraph(copy.intro), detailsTable(rows), button(PORTAL_URL, cta)].join("\n"),
+    bodyHtml: [paragraph(copy.intro), detailsTable(rows)].join("\n"),
     footerNote,
   });
   const text = renderTextLayout({
     heading: copy.heading,
-    body: [copy.intro, "", textDetails(rows), "", `${cta}: ${PORTAL_URL}`].join("\n"),
+    body: [copy.intro, "", textDetails(rows)].join("\n"),
     footerNote,
   });
   return { subject: copy.subject, html, text };

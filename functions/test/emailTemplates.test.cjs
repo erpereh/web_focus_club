@@ -67,18 +67,36 @@ test("customer appointment email covers confirmed, rejected and cancelled/delete
   assert.match(confirmed.html, /10:15/);
   assert.match(confirmed.html, /Carlos/);
   assert.match(confirmed.text, /Hora: 10:15/);
-  assert.match(confirmed.text, /https:\/\/focusclub\.es\/portal/);
   assert.equal(confirmed.html.includes("600000000"), false, "customer email must not expose admin-only data");
 
   const rejected = appointmentCustomerEmail(appointment({ action: "deleted", status: "rejected" }));
   assertWellFormed(rejected);
   assert.match(rejected.subject, /No hemos podido confirmar/);
-  assert.match(rejected.html, /Elegir otro horario/);
 
   for (const status of ["cancelled", "deleted"]) {
     const cancelled = appointmentCustomerEmail(appointment({ action: "deleted", status }));
     assertWellFormed(cancelled);
     assert.equal(cancelled.subject, "Tu cita ha sido cancelada · Focus Club");
+  }
+});
+
+test("appointment emails are informational only: no CTA button or portal link", () => {
+  const variants = [
+    { action: "confirmed", status: "pending" },
+    { action: "confirmed", status: "approved" },
+    { action: "deleted", status: "rejected" },
+    { action: "deleted", status: "cancelled" },
+    { action: "deleted", status: "deleted" },
+  ];
+  for (const variant of variants) {
+    for (const email of [appointmentCustomerEmail(appointment(variant)), appointmentAdminEmail(appointment(variant))]) {
+      assert.equal(email.html.includes('class="fc-button"'), false);
+      assert.equal(email.html.includes("v:roundrect"), false);
+      assert.equal(email.html.includes("/portal"), false);
+      assert.equal(email.text.includes("/portal"), false);
+      assert.doesNotMatch(email.html, /Ver mis citas|Elegir otro horario/);
+      assert.doesNotMatch(email.text, /Ver mis citas|Elegir otro horario/);
+    }
   }
 });
 
