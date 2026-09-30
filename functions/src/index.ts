@@ -7,7 +7,6 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import { onDocumentCreated, onDocumentDeleted, onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { calendar_v3, google } from "googleapis";
-import { Resend } from "resend";
 import {
   buildCalendarEventPayload,
   buildCalendarSyncHash,
@@ -46,8 +45,17 @@ import { createSupportChatHandlers, type SupportChatNotificationInput } from "./
 import {
   createCustomerSuggestionHandlers,
   notifyCustomerSuggestionCreatedSafely,
-  type CustomerSuggestionMakeEvent,
 } from "./customerSuggestions";
+import { BREVO_API_KEY, getBrevoClient, sanitizeEmailError } from "./email/brevo.js";
+import {
+  ADMIN_NOTIFICATION_EMAIL,
+  type EmailDeps,
+  sendAppointmentEmailSafely as dispatchAppointmentEmailSafely,
+  sendContactEmail,
+  sendCustomerSuggestionEmail,
+  sendWelcomeEmail,
+} from "./email/notifications.js";
+import type { AppointmentEmailData, AppointmentEmailStatus } from "./email/templates/index.js";
 import { doesSessionFitWithinSchedule, generateTimeSlots, normalizeSiteConfig, type SiteConfig } from "./siteConfig.js";
 import {
   applyMigrationOperations,
@@ -65,14 +73,9 @@ import {
 initializeApp();
 
 const db = getFirestore();
-const MAKE_WEBHOOK_URL = defineSecret("MAKE_WEBHOOK_URL");
-const MAKE_WELCOME_WEBHOOK_URL = defineSecret("MAKE_WELCOME_WEBHOOK_URL");
-const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
 const GOOGLE_CALENDAR_ID = defineSecret("GOOGLE_CALENDAR_ID");
 const REGION = "europe-west1";
 const APPOINTMENT_SERVICE_TYPE = "Bono Mensual de Entrenamiento";
-const ADMIN_NOTIFICATION_EMAIL = "infofocusclub2026@gmail.com";
-const CONTACT_EMAIL_FROM = "Focus Club <noreply@focusclub.es>";
 const CONTACT_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const CONTACT_RATE_LIMIT_MAX_REQUESTS = 5;
 const CONTACT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -262,34 +265,6 @@ interface ServiceDoc {
   title?: string;
   duration?: string;
   active?: boolean;
-}
-
-interface MakePayload {
-  action: "confirmed" | "deleted";
-  recipientType: "customer" | "admin";
-  customerName: string;
-  customerEmail: string;
-  date: string;
-  time: string;
-  sessionType: string;
-  trainerName: string;
-  clientName?: string;
-  clientEmail?: string;
-  clientPhone?: string;
-  appointmentStatus?: AppointmentDoc["status"] | "deleted";
-  appointmentId?: string;
-  duration?: AppointmentDuration;
-  serviceType?: string;
-}
-
-type MakeWebhookPayload = MakePayload | CustomerSuggestionMakeEvent;
-
-interface WelcomeWebhookPayload {
-  event: "user_welcome";
-  recipientType: "customer";
-  customerName: string;
-  customerEmail: string;
-  appName: "Focus Club";
 }
 
 interface FcmTokenDoc {
@@ -596,74 +571,15 @@ async function resolveContactRecipientEmail(): Promise<string> {
   throw toHttpsError("failed-precondition", "No hay un email receptor valido configurado.");
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function formatSubmittedAt(date: Date): string {
-  return new Intl.DateTimeFormat("es-ES", {
-    dateStyle: "full",
-    timeStyle: "short",
-    timeZone: "Europe/Madrid",
-  }).format(date);
-}
-
-function buildContactEmail(message: ContactMessage, submittedAt: Date): { subject: string; html: string; text: string } {
-  const displayDate = formatSubmittedAt(submittedAt);
-  const subject = `Nuevo mensaje de contacto - Focus Club - ${message.subject}`;
-  const rows = [
-    ["Nombre", message.name],
-    ["Email", message.email],
-    ["Telefono", message.phone || "No indicado"],
-    ["Asunto", message.subject],
-    ["Fecha/hora", displayDate],
-  ];
-
-  const htmlRows = rows.map(([label, value]) => `
-    <tr>
-      <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-weight:600;color:#111827;">${escapeHtml(label)}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;color:#374151;">${escapeHtml(value)}</td>
-    </tr>
-  `).join("");
-
-  const html = `
-    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111827;">
-      <h1 style="font-size:20px;margin:0 0 16px;">Nuevo mensaje de contacto</h1>
-      <table style="border-collapse:collapse;width:100%;max-width:640px;margin-bottom:20px;">${htmlRows}</table>
-      <h2 style="font-size:16px;margin:0 0 8px;">Mensaje</h2>
-      <div style="white-space:pre-wrap;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;">${escapeHtml(message.message)}</div>
-    </div>
-  `;
-
-  const text = [
-    "Nuevo mensaje de contacto",
-    "",
-    `Nombre: ${message.name}`,
-    `Email: ${message.email}`,
-    `Telefono: ${message.phone || "No indicado"}`,
-    `Asunto: ${message.subject}`,
-    `Fecha/hora: ${displayDate}`,
-    "",
-    "Mensaje:",
-    message.message,
-  ].join("\n");
-
-  return { subject, html, text };
-}
-
 async function saveContactSubmission(
+  submissionRef: DocumentReference,
   message: ContactMessage,
   recipientEmail: string,
   createdAt: string,
   status: "sent" | "failed",
   extra: Record<string, unknown> = {},
 ): Promise<void> {
-  await db.collection("contact_submissions").add({
+  await submissionRef.set({
     name: message.name,
     email: message.email,
     phone: message.phone,
@@ -685,43 +601,8 @@ async function resolveTrainerName(trainerId?: string): Promise<string> {
   return trainer.name ?? "";
 }
 
-async function sendMakeWebhook(payload: MakeWebhookPayload): Promise<void> {
-  const webhookUrl = MAKE_WEBHOOK_URL.value();
-  if (!webhookUrl) {
-    console.warn("[Make] Secret MAKE_WEBHOOK_URL is not configured. Skipping webhook.");
-    return;
-  }
-
-  const response = await fetch(webhookUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Make webhook failed with status ${response.status}`);
-  }
-}
-
-async function sendWelcomeWebhook(payload: WelcomeWebhookPayload): Promise<void> {
-  const webhookUrl = MAKE_WELCOME_WEBHOOK_URL.value();
-  if (!webhookUrl) {
-    throw new Error("Welcome webhook secret is not configured.");
-  }
-
-  const response = await fetch(webhookUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Make welcome webhook failed with status ${response.status}`);
-  }
+function emailDeps(): EmailDeps {
+  return { db, client: getBrevoClient() };
 }
 
 function getWelcomeCustomerName(data: Record<string, unknown>, email: string): string {
@@ -734,97 +615,57 @@ function getWelcomeCustomerName(data: Record<string, unknown>, email: string): s
   return email.split("@")[0] || email;
 }
 
-function shortErrorMessage(error: unknown): string {
-  const rawMessage = error instanceof Error ? error.message : "Unknown welcome webhook error.";
-  return rawMessage
-    .replace(/https?:\/\/\S+/g, "[redacted-url]")
-    .slice(0, 180);
-}
-
-function buildMakePayload(
+function buildAppointmentEmailData(
   action: "confirmed" | "deleted",
   appointment: AppointmentDoc,
   trainerName: string,
-  recipientType: "customer" | "admin",
-  recipientEmail: string,
-  appointmentId?: string,
-  appointmentStatus: AppointmentDoc["status"] | "deleted" = appointment.status,
-): MakePayload {
+  appointmentId: string,
+  appointmentStatus: AppointmentEmailStatus = appointment.status,
+): AppointmentEmailData {
   const slot = appointment.approvedSlot ?? appointment.preferredSlots?.[0];
-  const payload: MakePayload = {
+  return {
     action,
-    recipientType,
+    status: appointmentStatus,
+    appointmentId,
     customerName: appointment.name,
-    customerEmail: recipientEmail,
+    customerEmail: appointment.email,
+    customerPhone: appointment.phone,
     date: slot?.date ?? "",
     time: slot?.time ?? "",
     sessionType: appointment.sessionType || appointment.serviceType || "",
     trainerName,
+    duration: appointment.duration,
+    serviceType: appointment.serviceType,
   };
-
-  if (recipientType === "admin") {
-    payload.clientName = appointment.name;
-    payload.clientEmail = appointment.email;
-    payload.clientPhone = appointment.phone;
-    payload.appointmentStatus = appointmentStatus;
-    payload.appointmentId = appointmentId;
-    payload.duration = appointment.duration;
-    payload.serviceType = appointment.serviceType;
-  }
-
-  return payload;
 }
 
-async function sendAppointmentMakeNotification(
+/**
+ * Sends one appointment email through Brevo. `dedupeKey` must be stable across
+ * retries of the same event (trigger event id or a callable-specific key).
+ */
+async function sendAppointmentEmailSafely(
+  dedupeKey: string,
   appointmentId: string,
   appointment: AppointmentDoc,
   action: "confirmed" | "deleted",
   recipientType: "customer" | "admin",
   recipientEmail: string,
-  appointmentStatus?: AppointmentDoc["status"] | "deleted",
-): Promise<void> {
-  const trainerName = await resolveTrainerName(appointment.assignedTrainer);
-  await sendMakeWebhook(buildMakePayload(
-    action,
-    appointment,
-    trainerName,
-    recipientType,
-    recipientEmail,
-    appointmentId,
-    appointmentStatus,
-  ));
-  console.log("[Make] Appointment notification sent", {
-    appointmentId,
-    action,
-    recipientType,
-    recipientEmail,
-  });
-}
-
-async function sendAppointmentMakeNotificationSafely(
-  appointmentId: string,
-  appointment: AppointmentDoc,
-  action: "confirmed" | "deleted",
-  recipientType: "customer" | "admin",
-  recipientEmail: string,
-  appointmentStatus?: AppointmentDoc["status"] | "deleted",
+  appointmentStatus?: AppointmentEmailStatus,
 ): Promise<void> {
   try {
-    await sendAppointmentMakeNotification(
-      appointmentId,
-      appointment,
-      action,
+    const trainerName = await resolveTrainerName(appointment.assignedTrainer);
+    await dispatchAppointmentEmailSafely(emailDeps(), {
+      dedupeKey: `${dedupeKey}:${recipientType}`,
+      data: buildAppointmentEmailData(action, appointment, trainerName, appointmentId, appointmentStatus),
       recipientType,
       recipientEmail,
-      appointmentStatus,
-    );
+    });
   } catch (error) {
-    console.error("[Make] Failed to send appointment notification", {
+    console.error("[Email] Failed to send appointment notification", {
       appointmentId,
       action,
       recipientType,
-      recipientEmail,
-      error,
+      error: sanitizeEmailError(error),
     });
   }
 }
@@ -1323,7 +1164,7 @@ export const onCustomerSuggestionCreated = onDocumentCreated(
   {
     document: "customer_suggestions/{suggestionId}",
     region: REGION,
-    secrets: [MAKE_WEBHOOK_URL],
+    secrets: [BREVO_API_KEY],
   },
   async (event) => {
     const data = event.data?.data();
@@ -1331,7 +1172,7 @@ export const onCustomerSuggestionCreated = onDocumentCreated(
     await notifyCustomerSuggestionCreatedSafely(
       String(event.params.suggestionId),
       data,
-      sendMakeWebhook,
+      (suggestionEvent) => sendCustomerSuggestionEmail(emailDeps(), suggestionEvent),
     );
   },
 );
@@ -1511,7 +1352,7 @@ export const deleteUserFromAdmin = onCall<DeleteUserFromAdminRequest>(
 export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminRequest>(
   {
     region: REGION,
-    secrets: [MAKE_WEBHOOK_URL],
+    secrets: [BREVO_API_KEY],
   },
   async (request) => {
     if (!request.auth) {
@@ -1670,15 +1511,18 @@ export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminReque
         console.error("[Push] Failed to send admin-created approved appointment notification", result.appointmentId, error);
       }
 
+      const dedupeKey = `admin-created:${result.appointmentId}`;
       await Promise.all([
-        sendAppointmentMakeNotificationSafely(
+        sendAppointmentEmailSafely(
+          dedupeKey,
           result.appointmentId,
           result.appointment,
           "confirmed",
           "customer",
           result.appointment.email,
         ),
-        sendAppointmentMakeNotificationSafely(
+        sendAppointmentEmailSafely(
+          dedupeKey,
           result.appointmentId,
           result.appointment,
           "confirmed",
@@ -1784,7 +1628,7 @@ export const returnRecurringSeriesToPendingFromAdmin = onCall(
 export const sendContactMessage = onCall<ContactMessageRequest>(
   {
     region: REGION,
-    secrets: [RESEND_API_KEY],
+    secrets: [BREVO_API_KEY],
   },
   async (request) => {
     const contactMessage = parseContactMessage(request.data);
@@ -1793,42 +1637,34 @@ export const sendContactMessage = onCall<ContactMessageRequest>(
     const ip = getClientIp(request.rawRequest);
     await enforceContactRateLimit(rateLimitDocId(ip));
 
+    const submissionRef = db.collection("contact_submissions").doc();
     let recipientEmail = "";
     try {
       recipientEmail = await resolveContactRecipientEmail();
     } catch (error) {
-      await saveContactSubmission(contactMessage, recipientEmail, createdAt, "failed", {
+      await saveContactSubmission(submissionRef, contactMessage, recipientEmail, createdAt, "failed", {
         errorMessage: error instanceof Error ? error.message : "No hay email receptor valido.",
       });
       throw error;
     }
 
-    const resend = new Resend(RESEND_API_KEY.value());
-    const email = buildContactEmail(contactMessage, submittedAt);
-
     try {
-      const result = await resend.emails.send({
-        from: CONTACT_EMAIL_FROM,
-        to: [recipientEmail],
-        subject: email.subject,
-        html: email.html,
-        text: email.text,
-        replyTo: contactMessage.email,
+      const result = await sendContactEmail(emailDeps(), {
+        submissionId: submissionRef.id,
+        data: { ...contactMessage, submittedAt },
+        recipientEmail,
       });
 
-      if (result.error) {
-        throw new Error(result.error.message);
-      }
-
-      await saveContactSubmission(contactMessage, recipientEmail, createdAt, "sent", {
-        resendEmailId: result.data?.id ?? "",
+      await saveContactSubmission(submissionRef, contactMessage, recipientEmail, createdAt, "sent", {
+        brevoMessageId: result.status === "sent" ? result.messageId : "",
       });
 
       return { success: true };
     } catch (error) {
-      console.error("[Contact] Failed to send contact email", error);
-      await saveContactSubmission(contactMessage, recipientEmail, createdAt, "failed", {
-        errorMessage: error instanceof Error ? error.message : "Error desconocido al enviar el email.",
+      const errorMessage = sanitizeEmailError(error, "Error desconocido al enviar el email.");
+      console.error("[Contact] Failed to send contact email", { submissionId: submissionRef.id, error: errorMessage });
+      await saveContactSubmission(submissionRef, contactMessage, recipientEmail, createdAt, "failed", {
+        errorMessage,
       });
       throw toHttpsError("internal", "No se ha podido enviar el mensaje. Intentalo de nuevo mas tarde.");
     }
@@ -2393,7 +2229,7 @@ export const onUserProfileCreatedWelcomeEmail = onDocumentCreated(
   {
     document: "users/{uid}",
     region: REGION,
-    secrets: [MAKE_WELCOME_WEBHOOK_URL],
+    secrets: [BREVO_API_KEY],
   },
   async (event) => {
     const userSnap = event.data;
@@ -2405,40 +2241,41 @@ export const onUserProfileCreatedWelcomeEmail = onDocumentCreated(
     if (!data) return;
 
     if (data.welcomeEmailSentAt) {
-      console.log("[WelcomeEmail] Welcome email already sent. Skipping webhook.", { uid });
+      console.log("[WelcomeEmail] Welcome email already sent. Skipping.", { uid });
       return;
     }
 
     const email = typeof data.email === "string" ? data.email.trim() : "";
     if (!isValidEmail(email)) {
-      console.warn("[WelcomeEmail] User profile has no valid email. Skipping webhook.", { uid });
+      console.warn("[WelcomeEmail] User profile has no valid email. Skipping.", { uid });
       return;
     }
 
-    const payload: WelcomeWebhookPayload = {
-      event: "user_welcome",
-      recipientType: "customer",
-      customerName: getWelcomeCustomerName(data, email),
-      customerEmail: email,
-      appName: "Focus Club",
-    };
-
     try {
-      await sendWelcomeWebhook(payload);
+      const result = await sendWelcomeEmail(emailDeps(), {
+        uid,
+        customerName: getWelcomeCustomerName(data, email),
+        customerEmail: email,
+      });
+      if (result.status === "skipped" && result.reason === "in_progress") {
+        console.log("[WelcomeEmail] Welcome email already in progress. Skipping.", { uid });
+        return;
+      }
 
       const now = new Date().toISOString();
       await userSnap.ref.set({
         welcomeEmailSentAt: now,
         welcomeEmailStatus: "sent",
         welcomeEmailLastAttemptAt: now,
+        ...(result.status === "sent" ? { welcomeEmailMessageId: result.messageId } : {}),
       }, { merge: true });
 
-      console.log("[WelcomeEmail] Welcome webhook sent.", { uid });
+      console.log("[WelcomeEmail] Welcome email sent.", { uid, outcome: result.status });
     } catch (error) {
       const now = new Date().toISOString();
-      const errorMessage = shortErrorMessage(error);
+      const errorMessage = sanitizeEmailError(error);
 
-      console.error("[WelcomeEmail] Failed to send welcome webhook.", {
+      console.error("[WelcomeEmail] Failed to send welcome email.", {
         uid,
         error: errorMessage,
       });
@@ -2452,7 +2289,7 @@ export const onUserProfileCreatedWelcomeEmail = onDocumentCreated(
       } catch (writeError) {
         console.error("[WelcomeEmail] Failed to store welcome email failure status.", {
           uid,
-          error: shortErrorMessage(writeError),
+          error: sanitizeEmailError(writeError),
         });
       }
     }
@@ -2463,7 +2300,7 @@ export const onAppointmentCreated = onDocumentCreated(
   {
     document: "appointments/{appointmentId}",
     region: REGION,
-    secrets: [MAKE_WEBHOOK_URL],
+    secrets: [BREVO_API_KEY],
   },
   async (event) => {
     const appointment = event.data?.data() as AppointmentDoc | undefined;
@@ -2472,7 +2309,8 @@ export const onAppointmentCreated = onDocumentCreated(
     if (!appointment || appointment.status !== "pending") return;
     if (appointment.recurrenceSeriesId) return;
 
-    await sendAppointmentMakeNotificationSafely(
+    await sendAppointmentEmailSafely(
+      event.id,
       appointmentId,
       appointment,
       "confirmed",
@@ -2486,7 +2324,7 @@ export const onAppointmentApproved = onDocumentUpdated(
   {
     document: "appointments/{appointmentId}",
     region: REGION,
-    secrets: [MAKE_WEBHOOK_URL],
+    secrets: [BREVO_API_KEY],
   },
   async (event) => {
     const before = event.data?.before.data() as AppointmentDoc | undefined;
@@ -2576,8 +2414,8 @@ export const onAppointmentApproved = onDocumentUpdated(
 
     const action = changedToApproved ? "confirmed" : "deleted";
     await Promise.all([
-      sendAppointmentMakeNotificationSafely(appointmentId, after, action, "customer", after.email),
-      sendAppointmentMakeNotificationSafely(appointmentId, after, action, "admin", ADMIN_NOTIFICATION_EMAIL),
+      sendAppointmentEmailSafely(event.id, appointmentId, after, action, "customer", after.email),
+      sendAppointmentEmailSafely(event.id, appointmentId, after, action, "admin", ADMIN_NOTIFICATION_EMAIL),
     ]);
   },
 );
@@ -2586,7 +2424,7 @@ export const onAppointmentDeleted = onDocumentDeleted(
   {
     document: "appointments/{appointmentId}",
     region: REGION,
-    secrets: [MAKE_WEBHOOK_URL],
+    secrets: [BREVO_API_KEY],
   },
   async (event) => {
     const appointment = event.data?.data() as AppointmentDoc | undefined;
@@ -2594,7 +2432,8 @@ export const onAppointmentDeleted = onDocumentDeleted(
     if (!appointment) return;
 
     await Promise.all([
-      sendAppointmentMakeNotificationSafely(
+      sendAppointmentEmailSafely(
+        event.id,
         appointmentId,
         appointment,
         "deleted",
@@ -2602,7 +2441,8 @@ export const onAppointmentDeleted = onDocumentDeleted(
         appointment.email,
         "deleted",
       ),
-      sendAppointmentMakeNotificationSafely(
+      sendAppointmentEmailSafely(
+        event.id,
         appointmentId,
         appointment,
         "deleted",

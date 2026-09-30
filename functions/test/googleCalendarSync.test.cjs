@@ -102,40 +102,37 @@ assert.match(indexSource, /new google\.auth\.GoogleAuth/);
 assert.match(indexSource, /secrets:\s*\[GOOGLE_CALENDAR_ID\]/);
 assert.equal(indexSource.includes("serviceAccount:"), false);
 
-assert.match(indexSource, /ADMIN_NOTIFICATION_EMAIL\s*=\s*"infofocusclub2026@gmail\.com"/);
+const notificationsSource = fs.readFileSync(path.join(__dirname, "../src/email/notifications.ts"), "utf8");
+assert.match(notificationsSource, /ADMIN_NOTIFICATION_EMAIL\s*=\s*"infofocusclub2026@gmail\.com"/);
+assert.match(notificationsSource, /SUGGESTIONS_RECIPIENT_EMAIL\s*=\s*"info@focusclub\.es"/);
 assert.match(indexSource, /onDocumentCreated/);
 assert.match(indexSource, /export const onAppointmentCreated/);
-assert.match(indexSource, /recipientType:\s*"customer"\s*\|\s*"admin"/);
-assert.match(indexSource, /recipientEmail:\s*string/);
 assert.match(indexSource, /recipientType:\s*"customer"\s*\|\s*"admin",\s*\n\s*recipientEmail:\s*string/);
-assert.match(indexSource, /customerEmail:\s*recipientEmail/);
-assert.match(indexSource, /payload\.clientName\s*=\s*appointment\.name/);
-assert.match(indexSource, /payload\.clientEmail\s*=\s*appointment\.email/);
-assert.match(indexSource, /payload\.clientPhone\s*=\s*appointment\.phone/);
-assert.match(indexSource, /payload\.appointmentStatus\s*=\s*appointmentStatus/);
-assert.match(indexSource, /payload\.appointmentId\s*=\s*appointmentId/);
-assert.match(indexSource, /sendAppointmentMakeNotificationSafely/);
+assert.match(indexSource, /customerName:\s*appointment\.name/);
+assert.match(indexSource, /customerEmail:\s*appointment\.email/);
+assert.match(indexSource, /customerPhone:\s*appointment\.phone/);
+assert.match(indexSource, /status:\s*appointmentStatus/);
 assert.match(indexSource, /"confirmed",\s*\n\s*"admin",\s*\n\s*ADMIN_NOTIFICATION_EMAIL/);
-assert.match(indexSource, /sendAppointmentMakeNotificationSafely\(appointmentId,\s*after,\s*action,\s*"customer",\s*after\.email\)/);
-assert.match(indexSource, /sendAppointmentMakeNotificationSafely\(appointmentId,\s*after,\s*action,\s*"admin",\s*ADMIN_NOTIFICATION_EMAIL\)/);
-assert.match(indexSource, /sendAppointmentMakeNotificationSafely\(\s*appointmentId,\s*appointment,\s*"deleted",\s*"customer",\s*appointment\.email,\s*"deleted",?\s*\)/);
-assert.match(indexSource, /sendAppointmentMakeNotificationSafely\(\s*appointmentId,\s*appointment,\s*"deleted",\s*"admin",\s*ADMIN_NOTIFICATION_EMAIL,\s*"deleted",?\s*\)/);
+assert.match(indexSource, /sendAppointmentEmailSafely\(event\.id,\s*appointmentId,\s*after,\s*action,\s*"customer",\s*after\.email\)/);
+assert.match(indexSource, /sendAppointmentEmailSafely\(event\.id,\s*appointmentId,\s*after,\s*action,\s*"admin",\s*ADMIN_NOTIFICATION_EMAIL\)/);
+assert.match(indexSource, /sendAppointmentEmailSafely\(\s*event\.id,\s*appointmentId,\s*appointment,\s*"deleted",\s*"customer",\s*appointment\.email,\s*"deleted",?\s*\)/);
+assert.match(indexSource, /sendAppointmentEmailSafely\(\s*event\.id,\s*appointmentId,\s*appointment,\s*"deleted",\s*"admin",\s*ADMIN_NOTIFICATION_EMAIL,\s*"deleted",?\s*\)/);
 assert.equal(indexSource.includes('"pending" | "confirmed" | "deleted"'), false);
 assert.equal(indexSource.includes('"rejected" | "confirmed" | "deleted"'), false);
 assert.equal(indexSource.includes('action: "pending"'), false);
 assert.equal(indexSource.includes('action: "rejected"'), false);
 
-assert.match(indexSource, /MAKE_WELCOME_WEBHOOK_URL\s*=\s*defineSecret\("MAKE_WELCOME_WEBHOOK_URL"\)/);
-assert.match(indexSource, /interface WelcomeWebhookPayload/);
+// Email infrastructure is Brevo only: no Make webhooks or Resend left.
+for (const legacy of ["MAKE_WEBHOOK_URL", "MAKE_WELCOME_WEBHOOK_URL", "RESEND_API_KEY", "sendMakeWebhook", "sendWelcomeWebhook", "Resend"]) {
+  assert.equal(indexSource.includes(legacy), false, `${legacy} should be removed`);
+}
+assert.match(indexSource, /import \{ BREVO_API_KEY/);
+assert.equal((indexSource.match(/secrets:\s*\[BREVO_API_KEY\]/g) ?? []).length, 7);
+
 assert.match(indexSource, /function getWelcomeCustomerName/);
-assert.match(indexSource, /async function sendWelcomeWebhook/);
-assert.match(indexSource, /function shortErrorMessage/);
 assert.match(indexSource, /export const onUserProfileCreatedWelcomeEmail\s*=\s*onDocumentCreated/);
 assert.match(indexSource, /document:\s*"users\/\{uid\}"/);
-assert.match(indexSource, /secrets:\s*\[MAKE_WELCOME_WEBHOOK_URL\]/);
-assert.match(indexSource, /event:\s*"user_welcome"/);
-assert.match(indexSource, /recipientType:\s*"customer"/);
-assert.match(indexSource, /appName:\s*"Focus Club"/);
+assert.match(indexSource, /sendWelcomeEmail\(emailDeps\(\)/);
 assert.match(indexSource, /welcomeEmailSentAt/);
 assert.match(indexSource, /welcomeEmailStatus:\s*"sent"/);
 assert.match(indexSource, /welcomeEmailStatus:\s*"failed"/);

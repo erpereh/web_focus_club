@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
-  buildCustomerSuggestionMakeEvent,
+  buildCustomerSuggestionEmailEvent,
   createCustomerSuggestionHandlers,
   normalizeCustomerSuggestionPayload,
   notifyCustomerSuggestionCreatedSafely,
@@ -298,7 +298,7 @@ test("deleting is idempotent and rejects invalid ids or unknown states", async (
   );
 });
 
-test("builds the Make event from the persisted Timestamp and absorbs webhook failures", async () => {
+test("builds the email event from the persisted Timestamp and absorbs send failures", async () => {
   const createdAt = Timestamp.fromDate(new Date("2026-07-16T10:30:00.000Z"));
   const data = {
     userId: "customer-1",
@@ -309,7 +309,7 @@ test("builds the Make event from the persisted Timestamp and absorbs webhook fai
     createdAt,
   };
 
-  assert.deepEqual(buildCustomerSuggestionMakeEvent("suggestion-1", data), {
+  assert.deepEqual(buildCustomerSuggestionEmailEvent("suggestion-1", data), {
     event: "customer_suggestion",
     suggestionId: "suggestion-1",
     userId: "customer-1",
@@ -324,7 +324,7 @@ test("builds the Make event from the persisted Timestamp and absorbs webhook fai
   await assert.doesNotReject(() => notifyCustomerSuggestionCreatedSafely(
     "suggestion-1",
     data,
-    async () => { throw new Error("Make unavailable"); },
+    async () => { throw new Error("Brevo unavailable"); },
     (message) => errors.push(message),
   ));
   assert.equal(errors.length, 1);

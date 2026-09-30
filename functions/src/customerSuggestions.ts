@@ -18,7 +18,7 @@ export interface CustomerSuggestion {
   reviewedByEmail: string | null;
 }
 
-export interface CustomerSuggestionMakeEvent {
+export interface CustomerSuggestionEmailEvent {
   event: "customer_suggestion";
   suggestionId: string;
   userId: string;
@@ -187,10 +187,10 @@ export function createCustomerSuggestionHandlers(
   };
 }
 
-export function buildCustomerSuggestionMakeEvent(
+export function buildCustomerSuggestionEmailEvent(
   suggestionId: string,
   data: FirebaseFirestore.DocumentData,
-): CustomerSuggestionMakeEvent {
+): CustomerSuggestionEmailEvent {
   if (!(data.createdAt instanceof Timestamp)) {
     throw new Error("Customer suggestion createdAt is not a persisted Timestamp.");
   }
@@ -209,14 +209,14 @@ export function buildCustomerSuggestionMakeEvent(
 export async function notifyCustomerSuggestionCreatedSafely(
   suggestionId: string,
   data: FirebaseFirestore.DocumentData,
-  sendWebhook: (event: CustomerSuggestionMakeEvent) => Promise<void>,
+  sendEmail: (event: CustomerSuggestionEmailEvent) => Promise<unknown>,
   logError: (message: string) => void = console.error,
 ): Promise<void> {
   try {
-    await sendWebhook(buildCustomerSuggestionMakeEvent(suggestionId, data));
+    await sendEmail(buildCustomerSuggestionEmailEvent(suggestionId, data));
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown Make webhook error.";
-    logError(`[Make] Customer suggestion notification failed: ${message}`);
+    const message = error instanceof Error ? error.message : "Unknown email error.";
+    logError(`[Email] Customer suggestion notification failed: ${message}`);
   }
 }
 

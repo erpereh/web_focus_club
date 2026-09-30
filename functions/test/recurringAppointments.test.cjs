@@ -424,7 +424,7 @@ assert.match(recurringSource, /bonoId:/);
 assert.match(recurringSource, /intervalDays/);
 assert.doesNotMatch(recurringSource, /intervalWeeks/);
 assert.doesNotMatch(recurringSource, /sendAppointmentStatusPushNotification/);
-assert.doesNotMatch(recurringSource, /sendAppointmentMakeNotificationSafely/);
+assert.doesNotMatch(recurringSource, /sendAppointmentEmailSafely/);
 assert.match(indexSource, /export const createRecurringAppointmentsFromAdmin\s*=\s*onCall/);
 assert.match(indexSource, /export const createRecurringAppointments\s*=\s*onCall/);
 assert.match(indexSource, /export const approveRecurringAppointmentSeriesFromAdmin\s*=\s*onCall/);
