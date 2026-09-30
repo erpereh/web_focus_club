@@ -264,6 +264,16 @@ test("customer replaces a mixed future series with deterministic reuse/create re
   assert.equal(db.documents.get("appointments/auto-1").status, "pending");
   assert.equal(db.documents.get("bonos/bono-1").minutosRestantes, 240);
 
+  // One grouped customer notice for the whole replacement.
+  const outbox = [...db.documents.entries()].filter(([path]) => path.startsWith("notification_outbox/"));
+  assert.equal(outbox.length, 1);
+  const [outboxPath, outboxEntry] = outbox[0];
+  assert.equal(outboxEntry.event, "appointment_series_requested");
+  assert.deepEqual(outboxEntry.appointmentIds, ["future-approved", "future-pending", "auto-1"]);
+  for (const id of ["future-approved", "future-pending", "auto-1"]) {
+    assert.equal(db.documents.get(`appointments/${id}`).notificationOperationId, outboxPath.split("/")[1]);
+  }
+
   getCanonicalSlotBlocks("10:00", duration).forEach((time) => {
     assert.equal(db.documents.get(`slot_occupancy/2026-09-10_${time}`).count, 0);
   });

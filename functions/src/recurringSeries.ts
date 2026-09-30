@@ -24,6 +24,7 @@ import {
   normalizeSiteConfig,
   type SiteConfig,
 } from "./siteConfig.js";
+import { newNotificationOperation, sessionsOf, writeNotificationOutbox } from "./notifications/outbox.js";
 import {
   calculateActiveSeriesMetadata,
   isActiveOccurrenceStatus,
@@ -64,6 +65,7 @@ interface SeriesAppointment {
   minutesRefundReason?: string | null;
   recurrenceSeriesId?: string;
   recurrenceIndex?: number;
+  notificationOperationId?: string;
   createdAt: string;
   updatedAt?: string;
 }
@@ -341,6 +343,8 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           accion: "descuento_cita",
         }));
 
+        const operation = newNotificationOperation(db);
+        const createdSlots: TimeSlot[] = [];
         transaction.create(seriesRef, {
           userId: input.userId,
           serviceType: input.serviceType,
@@ -390,10 +394,24 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
             minutesDeductedAt: now,
             minutesRefundedAt: null,
             minutesRefundReason: null,
+            notificationOperationId: operation.operationId,
             createdAt: now,
             updatedAt: now,
           };
           transaction.create(appointmentRefs[index], appointment);
+          createdSlots.push(slot);
+        });
+
+        writeNotificationOutbox(transaction, operation, {
+          userId: input.userId!,
+          event: "appointment_series_confirmed",
+          seriesId: seriesRef.id,
+          appointmentIds: appointmentRefs.slice(0, createdSlots.length).map((ref) => ref.id),
+          sessions: sessionsOf(createdSlots),
+          customerName: userProfile.name,
+          customerEmail: userProfile.email,
+          actor: "admin",
+          createdAt: now,
         });
 
         plan.writes.occupancyWrites.forEach((write) => {
@@ -551,6 +569,8 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           accion: "descuento_cita",
         }));
 
+        const operation = newNotificationOperation(db);
+        const requestedSlots: TimeSlot[] = [];
         transaction.create(seriesRef, {
           userId,
           serviceType: input.serviceType,
@@ -591,10 +611,24 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
             minutesDeductedAt: now,
             minutesRefundedAt: null,
             minutesRefundReason: null,
+            notificationOperationId: operation.operationId,
             createdAt: now,
             updatedAt: now,
           };
           transaction.create(appointmentRefs[index], appointment);
+          requestedSlots.push(slot);
+        });
+
+        writeNotificationOutbox(transaction, operation, {
+          userId,
+          event: "appointment_series_requested",
+          seriesId: seriesRef.id,
+          appointmentIds: appointmentRefs.slice(0, requestedSlots.length).map((ref) => ref.id),
+          sessions: sessionsOf(requestedSlots),
+          customerName: userProfile.name,
+          customerEmail: userProfile.email,
+          actor: "customer",
+          createdAt: now,
         });
 
         transaction.set(bonoRef, {
@@ -768,6 +802,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         });
 
         const now = nowDate.toISOString();
+        const operation = newNotificationOperation(db);
         prepared.forEach((occurrence) => {
           const patch: Record<string, unknown> = {
             status: "approved",
@@ -777,10 +812,22 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
             updatedAt: now,
             approvedAt: now,
             approvedByAdmin: adminUid,
+            notificationOperationId: operation.operationId,
           };
           if (assignedTrainer) patch.assignedTrainer = assignedTrainer;
           if (sessionType) patch.sessionType = sessionType;
           transaction.set(occurrence.ref, patch, { merge: true });
+        });
+        writeNotificationOutbox(transaction, operation, {
+          userId: series.userId,
+          event: "appointment_series_confirmed",
+          seriesId,
+          appointmentIds: prepared.map((occurrence) => occurrence.id),
+          sessions: sessionsOf(prepared.map((occurrence) => ({ approvedSlot: occurrence.slot }))),
+          customerName: prepared[0].data.name ?? "",
+          customerEmail: prepared[0].data.email ?? "",
+          actor: "admin",
+          createdAt: now,
         });
 
         occupancyKeys.forEach((key) => {
@@ -955,12 +1002,27 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         accion: "devolucion_cita",
       }));
 
+      const operation = newNotificationOperation(db);
       occurrences.forEach((occurrence, index) => {
-        transaction.set(occurrence.ref, buildPendingSeriesOccurrencePatch({
-          status: input.appointmentStatus,
-          now,
-          refundPatch: refundPlan.appointmentPatches[index],
-        }), { merge: true });
+        transaction.set(occurrence.ref, {
+          ...buildPendingSeriesOccurrencePatch({
+            status: input.appointmentStatus,
+            now,
+            refundPatch: refundPlan.appointmentPatches[index],
+          }),
+          notificationOperationId: operation.operationId,
+        }, { merge: true });
+      });
+      writeNotificationOutbox(transaction, operation, {
+        userId: series.userId,
+        event: input.appointmentStatus === "rejected" ? "appointment_series_rejected" : "appointment_series_cancelled",
+        seriesId: input.seriesId,
+        appointmentIds: occurrences.map((occurrence) => occurrence.id),
+        sessions: sessionsOf(occurrences.map((occurrence) => occurrence.data)),
+        customerName: occurrences[0]?.data.name ?? "",
+        customerEmail: occurrences[0]?.data.email ?? "",
+        actor: input.requireOwner ? "customer" : "admin",
+        createdAt: now,
       });
 
       transaction.set(bonoRef, {

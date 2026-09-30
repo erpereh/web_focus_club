@@ -1,23 +1,16 @@
-import { createHash } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
+import { claimLedger, dispatchIdFor, markLedgerFailed, markLedgerSent } from "../notifications/ledger.js";
 import { sanitizeEmailError } from "./brevo.js";
 import type {
   EmailClient,
   EmailDispatchContext,
   EmailDispatchOutcome,
-  EmailDispatchStatus,
   EmailMessage,
 } from "./types.js";
 
 export const EMAIL_DISPATCH_COLLECTION = "email_dispatches";
 /** Must exceed the Brevo client's worst case (timeout x attempts + backoff). */
 export const EMAIL_DISPATCH_LEASE_MS = 2 * 60 * 1000;
-
-interface EmailDispatchDoc {
-  status?: EmailDispatchStatus;
-  leaseUntilMillis?: number;
-  attempts?: number;
-}
 
 export interface SendEmailOnceInput {
   db: Firestore;
@@ -30,7 +23,7 @@ export interface SendEmailOnceInput {
 }
 
 export function emailDispatchId(dedupeKey: string): string {
-  return createHash("sha256").update(dedupeKey).digest("hex");
+  return dispatchIdFor(dedupeKey);
 }
 
 /** Deterministic UUID-shaped key derived from the dedupe key. */
@@ -44,10 +37,6 @@ export function emailIdempotencyKey(dedupeKey: string): string {
     hex.slice(20, 32),
   ].join("-");
 }
-
-type ClaimResult =
-  | { claimed: true }
-  | { claimed: false; reason: "already_sent" | "in_progress" };
 
 /**
  * Sends an email at most once per dedupe key. A Firestore ledger guards
@@ -65,33 +54,11 @@ export async function sendEmailOnce({
   leaseMs = EMAIL_DISPATCH_LEASE_MS,
 }: SendEmailOnceInput): Promise<EmailDispatchOutcome> {
   const dispatchId = emailDispatchId(dedupeKey);
-  const ref = db.collection(EMAIL_DISPATCH_COLLECTION).doc(dispatchId);
-
-  const claim = await db.runTransaction<ClaimResult>(async (transaction) => {
-    const snap = await transaction.get(ref);
-    const existing = snap.exists ? snap.data() as EmailDispatchDoc : undefined;
-    const nowMillis = now();
-
-    if (existing?.status === "sent") return { claimed: false, reason: "already_sent" };
-    if (existing?.status === "sending"
-      && typeof existing.leaseUntilMillis === "number"
-      && existing.leaseUntilMillis > nowMillis) {
-      return { claimed: false, reason: "in_progress" };
-    }
-
-    transaction.set(ref, {
-      status: "sending" satisfies EmailDispatchStatus,
-      category: message.category,
-      recipientType: context.recipientType ?? null,
-      relatedId: context.relatedId ?? null,
-      sendingAt: new Date(nowMillis).toISOString(),
-      leaseUntilMillis: nowMillis + leaseMs,
-      attempts: (existing?.attempts ?? 0) + 1,
-      updatedAt: new Date(nowMillis).toISOString(),
-      ...(existing ? {} : { createdAt: new Date(nowMillis).toISOString() }),
-    }, { merge: true });
-    return { claimed: true };
-  });
+  const claim = await claimLedger(db, EMAIL_DISPATCH_COLLECTION, dispatchId, {
+    category: message.category,
+    recipientType: context.recipientType ?? null,
+    relatedId: context.relatedId ?? null,
+  }, now(), leaseMs);
 
   if (!claim.claimed) {
     console.log("[Email] Duplicate send skipped", {
@@ -109,13 +76,7 @@ export async function sendEmailOnce({
   } catch (error) {
     const errorMessage = sanitizeEmailError(error);
     try {
-      await ref.set({
-        status: "failed" satisfies EmailDispatchStatus,
-        leaseUntilMillis: null,
-        lastError: errorMessage,
-        failedAt: new Date(now()).toISOString(),
-        updatedAt: new Date(now()).toISOString(),
-      }, { merge: true });
+      await markLedgerFailed(claim.ref, now(), errorMessage);
     } catch (writeError) {
       console.error("[Email] Failed to store dispatch failure", {
         dispatchId,
@@ -126,14 +87,7 @@ export async function sendEmailOnce({
   }
 
   try {
-    await ref.set({
-      status: "sent" satisfies EmailDispatchStatus,
-      messageId,
-      leaseUntilMillis: null,
-      lastError: null,
-      sentAt: new Date(now()).toISOString(),
-      updatedAt: new Date(now()).toISOString(),
-    }, { merge: true });
+    await markLedgerSent(claim.ref, now(), { messageId });
   } catch (writeError) {
     // The email went out; a later reclaim is still covered by Brevo's key.
     console.error("[Email] Failed to store dispatch success", {

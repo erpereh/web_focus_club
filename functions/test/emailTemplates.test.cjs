@@ -167,3 +167,78 @@ test("customer suggestion email", () => {
   assert.match(email.html, /Más horarios por la tarde/);
   assert.match(email.text, /Sugerencia:\nMás horarios por la tarde/);
 });
+
+const {
+  appointmentCustomerEventEmail,
+  appointmentSeriesEmail,
+  bonoEmail,
+} = require("../lib/email/templates/index.js");
+
+function assertInformational(email) {
+  assertWellFormed(email);
+  assert.equal(email.html.includes('class="fc-button"'), false);
+  assert.equal(email.html.includes("/portal"), false);
+  assert.equal(email.text.includes("/portal"), false);
+}
+
+test("customer appointment event emails cover requested, rescheduled and deleted", () => {
+  const requested = appointmentCustomerEventEmail("appointment_requested", appointment({ status: "pending" }));
+  assertInformational(requested);
+  assert.equal(requested.subject, "Hemos recibido tu solicitud de cita · Focus Club");
+
+  const rescheduled = appointmentCustomerEventEmail(
+    "appointment_rescheduled",
+    appointment({ date: "2026-10-06", time: "11:00" }),
+    { date: "2026-10-05", time: "10:15" },
+  );
+  assertInformational(rescheduled);
+  assert.equal(rescheduled.subject, "Tu cita ha cambiado · Focus Club");
+  assert.match(rescheduled.text, /Antes: Lunes, 5 de octubre de 2026 · 10:15/);
+  assert.match(rescheduled.text, /Estado: Confirmada/);
+
+  const pendingReschedule = appointmentCustomerEventEmail("appointment_rescheduled", appointment({ status: "pending" }));
+  assert.match(pendingReschedule.text, /pendiente de confirmación/);
+
+  const deleted = appointmentCustomerEventEmail("appointment_deleted", appointment({ action: "deleted", status: "deleted" }));
+  assertInformational(deleted);
+  assert.equal(deleted.subject, "Tu cita ha sido eliminada · Focus Club");
+});
+
+test("series email lists every session and cancelled ones, escaped", () => {
+  const data = {
+    customerName: "Lucía",
+    sessions: [{ date: "2026-10-05", time: "10:00" }, { date: "2026-10-12", time: "10:00" }],
+    cancelledSessions: [{ date: "2026-10-19", time: "10:00" }],
+  };
+  const email = appointmentSeriesEmail("appointment_series_confirmed", data);
+  assertInformational(email);
+  assert.equal(email.subject, "Tus citas recurrentes están confirmadas · Focus Club");
+  assert.match(email.html, /Lunes, 5 de octubre de 2026 · 10:00/);
+  assert.match(email.html, /Cancelada: Lunes, 19 de octubre de 2026/);
+  assert.match(email.text, /- Lunes, 12 de octubre de 2026 · 10:00/);
+
+  const malicious = appointmentSeriesEmail("appointment_series_confirmed", { ...data, customerName: "<b>Lucía" });
+  assert.match(malicious.html, /Hola &lt;b&gt;Lucía/);
+  assert.equal(malicious.html.includes("<b>Lucía"), false);
+});
+
+test("bono emails for every bono event", () => {
+  const data = { customerName: "Lucía", totalMinutes: 240, remainingMinutes: 90, startDate: "2026-07-01", expiryDate: "2026-10-08" };
+  const subjects = {
+    bono_assigned: "Tu bono ya está activo · Focus Club",
+    bono_renewed: "Tu bono se ha renovado · Focus Club",
+    bono_exhausted: "Tu bono se ha agotado · Focus Club",
+    bono_expired: "Tu bono ha caducado · Focus Club",
+    bono_validity_changed: "Hemos actualizado la validez de tu bono · Focus Club",
+    bono_expiring_7d: "Tu bono caduca en 7 días · Focus Club",
+    bono_expiring_2d: "Tu bono caduca en 2 días · Focus Club",
+  };
+  for (const [event, subject] of Object.entries(subjects)) {
+    const email = bonoEmail(event, data);
+    assertInformational(email);
+    assert.equal(email.subject, subject);
+    assert.match(email.text, /Minutos disponibles: 90 min/);
+    assert.match(email.text, /Válido hasta: Jueves, 8 de octubre de 2026/);
+  }
+  assert.match(bonoEmail("bono_exhausted", data).text, /ya no te quedan minutos disponibles para nuevas reservas/);
+});

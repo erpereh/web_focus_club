@@ -6,6 +6,7 @@ import { getMessaging } from "firebase-admin/messaging";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import { onDocumentCreated, onDocumentDeleted, onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { calendar_v3, google } from "googleapis";
 import {
   buildCalendarEventPayload,
@@ -41,7 +42,7 @@ import {
 import { createRecurringSeriesHandlers } from "./recurringSeries.js";
 import { createRecurringRescheduleHandlers } from "./recurringReschedule.js";
 import { createAdminAppointmentRescheduleHandlers } from "./adminAppointmentReschedule.js";
-import { createSupportChatHandlers, type SupportChatNotificationInput } from "./supportChat";
+import { createSupportChatHandlers } from "./supportChat";
 import {
   createCustomerSuggestionHandlers,
   notifyCustomerSuggestionCreatedSafely,
@@ -56,6 +57,10 @@ import {
   sendWelcomeEmail,
 } from "./email/notifications.js";
 import type { AppointmentEmailData, AppointmentEmailStatus } from "./email/templates/index.js";
+import { createNotificationHandlers } from "./notifications/handlers.js";
+import type { NotifiableAppointment } from "./notifications/appointmentEvents.js";
+import type { NotifiableBono } from "./notifications/bonoEvents.js";
+import type { NotificationOutboxEntry } from "./notifications/outbox.js";
 import { doesSessionFitWithinSchedule, generateTimeSlots, normalizeSiteConfig, type SiteConfig } from "./siteConfig.js";
 import {
   applyMigrationOperations,
@@ -79,8 +84,17 @@ const APPOINTMENT_SERVICE_TYPE = "Bono Mensual de Entrenamiento";
 const CONTACT_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const CONTACT_RATE_LIMIT_MAX_REQUESTS = 5;
 const CONTACT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const notifications = createNotificationHandlers({
+  db,
+  messaging: {
+    sendEachForMulticast: (message) => getMessaging().sendEachForMulticast(message),
+  },
+  getEmailClient: getBrevoClient,
+});
 const supportChat = createSupportChatHandlers(db, {
-  notifySupportCustomer: sendSupportMessagePushNotificationSafely,
+  notifySupportCustomer: async (input) => {
+    await notifications.notifySupportMessage(input);
+  },
 });
 const customerSuggestions = createCustomerSuggestionHandlers(db);
 
@@ -267,10 +281,6 @@ interface ServiceDoc {
   active?: boolean;
 }
 
-interface FcmTokenDoc {
-  token?: string;
-  platform?: string;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -672,111 +682,6 @@ async function sendAppointmentEmailSafely(
 
 function notificationSlot(appointment: AppointmentDoc): TimeSlot | undefined {
   return getAppointmentEffectiveSlot(appointment);
-}
-
-function appointmentStatusNotification(status: "approved" | "rejected" | "cancelled", appointment: AppointmentDoc): { title: string; body: string } {
-  if (status === "approved") {
-    const slot = notificationSlot(appointment);
-    return {
-      title: "Cita aprobada",
-      body: `Tu sesion del ${slot?.date ?? ""} a las ${slot?.time ?? ""} ha sido aprobada.`,
-    };
-  }
-
-  if (status === "cancelled") {
-    return {
-      title: "Cita cancelada",
-      body: "Tu cita ha sido cancelada y los minutos se han devuelto a tu bono.",
-    };
-  }
-
-  return {
-    title: "Cita rechazada",
-    body: "Tu solicitud de cita no ha podido ser aprobada. Revisa tus citas en la app.",
-  };
-}
-
-function isInvalidFcmTokenError(code?: string): boolean {
-  return code === "messaging/registration-token-not-registered"
-    || code === "messaging/invalid-registration-token";
-}
-
-async function sendUserPushNotification(
-  userId: string,
-  notification: { title: string; body: string },
-  data: Record<string, string>,
-): Promise<void> {
-  const userSnap = await db.collection("users").doc(userId).get();
-  const user = userSnap.data() as UserProfile | undefined;
-  if (!user || user.pushNotificationsEnabled !== true) return;
-
-  const tokenSnap = await userSnap.ref.collection("fcmTokens").get();
-  const tokenRefs = tokenSnap.docs
-    .map((docSnap) => {
-      const tokenDoc = docSnap.data() as FcmTokenDoc;
-      const token = typeof tokenDoc.token === "string" ? tokenDoc.token.trim() : "";
-      return token ? { ref: docSnap.ref, token } : null;
-    })
-    .filter((entry): entry is { ref: DocumentReference; token: string } => entry !== null);
-
-  if (tokenRefs.length === 0) return;
-
-  const messaging = getMessaging();
-
-  for (let index = 0; index < tokenRefs.length; index += 500) {
-    const batch = tokenRefs.slice(index, index + 500);
-    const response = await messaging.sendEachForMulticast({
-      tokens: batch.map((entry) => entry.token),
-      notification,
-      data,
-    });
-
-    await Promise.all(
-      response.responses.map((sendResponse, responseIndex) => {
-        const code = sendResponse.error?.code;
-        if (!sendResponse.success && isInvalidFcmTokenError(code)) {
-          return batch[responseIndex].ref.delete();
-        }
-        return Promise.resolve();
-      }),
-    );
-  }
-}
-
-async function sendAppointmentStatusPushNotification(
-  appointmentId: string,
-  appointment: AppointmentDoc,
-  status: "approved" | "rejected" | "cancelled",
-): Promise<void> {
-  await sendUserPushNotification(
-    appointment.userId,
-    appointmentStatusNotification(status, appointment),
-    {
-      type: "appointment_status",
-      appointmentId,
-      status,
-    },
-  );
-}
-
-async function sendSupportMessagePushNotificationSafely(
-  input: SupportChatNotificationInput,
-): Promise<void> {
-  try {
-    await sendUserPushNotification(
-      input.userId,
-      {
-        title: "Nuevo mensaje de Focus Club",
-        body: "Tienes una nueva respuesta en el chat.",
-      },
-      {
-        type: "support_message",
-        conversationId: input.conversationId,
-      },
-    );
-  } catch (_) {
-    console.error("Support message push notification failed.");
-  }
 }
 
 function googleCalendarErrorStatus(error: unknown): number | undefined {
@@ -1504,32 +1409,17 @@ export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminReque
       return { appointmentId: appointmentRef.id, appointment, bonoWarning };
     });
 
+    // The customer is notified by onAppointmentCustomerNotification (create
+    // trigger); only the existing admin email is sent from here.
     if (result.appointment.status === "approved") {
-      try {
-        await sendAppointmentStatusPushNotification(result.appointmentId, result.appointment, "approved");
-      } catch (error) {
-        console.error("[Push] Failed to send admin-created approved appointment notification", result.appointmentId, error);
-      }
-
-      const dedupeKey = `admin-created:${result.appointmentId}`;
-      await Promise.all([
-        sendAppointmentEmailSafely(
-          dedupeKey,
-          result.appointmentId,
-          result.appointment,
-          "confirmed",
-          "customer",
-          result.appointment.email,
-        ),
-        sendAppointmentEmailSafely(
-          dedupeKey,
-          result.appointmentId,
-          result.appointment,
-          "confirmed",
-          "admin",
-          ADMIN_NOTIFICATION_EMAIL,
-        ),
-      ]);
+      await sendAppointmentEmailSafely(
+        `admin-created:${result.appointmentId}`,
+        result.appointmentId,
+        result.appointment,
+        "confirmed",
+        "admin",
+        ADMIN_NOTIFICATION_EMAIL,
+      );
     }
 
     return {
@@ -2412,11 +2302,9 @@ export const onAppointmentApproved = onDocumentUpdated(
 
     if (skipNotification) return;
 
+    // Customer notices come from onAppointmentCustomerNotification.
     const action = changedToApproved ? "confirmed" : "deleted";
-    await Promise.all([
-      sendAppointmentEmailSafely(event.id, appointmentId, after, action, "customer", after.email),
-      sendAppointmentEmailSafely(event.id, appointmentId, after, action, "admin", ADMIN_NOTIFICATION_EMAIL),
-    ]);
+    await sendAppointmentEmailSafely(event.id, appointmentId, after, action, "admin", ADMIN_NOTIFICATION_EMAIL);
   },
 );
 
@@ -2431,48 +2319,98 @@ export const onAppointmentDeleted = onDocumentDeleted(
     const appointmentId = String(event.params.appointmentId);
     if (!appointment) return;
 
-    await Promise.all([
-      sendAppointmentEmailSafely(
-        event.id,
-        appointmentId,
-        appointment,
-        "deleted",
-        "customer",
-        appointment.email,
-        "deleted",
-      ),
-      sendAppointmentEmailSafely(
-        event.id,
-        appointmentId,
-        appointment,
-        "deleted",
-        "admin",
-        ADMIN_NOTIFICATION_EMAIL,
-        "deleted",
-      ),
-    ]);
+    // Customer notices come from onAppointmentCustomerNotification.
+    await sendAppointmentEmailSafely(
+      event.id,
+      appointmentId,
+      appointment,
+      "deleted",
+      "admin",
+      ADMIN_NOTIFICATION_EMAIL,
+      "deleted",
+    );
   },
 );
 
-export const onAppointmentStatusPushNotification = onDocumentUpdated(
+export const onAppointmentCustomerNotification = onDocumentWritten(
   {
     document: "appointments/{appointmentId}",
     region: REGION,
+    secrets: [BREVO_API_KEY],
   },
   async (event) => {
-    const before = event.data?.before.data() as AppointmentDoc | undefined;
-    const after = event.data?.after.data() as AppointmentDoc | undefined;
-    const appointmentId = String(event.params.appointmentId);
+    const beforeSnap = event.data?.before;
+    const afterSnap = event.data?.after;
+    await notifications.onAppointmentWritten({
+      eventId: event.id,
+      appointmentId: String(event.params.appointmentId),
+      before: beforeSnap?.exists ? beforeSnap.data() as NotifiableAppointment : undefined,
+      after: afterSnap?.exists ? afterSnap.data() as NotifiableAppointment : undefined,
+    });
+  },
+);
 
-    if (!before || !after) return;
+export const onNotificationOutboxCreated = onDocumentCreated(
+  {
+    document: "notification_outbox/{operationId}",
+    region: REGION,
+    secrets: [BREVO_API_KEY],
+  },
+  async (event) => {
+    const entry = event.data?.data() as NotificationOutboxEntry | undefined;
+    if (!entry) return;
+    await notifications.onOutboxCreated({ operationId: String(event.params.operationId), entry });
+  },
+);
 
-    const changedToApproved = before.status !== "approved" && after.status === "approved";
-    const changedToRejected = before.status !== "rejected" && after.status === "rejected";
-    const changedToCancelled = before.status !== "cancelled" && after.status === "cancelled";
-    if (!changedToApproved && !changedToRejected && !changedToCancelled) return;
-    if (shouldSkipRecurringStatusNotification(before, after)) return;
+export const onBonoCustomerNotification = onDocumentWritten(
+  {
+    document: "bonos/{bonoId}",
+    region: REGION,
+    secrets: [BREVO_API_KEY],
+  },
+  async (event) => {
+    const beforeSnap = event.data?.before;
+    const afterSnap = event.data?.after;
+    await notifications.onBonoWritten({
+      eventId: event.id,
+      bonoId: String(event.params.bonoId),
+      before: beforeSnap?.exists ? beforeSnap.data() as NotifiableBono : undefined,
+      after: afterSnap?.exists ? afterSnap.data() as NotifiableBono : undefined,
+    });
+  },
+);
 
-    const status = after.status as "approved" | "rejected" | "cancelled";
-    await sendAppointmentStatusPushNotification(appointmentId, after, status);
+const SCHEDULE_OPTIONS = { region: REGION, timeZone: "Europe/Madrid" } as const;
+
+export const bonoExpiryWarningsScheduled = onSchedule(
+  { ...SCHEDULE_OPTIONS, schedule: "0 10 * * *", secrets: [BREVO_API_KEY] },
+  async () => {
+    const count = await notifications.runBonoExpiryWarnings();
+    console.log("[Notify] Bono expiry warnings processed", { count });
+  },
+);
+
+export const expireOverdueBonosScheduled = onSchedule(
+  { ...SCHEDULE_OPTIONS, schedule: "5 * * * *" },
+  async () => {
+    const count = await notifications.runExpireOverdueBonos();
+    console.log("[Notify] Overdue bonos expired", { count });
+  },
+);
+
+export const appointmentRemindersScheduled = onSchedule(
+  { ...SCHEDULE_OPTIONS, schedule: "*/15 * * * *" },
+  async () => {
+    const count = await notifications.runAppointmentReminders();
+    console.log("[Notify] Appointment reminders processed", { count });
+  },
+);
+
+export const retryNotificationDeliveriesScheduled = onSchedule(
+  { ...SCHEDULE_OPTIONS, schedule: "*/15 * * * *", secrets: [BREVO_API_KEY] },
+  async () => {
+    const count = await notifications.runDeliveryRetries();
+    console.log("[Notify] Notification delivery retries processed", { count });
   },
 );

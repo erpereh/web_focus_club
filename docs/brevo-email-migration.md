@@ -2,6 +2,8 @@
 
 Todos los emails transaccionales de las Cloud Functions salen ahora por la API REST de Brevo (`POST https://api.brevo.com/v3/smtp/email`). Se eliminan los webhooks de Make y el SDK de Resend. Solo cambia la infraestructura: mismos eventos y mismos destinatarios. Flutter, FCM y los emails de Firebase Auth (verificación y recuperación de contraseña) no se tocan.
 
+> **Actualización:** los emails de citas al cliente ya no se envían desde `onAppointmentApproved`, `onAppointmentDeleted` ni `createAppointmentFromAdmin`. Ahora los gestiona la capa central de notificaciones (`functions/src/notifications/`), que añade push, historial y reintentos. Los emails al admin siguen como aparece aquí abajo. El detalle está en [notifications-contract.md](notifications-contract.md).
+
 ## Flujos migrados
 
 Todos están en `functions/src/index.ts`.

@@ -8,7 +8,9 @@ export type EmailCategory =
   | "appointment_admin"
   | "welcome"
   | "contact"
-  | "customer_suggestion";
+  | "customer_suggestion"
+  | "appointment_series_customer"
+  | "bono_customer";
 
 export interface RenderedEmail {
   subject: string;

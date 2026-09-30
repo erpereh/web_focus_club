@@ -44,6 +44,7 @@ import {
   normalizeSiteConfig,
   type SiteConfig,
 } from "./siteConfig.js";
+import { newNotificationOperation, sessionsOf, writeNotificationOutbox } from "./notifications/outbox.js";
 
 export type RecurringRescheduleScope = "single" | "series" | "following";
 export type RecurringRescheduleActorType = "admin" | "customer";
@@ -1359,8 +1360,10 @@ async function runCustomerSeriesReplacement(
     }
     const hasHistorical = occurrences.some((occurrence) => isHistoricalReplacementOccurrence(occurrence.data, nowDate));
 
+    const operation = newNotificationOperation(deps.db);
     reused.forEach((occurrence, index) => {
       transaction.set(occurrence.ref, {
+        notificationOperationId: operation.operationId,
         preferredSlots: [desired[index].slot],
         date: desired[index].slot.date,
         time: desired[index].slot.time,
@@ -1380,6 +1383,7 @@ async function runCustomerSeriesReplacement(
     });
     cancelled.forEach((occurrence) => {
       transaction.set(occurrence.ref, {
+        notificationOperationId: operation.operationId,
         status: "cancelled",
         cancelledBy: customerUid,
         cancelledAt: now,
@@ -1415,9 +1419,22 @@ async function runCustomerSeriesReplacement(
         minutesRefundedAmount: null,
         minutesRefundedAt: null,
         minutesRefundReason: null,
+        notificationOperationId: operation.operationId,
         createdAt: now,
         updatedAt: now,
       });
+    });
+    writeNotificationOutbox(transaction, operation, {
+      userId: customerUid,
+      event: "appointment_series_requested",
+      seriesId,
+      appointmentIds: [...reused.map((occurrence) => occurrence.id), ...createdRefs.map((ref) => ref.id)],
+      sessions: sessionsOf(desired.map((item) => ({ approvedSlot: item.slot }))),
+      cancelledSessions: sessionsOf(cancelled.map((occurrence) => occurrence.data)),
+      customerName: typeof userProfile.name === "string" ? userProfile.name : "",
+      customerEmail: typeof userProfile.email === "string" ? userProfile.email : "",
+      actor: "customer",
+      createdAt: now,
     });
     occupancyWrites.forEach((write) => {
       transaction.set(
@@ -1599,11 +1616,28 @@ async function runRecurringReschedule(
     // G. Writes only after every read and validation has completed.
     const now = transactionNow.toISOString();
     const occurrenceById = new Map(occurrences.map((item) => [item.id, item]));
+    // Multi-appointment changes send one grouped notice; a single occurrence
+    // is notified by the per-appointment trigger.
+    const operation = parsed.scope === "single" ? undefined : newNotificationOperation(deps.db);
     draft.affected.forEach((item) => {
       const occurrence = occurrenceById.get(item.appointment.id);
       if (!occurrence) return;
-      transaction.set(occurrence.ref, buildRecurringAppointmentPatch(item.newSlot, actorUid, now), { merge: true });
+      transaction.set(occurrence.ref, {
+        ...buildRecurringAppointmentPatch(item.newSlot, actorUid, now),
+        ...(operation ? { notificationOperationId: operation.operationId } : {}),
+      }, { merge: true });
     });
+    if (operation) {
+      writeNotificationOutbox(transaction, operation, {
+        userId: selectedData.userId,
+        event: "appointment_series_rescheduled",
+        seriesId: series.id,
+        appointmentIds: draft.affected.map((item) => item.appointment.id),
+        sessions: sessionsOf(draft.affected.map((item) => ({ approvedSlot: item.newSlot }))),
+        actor: actorType === "admin" ? "admin" : "customer",
+        createdAt: now,
+      });
+    }
     availability.plan.occupancyWrites.forEach((write) => {
       transaction.set(
         deps.db.collection("slot_occupancy").doc(write.key),

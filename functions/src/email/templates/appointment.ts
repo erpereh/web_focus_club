@@ -59,39 +59,76 @@ function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] || name;
 }
 
-function customerCopy(data: AppointmentEmailData): Copy {
+export type CustomerAppointmentEvent =
+  | "appointment_requested"
+  | "appointment_confirmed"
+  | "appointment_rescheduled"
+  | "appointment_rejected"
+  | "appointment_cancelled"
+  | "appointment_deleted";
+
+function customerEventCopy(event: CustomerAppointmentEvent, data: AppointmentEmailData): Copy {
   const when = whenLabel(data);
   const hi = `Hola ${firstName(data.customerName)},`;
-  if (data.action === "confirmed") {
-    if (data.status === "pending") {
+  switch (event) {
+    case "appointment_requested":
       return {
         subject: "Hemos recibido tu solicitud de cita · Focus Club",
         heading: "Solicitud recibida",
         intro: `${hi} hemos recibido tu solicitud de cita. Te avisaremos en cuanto la revisemos.`,
         preheader: `Solicitud de cita para ${when}.`,
       };
-    }
-    return {
-      subject: "Tu cita está confirmada · Focus Club",
-      heading: "Tu cita está confirmada",
-      intro: `${hi} tu sesión ha quedado confirmada. Te esperamos.`,
-      preheader: `Sesión confirmada: ${when}.`,
-    };
+    case "appointment_confirmed":
+      return {
+        subject: "Tu cita está confirmada · Focus Club",
+        heading: "Tu cita está confirmada",
+        intro: `${hi} tu sesión ha quedado confirmada. Te esperamos.`,
+        preheader: `Sesión confirmada: ${when}.`,
+      };
+    case "appointment_rescheduled":
+      return data.status === "pending"
+        ? {
+          subject: "Tu cita ha cambiado · Focus Club",
+          heading: "Tu cita ha cambiado",
+          intro: `${hi} hemos registrado el cambio de tu cita. Queda pendiente de confirmación y te avisaremos en cuanto la revisemos.`,
+          preheader: `Nuevo horario pendiente de confirmar: ${when}.`,
+        }
+        : {
+          subject: "Tu cita ha cambiado · Focus Club",
+          heading: "Tu cita ha cambiado",
+          intro: `${hi} estos son los nuevos datos de tu sesión.`,
+          preheader: `Nuevos datos de tu sesión: ${when}.`,
+        };
+    case "appointment_rejected":
+      return {
+        subject: "No hemos podido confirmar tu cita · Focus Club",
+        heading: "No hemos podido confirmar tu cita",
+        intro: `${hi} lamentamos no poder confirmar tu solicitud para esta fecha. Puedes elegir otro horario desde tu portal.`,
+        preheader: `Tu solicitud para ${when} no ha podido confirmarse.`,
+      };
+    case "appointment_deleted":
+      return {
+        subject: "Tu cita ha sido eliminada · Focus Club",
+        heading: "Tu cita ha sido eliminada",
+        intro: `${hi} la siguiente sesión se ha eliminado de tu agenda. Si tenías minutos reservados, se han devuelto a tu bono.`,
+        preheader: `Sesión eliminada: ${when}.`,
+      };
+    case "appointment_cancelled":
+    default:
+      return {
+        subject: "Tu cita ha sido cancelada · Focus Club",
+        heading: "Tu cita ha sido cancelada",
+        intro: `${hi} te confirmamos que la siguiente sesión ha sido cancelada. Si tenías minutos descontados, se han devuelto a tu bono.`,
+        preheader: `Sesión cancelada: ${when}.`,
+      };
   }
-  if (data.status === "rejected") {
-    return {
-      subject: "No hemos podido confirmar tu cita · Focus Club",
-      heading: "No hemos podido confirmar tu cita",
-      intro: `${hi} lamentamos no poder confirmar tu solicitud para esta fecha. Puedes elegir otro horario desde tu portal.`,
-      preheader: `Tu solicitud para ${when} no ha podido confirmarse.`,
-    };
+}
+
+function legacyCustomerEvent(data: AppointmentEmailData): CustomerAppointmentEvent {
+  if (data.action === "confirmed") {
+    return data.status === "pending" ? "appointment_requested" : "appointment_confirmed";
   }
-  return {
-    subject: "Tu cita ha sido cancelada · Focus Club",
-    heading: "Tu cita ha sido cancelada",
-    intro: `${hi} te confirmamos que la siguiente sesión ha sido cancelada. Si tenías minutos descontados, se han devuelto a tu bono.`,
-    preheader: `Sesión cancelada: ${when}.`,
-  };
+  return data.status === "rejected" ? "appointment_rejected" : "appointment_cancelled";
 }
 
 function adminCopy(data: AppointmentEmailData): Copy {
@@ -123,8 +160,23 @@ function adminCopy(data: AppointmentEmailData): Copy {
 }
 
 export function appointmentCustomerEmail(data: AppointmentEmailData): RenderedEmail {
-  const copy = customerCopy(data);
+  return appointmentCustomerEventEmail(legacyCustomerEvent(data), data);
+}
+
+/** Customer email for a concrete appointment event (informational, no CTA). */
+export function appointmentCustomerEventEmail(
+  event: CustomerAppointmentEvent,
+  data: AppointmentEmailData,
+  previousSlot?: { date: string; time: string },
+): RenderedEmail {
+  const copy = customerEventCopy(event, data);
   const rows = sessionRows(data);
+  if (event === "appointment_rescheduled") {
+    if (previousSlot && `${previousSlot.date}T${previousSlot.time}` !== `${data.date}T${data.time}`) {
+      rows.push(["Antes", [formatDisplayDate(previousSlot.date), previousSlot.time].join(" · ")]);
+    }
+    rows.push(["Estado", STATUS_LABELS[data.status]]);
+  }
   const footerNote = "Recibes este email porque tienes una cita en Focus Club.";
 
   const html = renderLayout({

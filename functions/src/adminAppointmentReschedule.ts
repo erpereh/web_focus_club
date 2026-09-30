@@ -38,6 +38,7 @@ import {
   safeReplacementCivilDate,
   validReplacementSlot,
 } from "./recurringScheduleReplacement.js";
+import { newNotificationOperation, sessionsOf, writeNotificationOutbox } from "./notifications/outbox.js";
 
 interface TimeSlot {
   date: string;
@@ -952,8 +953,10 @@ async function replaceRecurringSeriesScheduleFromAdmin(
     }
 
     // All reads and validation are complete. Only writes follow this point.
+    const operation = newNotificationOperation(deps.db);
     reused.forEach((occurrence, index) => {
       const patch: Record<string, unknown> = {
+        notificationOperationId: operation.operationId,
         preferredSlots: [desired[index].slot],
         date: desired[index].slot.date,
         time: desired[index].slot.time,
@@ -970,6 +973,7 @@ async function replaceRecurringSeriesScheduleFromAdmin(
     });
     cancelled.forEach((occurrence) => {
       transaction.set(occurrence.occurrence.ref, {
+        notificationOperationId: operation.operationId,
         status: "cancelled",
         cancelledBy: "admin",
         cancelledAt: now,
@@ -1011,10 +1015,23 @@ async function replaceRecurringSeriesScheduleFromAdmin(
         minutesRefundedAmount: null,
         minutesRefundedAt: null,
         minutesRefundReason: null,
+        notificationOperationId: operation.operationId,
         createdAt: now,
         updatedAt: now,
         ...(!isPendingSeries ? { approvedSlot: desiredOccurrence.slot } : {}),
       });
+    });
+    writeNotificationOutbox(transaction, operation, {
+      userId: String(identityTemplate.userId),
+      event: "appointment_series_rescheduled",
+      seriesId,
+      appointmentIds: [...reused.map((occurrence) => occurrence.occurrence.id), ...createdRefs.map((ref) => ref.id)],
+      sessions: sessionsOf(desired.map((item) => ({ approvedSlot: item.slot }))),
+      cancelledSessions: sessionsOf(cancelled.map((occurrence) => occurrence.occurrence.data)),
+      customerName: typeof identityTemplate.name === "string" ? identityTemplate.name : "",
+      customerEmail: typeof identityTemplate.email === "string" ? identityTemplate.email : "",
+      actor: "admin",
+      createdAt: now,
     });
     occupancyWrites.forEach((write) => {
       transaction.set(
@@ -1191,8 +1208,21 @@ async function returnRecurringSeriesToPendingFromAdmin(
     });
 
     const deleted = FieldValue.delete();
+    const operation = newNotificationOperation(deps.db);
+    writeNotificationOutbox(transaction, operation, {
+      userId: series.userId,
+      event: "appointment_series_returned_to_pending",
+      seriesId: input.seriesId,
+      appointmentIds: prepared.map((occurrence) => occurrence.id),
+      sessions: sessionsOf(prepared.map((occurrence) => ({ approvedSlot: occurrence.slot }))),
+      customerName: typeof prepared[0].data.name === "string" ? prepared[0].data.name : "",
+      customerEmail: typeof prepared[0].data.email === "string" ? prepared[0].data.email : "",
+      actor: "admin",
+      createdAt: now,
+    });
     prepared.forEach((occurrence) => {
       transaction.set(occurrence.ref, {
+        notificationOperationId: operation.operationId,
         status: "pending",
         preferredSlots: [occurrence.slot],
         date: occurrence.slot.date,

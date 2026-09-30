@@ -71,6 +71,8 @@ interface SupportConversationIdPayload {
 export interface SupportChatNotificationInput {
   userId: string;
   conversationId: string;
+  /** Admin message id; makes the notice idempotent per message. */
+  messageId: string;
 }
 
 export interface SupportChatHandlerOptions {
@@ -236,6 +238,7 @@ export function createSupportChatHandlers(
         return {
           userId: conversation.userId,
           conversationId: conversationRef.id,
+          messageId: messageRef.id,
         } satisfies SupportChatNotificationInput;
       });
 

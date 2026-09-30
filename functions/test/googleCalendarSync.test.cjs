@@ -113,10 +113,20 @@ assert.match(indexSource, /customerEmail:\s*appointment\.email/);
 assert.match(indexSource, /customerPhone:\s*appointment\.phone/);
 assert.match(indexSource, /status:\s*appointmentStatus/);
 assert.match(indexSource, /"confirmed",\s*\n\s*"admin",\s*\n\s*ADMIN_NOTIFICATION_EMAIL/);
-assert.match(indexSource, /sendAppointmentEmailSafely\(event\.id,\s*appointmentId,\s*after,\s*action,\s*"customer",\s*after\.email\)/);
+// Admin appointment emails stay in the legacy triggers...
 assert.match(indexSource, /sendAppointmentEmailSafely\(event\.id,\s*appointmentId,\s*after,\s*action,\s*"admin",\s*ADMIN_NOTIFICATION_EMAIL\)/);
-assert.match(indexSource, /sendAppointmentEmailSafely\(\s*event\.id,\s*appointmentId,\s*appointment,\s*"deleted",\s*"customer",\s*appointment\.email,\s*"deleted",?\s*\)/);
 assert.match(indexSource, /sendAppointmentEmailSafely\(\s*event\.id,\s*appointmentId,\s*appointment,\s*"deleted",\s*"admin",\s*ADMIN_NOTIFICATION_EMAIL,\s*"deleted",?\s*\)/);
+// ...while every customer appointment notice goes through the central layer.
+assert.doesNotMatch(indexSource, /sendAppointmentEmailSafely\([^)]*,\s*"customer",/);
+assert.equal(indexSource.includes("onAppointmentStatusPushNotification"), false);
+assert.equal(indexSource.includes("sendUserPushNotification"), false);
+assert.match(indexSource, /export const onAppointmentCustomerNotification\s*=\s*onDocumentWritten/);
+assert.match(indexSource, /export const onBonoCustomerNotification\s*=\s*onDocumentWritten/);
+assert.match(indexSource, /export const onNotificationOutboxCreated\s*=\s*onDocumentCreated/);
+for (const scheduled of ["bonoExpiryWarningsScheduled", "expireOverdueBonosScheduled", "appointmentRemindersScheduled", "retryNotificationDeliveriesScheduled"]) {
+  assert.match(indexSource, new RegExp(`export const ${scheduled}\\s*=\\s*onSchedule`));
+}
+assert.match(indexSource, /timeZone:\s*"Europe\/Madrid"/);
 assert.equal(indexSource.includes('"pending" | "confirmed" | "deleted"'), false);
 assert.equal(indexSource.includes('"rejected" | "confirmed" | "deleted"'), false);
 assert.equal(indexSource.includes('action: "pending"'), false);
@@ -127,7 +137,8 @@ for (const legacy of ["MAKE_WEBHOOK_URL", "MAKE_WELCOME_WEBHOOK_URL", "RESEND_AP
   assert.equal(indexSource.includes(legacy), false, `${legacy} should be removed`);
 }
 assert.match(indexSource, /import \{ BREVO_API_KEY/);
-assert.equal((indexSource.match(/secrets:\s*\[BREVO_API_KEY\]/g) ?? []).length, 7);
+// 7 migrated email functions + 3 notification triggers + 2 email-capable schedulers.
+assert.equal((indexSource.match(/secrets:\s*\[BREVO_API_KEY\]/g) ?? []).length, 12);
 
 assert.match(indexSource, /function getWelcomeCustomerName/);
 assert.match(indexSource, /export const onUserProfileCreatedWelcomeEmail\s*=\s*onDocumentCreated/);

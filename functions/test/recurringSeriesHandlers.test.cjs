@@ -393,3 +393,104 @@ test("historical pending remains pending and keeps mixed series pending after fu
   assert.equal(series.totalMinutes, 240);
   assert.equal(series.futureOccurrenceCount, 2);
 });
+
+// ------------------------------------------------------------ grouped notices
+
+const { classifyAppointmentChange } = require("../lib/notifications/appointmentEvents.js");
+
+function outboxEntries(db) {
+  return [...db.documents.entries()]
+    .filter(([path]) => path.startsWith("notification_outbox/"))
+    .map(([path, data]) => ({ id: path.split("/")[1], data }));
+}
+
+function assertGrouped(db, before, { event, appointmentIds }) {
+  const entries = outboxEntries(db);
+  assert.equal(entries.length, 1, "one grouped notice per operation");
+  const [{ id, data }] = entries;
+  assert.equal(data.event, event);
+  assert.equal(data.userId, "user-1");
+  assert.equal(data.seriesId, "series-1");
+  assert.deepEqual([...data.appointmentIds].sort(), [...appointmentIds].sort());
+  for (const appointmentId of appointmentIds) {
+    const after = db.documents.get(`appointments/${appointmentId}`);
+    assert.equal(after.notificationOperationId, id);
+    // The per-appointment trigger stays silent for these writes.
+    assert.equal(classifyAppointmentChange(before[`appointments/${appointmentId}`], after, fixedNow), null);
+  }
+  return data;
+}
+
+test("series approval writes one grouped confirmed notice", async () => {
+  const documents = pendingFixture(2);
+  addOccupancy(documents, "2026-09-08", "10:00", 0);
+  addOccupancy(documents, "2026-09-15", "11:00", 0);
+  const db = new FakeFirestore(documents);
+  await recurringHandlers(db).approveRecurringAppointmentSeriesFromAdmin(adminRequest({ seriesId: "series-1" }));
+  const entry = assertGrouped(db, documents, {
+    event: "appointment_series_confirmed",
+    appointmentIds: ["pending-0", "pending-1"],
+  });
+  assert.deepEqual(entry.sessions, [{ date: "2026-09-08", time: "10:00" }, { date: "2026-09-15", time: "11:00" }]);
+  assert.equal(entry.customerEmail, "cliente@example.com");
+  assert.equal(entry.actor, "admin");
+});
+
+test("series rejection and customer cancellation write one grouped notice each", async (t) => {
+  for (const [action, event, actor] of [
+    ["reject", "appointment_series_rejected", "admin"],
+    ["cancel", "appointment_series_cancelled", "customer"],
+  ]) {
+    await t.test(action, async () => {
+      const documents = pendingFixture(2);
+      const db = new FakeFirestore(documents);
+      if (action === "reject") {
+        await recurringHandlers(db).rejectRecurringAppointmentSeriesFromAdmin(adminRequest({ seriesId: "series-1" }));
+      } else {
+        await recurringHandlers(db).cancelOwnRecurringAppointmentSeries({
+          auth: { uid: "user-1", token: {} }, data: { seriesId: "series-1" },
+        });
+      }
+      const entry = assertGrouped(db, documents, { event, appointmentIds: ["pending-0", "pending-1"] });
+      assert.equal(entry.actor, actor);
+    });
+  }
+});
+
+test("admin schedule replacement groups reused, created and cancelled sessions in one notice", async () => {
+  const documents = pendingFixture(3);
+  const db = new FakeFirestore(documents);
+  await adminHandlers(db).replaceRecurringSeriesScheduleFromAdmin(adminRequest({
+    appointmentId: "pending-1",
+    startSlot: { date: "2026-09-08", time: "10:00" },
+    endDate: "2026-09-15",
+    assignedTrainer: null,
+  }));
+  const entries = outboxEntries(db);
+  assert.equal(entries.length, 1);
+  const { id, data } = entries[0];
+  assert.equal(data.event, "appointment_series_rescheduled");
+  assert.equal(data.sessions.length, 2);
+  assert.equal(data.cancelledSessions.length, 1);
+  for (const appointmentId of ["pending-0", "pending-1", "pending-2"]) {
+    const after = db.documents.get(`appointments/${appointmentId}`);
+    assert.equal(after.notificationOperationId, id);
+    assert.equal(classifyAppointmentChange(documents[`appointments/${appointmentId}`], after, fixedNow), null);
+  }
+});
+
+test("returning an approved series to pending writes one grouped notice", async () => {
+  const documents = pendingFixture(2);
+  addOccupancy(documents, "2026-09-08", "10:00", 0);
+  addOccupancy(documents, "2026-09-15", "11:00", 0);
+  const db = new FakeFirestore(documents);
+  await recurringHandlers(db).approveRecurringAppointmentSeriesFromAdmin(adminRequest({ seriesId: "series-1" }));
+  const approvedState = Object.fromEntries([...db.documents.entries()].map(([k, v]) => [k, clone(v)]));
+  [...db.documents.keys()].filter((key) => key.startsWith("notification_outbox/")).forEach((key) => db.documents.delete(key));
+
+  await adminHandlers(db).returnRecurringSeriesToPendingFromAdmin(adminRequest({ seriesId: "series-1" }));
+  assertGrouped(db, approvedState, {
+    event: "appointment_series_returned_to_pending",
+    appointmentIds: ["pending-0", "pending-1"],
+  });
+});

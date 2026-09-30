@@ -16,6 +16,17 @@ service cloud.firestore {
         allow create, update: if (isVerified() && request.auth.uid == uid && isValidOwnFcmToken(token)) || isAdmin();
         allow delete: if (isVerified() && request.auth.uid == uid) || isAdmin();
       }
+
+      // Customer notification history. Written only by Cloud Functions; the
+      // owner may only mark entries as read.
+      match /notifications/{notificationId} {
+        allow read: if (isVerified() && request.auth.uid == uid) || isAdmin();
+        allow update: if isVerified()
+          && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt'])
+          && request.resource.data.read is bool;
+        allow create, delete: if false;
+      }
     }
 
     // APPOINTMENTS
@@ -185,7 +196,8 @@ service cloud.firestore {
         'minutesRefunded',
         'minutesRefundedAmount',
         'minutesRefundedAt',
-        'minutesRefundReason'
+        'minutesRefundReason',
+        'notificationOperationId'
       ]);
     }
 

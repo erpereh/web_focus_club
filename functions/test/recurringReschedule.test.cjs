@@ -725,6 +725,16 @@ async function runHandlerTests() {
   assert.equal(seriesAfter.bonoId, "bono-1");
   const log = [...db.documents.entries()].find(([path]) => path.startsWith("activity_logs/"))[1];
   assert.equal(log.action, "recurring_appointment_rescheduled");
+  // Multi-appointment reschedule: one grouped customer notice, stamped on every change.
+  const outbox = [...db.documents.entries()].filter(([path]) => path.startsWith("notification_outbox/"));
+  assert.equal(outbox.length, 1);
+  assert.equal(outbox[0][1].event, "appointment_series_rescheduled");
+  assert.deepEqual(outbox[0][1].appointmentIds, ["a1", "a3"]);
+  assert.equal(outbox[0][1].actor, "admin");
+  ["a1", "a3"].forEach((id) => assert.equal(
+    db.documents.get(`appointments/${id}`).notificationOperationId,
+    outbox[0][0].split("/")[1],
+  ));
   assert.equal("email" in log, false);
   assert.equal("phone" in log, false);
   assert.equal("bonoId" in log, false);
