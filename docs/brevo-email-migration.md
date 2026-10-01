@@ -56,7 +56,7 @@ Claves de deduplicación:
 
 ## Despliegue (manual, no automático)
 
-1. Comprueba que `BREVO_API_KEY` existe: `firebase functions:secrets:access BREVO_API_KEY`. No imprimas su valor en logs compartidos.
+1. Comprueba que `BREVO_API_KEY` existe y tiene una versión `ENABLED`: `firebase functions:secrets:get BREVO_API_KEY`. Solo muestra metadatos; no uses `functions:secrets:access`, que imprime el valor.
 2. En Brevo, verifica el dominio `focusclub.es` (SPF, DKIM y DMARC) y el remitente `info@focusclub.es`.
 3. Despliega: `cd functions && npm run deploy`.
 4. Prueba con cuentas propias: formulario de contacto, alta de usuario, crear/aprobar/cancelar/borrar una cita y una sugerencia. Revisa los logs `[Email]` y el panel de Brevo, en Transactional > Logs.
