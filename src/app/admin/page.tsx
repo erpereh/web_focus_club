@@ -6683,7 +6683,7 @@ export default function AdminPage() {
                           disabled={savingBonoConfig || editBonoConfig === (siteConfig.bonoExpirationMonths || 1)}
                           onClick={async () => {
                             const confirmed = window.confirm(
-                              'Este cambio afectará a todos los bonos activos recalculando su fecha de expiración. ¿Continuar?'
+                              'Este cambio afectará a todos los bonos activos recalculando su fecha de expiración. Los clientes lo verán en el historial de la app, sin recibir email ni push. ¿Continuar?'
                             );
                             if (!confirmed) return;
                             setSavingBonoConfig(true);

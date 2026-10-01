@@ -4,11 +4,25 @@ function getPath(data, fieldPath) {
   return fieldPath.split(".").reduce((value, key) => (value == null ? undefined : value[key]), data);
 }
 
+function comparable(value) {
+  if (value instanceof Date) return value.getTime();
+  if (value && typeof value.toMillis === "function") return value.toMillis();
+  return value;
+}
+
+// Range filters only match values of the same type, as in Firestore.
+function sameType(a, b) {
+  return typeof comparable(a) === typeof comparable(b) && comparable(a) !== null;
+}
+
 function matches(data, filters) {
   return filters.every(({ field, op, value }) => {
     const current = getPath(data, field);
     if (op === "==") return current === value;
     if (op === "in") return value.includes(current);
+    if (op === "array-contains") return Array.isArray(current) && current.includes(value);
+    if (op === "<=") return sameType(current, value) && comparable(current) <= comparable(value);
+    if (op === "<") return sameType(current, value) && comparable(current) < comparable(value);
     throw new Error(`Unsupported operator ${op}`);
   });
 }
@@ -42,17 +56,30 @@ function createFakeFirestore(initial = {}) {
     };
   }
 
-  function query(path, filters = [], max = Infinity) {
+  function inScope(key, path, group) {
+    if (group) {
+      const parts = key.split("/");
+      return parts.length % 2 === 0 && parts.at(-2) === path;
+    }
+    const prefix = `${path}/`;
+    return key.startsWith(prefix) && !key.slice(prefix.length).includes("/");
+  }
+
+  function query(path, filters = [], max = Infinity, order, group = false) {
     return {
-      where: (field, op, value) => query(path, [...filters, { field, op, value }], max),
-      limit: (count) => query(path, filters, count),
+      where: (field, op, value) => query(path, [...filters, { field, op, value }], max, order, group),
+      orderBy: (field, direction = "asc") => query(path, filters, max, { field, direction }, group),
+      limit: (count) => query(path, filters, count, order, group),
       get: async () => {
-        const prefix = `${path}/`;
-        const docs = [...documents.keys()]
-          .filter((key) => key.startsWith(prefix) && !key.slice(prefix.length).includes("/"))
-          .filter((key) => matches(documents.get(key), filters))
-          .slice(0, max)
-          .map(snapshot);
+        let keys = [...documents.keys()]
+          .filter((key) => inScope(key, path, group))
+          .filter((key) => matches(documents.get(key), filters));
+        if (order) {
+          const sign = order.direction === "desc" ? -1 : 1;
+          keys = keys.sort((a, b) => sign * (comparable(getPath(documents.get(a), order.field))
+            - comparable(getPath(documents.get(b), order.field))));
+        }
+        const docs = keys.slice(0, max).map(snapshot);
         return { docs, empty: docs.length === 0, size: docs.length };
       },
     };
@@ -67,6 +94,13 @@ function createFakeFirestore(initial = {}) {
 
   const db = {
     collection,
+    collectionGroup: (name) => query(name, [], Infinity, undefined, true),
+    async recursiveDelete(ref) {
+      for (const key of [...documents.keys()]) {
+        if (key === ref.path || key.startsWith(`${ref.path}/`)) documents.delete(key);
+      }
+      writes.push({ path: ref.path, recursiveDeleted: true });
+    },
     async runTransaction(callback) {
       return callback({
         get: async (target) => (typeof target.where === "function" && !target.path ? target.get() : snapshot(target.path)),

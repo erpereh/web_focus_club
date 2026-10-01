@@ -22,6 +22,8 @@ export interface NotifiableAppointment {
   serviceType?: string;
   recurrenceSeriesId?: string;
   notificationOperationId?: string;
+  /** Set only when minutes were actually returned to the bono. */
+  minutesRefundedAt?: string | null;
 }
 
 export interface AppointmentChange {

@@ -9,7 +9,26 @@ import { bonoCivilDate, bonoExpiryInstant, bonoRemainingMinutes, type Notifiable
 
 export const REMINDER_MIN_LEAD_MS = 2 * 60 * 60 * 1000;
 export const REMINDER_MAX_LEAD_MS = 24 * 60 * 60 * 1000;
+/**
+ * A reminder is held back while the customer got a confirmation or a
+ * schedule change for the same session less than this long ago: that notice
+ * already told them the date and time.
+ */
+export const REMINDER_MIN_GAP_AFTER_NOTICE_MS = 6 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Notices that already state the session's date and time. */
+export const REMINDER_SUPPRESSING_EVENTS: ReadonlySet<string> = new Set([
+  "appointment_confirmed",
+  "appointment_rescheduled",
+  "appointment_series_confirmed",
+  "appointment_series_rescheduled",
+]);
+
+export interface RecentNotice {
+  event?: string;
+  createdAtMillis?: number;
+}
 
 export interface IdentifiedDoc<T> {
   id: string;
@@ -98,4 +117,16 @@ export function planAppointmentReminders(
     reminders.push({ appointmentId: id, uid: data.userId, slot });
   }
   return reminders;
+}
+
+/**
+ * True when one of `notices` (deliveries about the appointment) confirmed or
+ * moved it less than {@link REMINDER_MIN_GAP_AFTER_NOTICE_MS} ago. The
+ * reminder is then retried by the next scheduler run (its dedupe key is still
+ * unused), or skipped if the session leaves the reminder window first.
+ */
+export function hasRecentScheduleNotice(notices: RecentNotice[], now: Date): boolean {
+  return notices.some((notice) => REMINDER_SUPPRESSING_EVENTS.has(notice.event ?? "")
+    && typeof notice.createdAtMillis === "number"
+    && now.getTime() - notice.createdAtMillis < REMINDER_MIN_GAP_AFTER_NOTICE_MS);
 }

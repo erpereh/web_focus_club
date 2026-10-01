@@ -321,6 +321,8 @@ export interface Bono {
     historial: BonoHistorialEntry[];
     asignadoPor: string;       // admin email
     createdAt: string;
+    // Última edición masiva del admin (los avisos de esa escritura van solo al historial)
+    notificationBulkOperationId?: string;
     // Campos legacy (solo lectura, para bonos creados antes de la migración)
     tipo?: string;
     sesionesTotales?: number;

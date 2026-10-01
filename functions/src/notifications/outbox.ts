@@ -25,6 +25,11 @@ export interface NotificationOutboxEntry {
   customerEmail: string;
   actor: "admin" | "customer";
   createdAt: string;
+  /**
+   * Minutes returned to the bono in the same transaction. Customer copy only
+   * mentions a refund when this is positive.
+   */
+  refundedMinutes?: number;
 }
 
 export interface NotificationOperation {

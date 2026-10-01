@@ -24,6 +24,8 @@ export interface AppointmentEmailData {
   trainerName: string;
   duration?: string;
   serviceType?: string;
+  /** Customer copy mentions a refund only when this is true. */
+  minutesRefunded?: boolean;
 }
 
 interface Copy {
@@ -66,6 +68,10 @@ export type CustomerAppointmentEvent =
   | "appointment_rejected"
   | "appointment_cancelled"
   | "appointment_deleted";
+
+function refundNote(data: AppointmentEmailData): string {
+  return data.minutesRefunded ? " Los minutos reservados se han devuelto a tu bono." : "";
+}
 
 function customerEventCopy(event: CustomerAppointmentEvent, data: AppointmentEmailData): Copy {
   const when = whenLabel(data);
@@ -110,7 +116,7 @@ function customerEventCopy(event: CustomerAppointmentEvent, data: AppointmentEma
       return {
         subject: "Tu cita ha sido eliminada · Focus Club",
         heading: "Tu cita ha sido eliminada",
-        intro: `${hi} la siguiente sesión se ha eliminado de tu agenda. Si tenías minutos reservados, se han devuelto a tu bono.`,
+        intro: `${hi} la siguiente sesión se ha eliminado de tu agenda.${refundNote(data)}`,
         preheader: `Sesión eliminada: ${when}.`,
       };
     case "appointment_cancelled":
@@ -118,7 +124,7 @@ function customerEventCopy(event: CustomerAppointmentEvent, data: AppointmentEma
       return {
         subject: "Tu cita ha sido cancelada · Focus Club",
         heading: "Tu cita ha sido cancelada",
-        intro: `${hi} te confirmamos que la siguiente sesión ha sido cancelada. Si tenías minutos descontados, se han devuelto a tu bono.`,
+        intro: `${hi} te confirmamos que la siguiente sesión ha sido cancelada.${refundNote(data)}`,
         preheader: `Sesión cancelada: ${when}.`,
       };
   }

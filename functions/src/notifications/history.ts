@@ -29,17 +29,23 @@ export function buildHistoryDocument(
   };
 }
 
-/** Creates the history entry once; a second call with the same id is a no-op. */
+/**
+ * Creates the history entry once; a second call with the same id is a no-op.
+ * Never writes under a deleted account (no `users/{uid}` document), so a
+ * removed customer cannot get an orphan `notifications` subcollection back.
+ */
 export async function recordNotification(
   db: Firestore,
   notificationId: string,
   notification: CustomerNotification,
   nowMillis: number,
-): Promise<"created" | "exists"> {
-  const ref = db.collection("users").doc(notification.uid)
-    .collection(NOTIFICATIONS_SUBCOLLECTION).doc(notificationId);
+): Promise<"created" | "exists" | "owner_missing"> {
+  const userRef = db.collection("users").doc(notification.uid);
+  const ref = userRef.collection(NOTIFICATIONS_SUBCOLLECTION).doc(notificationId);
   return db.runTransaction(async (transaction) => {
+    const userSnap = await transaction.get(userRef);
     const snap = await transaction.get(ref);
+    if (!userSnap.exists) return "owner_missing";
     if (snap.exists) return "exists";
     transaction.set(ref, buildHistoryDocument(notification, nowMillis));
     return "created";

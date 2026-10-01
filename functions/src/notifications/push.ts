@@ -6,13 +6,39 @@ export const PUSH_DISPATCH_COLLECTION = "push_dispatches";
 export const PUSH_DISPATCH_LEASE_MS = 2 * 60 * 1000;
 const MULTICAST_LIMIT = 500;
 
+/**
+ * Android notification channel created by the Flutter app at startup
+ * (`MainActivity.kt`) and declared as the FCM default channel in its
+ * manifest. Builds that do not have it yet fall back to the manifest default.
+ */
+export const ANDROID_NOTIFICATION_CHANNEL_ID = "focus_club_default";
+
+/** Platform delivery options shared by every customer push. */
+export const PUSH_PLATFORM_OPTIONS = {
+  android: {
+    priority: "high" as const,
+    notification: {
+      channelId: ANDROID_NOTIFICATION_CHANNEL_ID,
+      sound: "default",
+    },
+  },
+  apns: {
+    headers: { "apns-priority": "10", "apns-push-type": "alert" },
+    payload: { aps: { sound: "default" } },
+  },
+};
+
+export interface PushMessage {
+  tokens: string[];
+  notification: { title: string; body: string };
+  data: Record<string, string>;
+  android?: typeof PUSH_PLATFORM_OPTIONS.android;
+  apns?: typeof PUSH_PLATFORM_OPTIONS.apns;
+}
+
 /** Minimal slice of firebase-admin Messaging, injectable for tests. */
 export interface PushMessaging {
-  sendEachForMulticast(message: {
-    tokens: string[];
-    notification: { title: string; body: string };
-    data: Record<string, string>;
-  }): Promise<{
+  sendEachForMulticast(message: PushMessage): Promise<{
     successCount: number;
     failureCount: number;
     responses: Array<{ success: boolean; error?: { code?: string } }>;
@@ -100,6 +126,7 @@ export async function sendPushOnce({
         tokens: batch.map((entry) => entry.token),
         notification: content.notification,
         data: content.data,
+        ...PUSH_PLATFORM_OPTIONS,
       });
       successCount += response.successCount;
       await Promise.all(response.responses.map((sendResponse, responseIndex) => {

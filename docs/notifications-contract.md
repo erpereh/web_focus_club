@@ -39,8 +39,8 @@ El push y el historial usan exactamente los mismos campos:
 | bono_status | `bono_assigned` | Primer bono del cliente | ✔ | ✔ | ✔ |
 | bono_status | `bono_renewed` | Bono nuevo cuando ya existía otro | ✔ | ✔ | ✔ |
 | bono_status | `bono_exhausted` | Los minutos disponibles pasan a 0 | ✔ | ✔ | ✔ |
-| bono_status | `bono_expired` | El estado pasa a `expirado` | ✔ | ✔ | ✔ |
-| bono_status | `bono_validity_changed` | Cambia la fecha civil (Europe/Madrid) de inicio o de caducidad | ✔ | ✔ | ✔ |
+| bono_status | `bono_expired` | Un bono `activo` con minutos pasa a `expirado`. Los bonos sustituidos o ya agotados caducan sin aviso | ✔ | ✔ | ✔ |
+| bono_status | `bono_validity_changed` | Cambia la fecha civil (Europe/Madrid) de inicio o de caducidad del bono `activo` | ✔ | ✔ | ✔ |
 | bono_status | `bono_expiring_7d` | Faltan 7 días civiles para la caducidad | ✔ | ✔ | ✔ |
 | bono_status | `bono_expiring_2d` | Faltan 2 días civiles para la caducidad | ✔ | ✔ | ✔ |
 | support_message | `support_message` | El admin responde en el chat | — | ✔ | ✔ |
@@ -63,6 +63,15 @@ Siempre incluye `type`, `event`, `notificationId` (el id del documento de histor
 | `conversationId` | chat | `conv123` |
 
 El bloque `notification` de FCM lleva `title` y `body`, con el mismo texto que el historial.
+
+Opciones de plataforma (no forman parte de `data` y no cambian el contrato):
+
+| Plataforma | Opciones |
+|---|---|
+| Android | `priority: high`, `notification.channelId: "focus_club_default"`, `sound: "default"` |
+| iOS (APNs) | `apns-priority: 10`, `apns-push-type: alert`, `aps.sound: "default"` |
+
+La app crea el canal `focus_club_default` al arrancar (`MainActivity.kt`) y lo declara como canal por defecto de FCM en el manifest. Si una build antigua no lo tiene, Android usa el canal por defecto del manifest o el de respaldo de FCM.
 
 Ejemplos:
 
@@ -106,9 +115,28 @@ Reglas: el propietario (o un admin) puede leer. El propietario solo puede actual
 
   El trigger `onNotificationOutboxCreated` envía el aviso agrupado. El trigger por cita ignora las escrituras que llevan un `notificationOperationId` nuevo. Una operación sobre una única ocurrencia se notifica como cita individual.
 - **Bono agotado**: los minutos se reservan al pedir la cita, así que "agotado" significa que no quedan minutos para nuevas reservas. Desactivar el bono anterior al renovar (pasa a `agotado` con minutos restantes) no genera aviso.
+- **Bono caducado**: solo se avisa si el bono era el `activo` del cliente y le quedaban minutos. El scheduler sigue marcando como `expirado` los bonos sustituidos (`agotado` con minutos) y los agotados, pero sin aviso: el cliente ya tiene otro bono o ya recibió `bono_exhausted`.
+- **Ediciones masivas del admin**: cada escritura de una edición masiva (por ejemplo, "recalcular caducidades") lleva el mismo `notificationBulkOperationId`. Una escritura con un valor nuevo genera solo la entrada del historial, sin push ni email. Una edición individual posterior sobre ese bono avisa con normalidad.
+- **Devolución de minutos**: los textos de cancelación y eliminación (push, historial y email) solo dicen que se han devuelto minutos si la cita tiene `minutesRefundedAt`. En las series, solo si el outbox lleva `refundedMinutes > 0`, que se calcula en la misma transacción que la devolución.
+- **Cuentas eliminadas**: no se crea ningún aviso para un `uid` sin documento `users/{uid}`. Una entrega en cola cuyo cliente se borra después se cierra sin escribir historial ni enviar nada. `deleteUserFromAdmin` (web) y `deleteOwnAccount` (app) borran `users/{uid}` de forma recursiva, con `notifications` y `fcmTokens`, y también las entregas de `notification_deliveries` de ese `uid`.
 - **Zona horaria**: las caducidades y los recordatorios se calculan en `Europe/Madrid`. Las fechas de solo día caducan al final de ese día en Madrid.
 - **Recordatorio**: su título es "Recordatorio de tu cita" y el cuerpo indica la fecha y la hora de la cita. Nunca dice "faltan 24 horas", porque se envía la primera vez que el scheduler encuentra la cita en la ventana (ahora + 2 h, ahora + 24 h].
+- **Recordatorio tras una confirmación**: si en las últimas 6 h se ha enviado `appointment_confirmed`, `appointment_rescheduled`, `appointment_series_confirmed` o `appointment_series_rescheduled` para esa cita, el recordatorio se retiene. El scheduler lo vuelve a intentar cada 15 min. Si la cita sale de la ventana antes, no hay recordatorio, porque el aviso reciente ya indicaba la fecha y la hora. La búsqueda usa `appointmentIds` y `createdAtMillis` de `notification_deliveries`.
 - **Push**: solo se envía si `users/{uid}.pushNotificationsEnabled === true`. El email y el historial se envían igualmente.
+
+### Ciclo de vida de los tokens FCM (`users/{uid}/fcmTokens/{token}`)
+
+| Momento | Quién | Qué pasa |
+|---|---|---|
+| Activar el push o abrir la app con el push activado | App | Guarda el token y refresca `updatedAt` |
+| `onTokenRefresh` | App | Guarda el token nuevo y borra el anterior |
+| Desactivar el push | App | `pushNotificationsEnabled = false` y borra el documento del token de este dispositivo |
+| Cerrar sesión o borrar la cuenta | App | Borra el documento del token (lo obtiene de FCM si la sesión no lo registró) y llama siempre a `deleteToken()` |
+| Se registra un token | `onFcmTokenWritten` | Borra ese mismo token de cualquier otra cuenta: un token pertenece solo a la última cuenta que lo registró |
+| Envío rechazado por FCM | Backend | Borra los tokens inválidos |
+| Token sin refrescar en 270 días | `pruneStaleFcmTokensScheduled` | Lo borra |
+
+Las búsquedas por `token` y por `updatedAt` en el grupo de colecciones `fcmTokens` usan los `fieldOverrides` de `firestore.indexes.json`.
 
 ## 5. Idempotencia y reintentos
 
@@ -133,6 +161,8 @@ Reglas: el propietario (o un admin) puede leer. El propietario solo puede actual
 
   Un canal que ya se envió nunca se repite.
 - Cuando un canal falla, el fallo queda guardado en `notification_deliveries` (`status: "retrying"`, con estado por canal y `lastError` sin secretos). El scheduler `retryNotificationDeliveriesScheduled` (cada 15 min) reintenta solo los canales fallidos, con backoff exponencial desde 5 min y un máximo de 8 intentos. También recupera las entregas que se quedaron en `pending` porque el proceso se cayó.
+- La cola se lee con `where("nextAttemptAtMillis", "<=", ahora).orderBy("nextAttemptAtMillis")`, hasta 100 entregas por pasada, de la más antigua a la más reciente. Solo las entregas `pending` o `retrying` tienen un número en ese campo; las terminadas guardan `null`. Así, las entregas programadas para más tarde nunca desplazan a las que ya tocan, y basta con el índice de campo único.
+- Cada entrega guarda también `createdAtMillis` y `appointmentIds` (las citas a las que se refiere el aviso).
 
 ## 6. Funciones
 
@@ -145,6 +175,8 @@ Reglas: el propietario (o un admin) puede leer. El propietario solo puede actual
 | `expireOverdueBonosScheduled` | cada hora (min 5) | Marca los bonos vencidos como `expirado`; el aviso lo envía el trigger de bonos |
 | `appointmentRemindersScheduled` | cada 15 min | Recordatorios (push + historial) |
 | `retryNotificationDeliveriesScheduled` | cada 15 min | Reintentos |
+| `onFcmTokenWritten` | `onDocumentWritten users/{uid}/fcmTokens/{tokenId}` | Quita ese token de las demás cuentas |
+| `pruneStaleFcmTokensScheduled` | lunes 04:30 Madrid | Borra los tokens sin refrescar en 270 días |
 
 Sustituyen a lo siguiente, que se ha eliminado:
 - `onAppointmentStatusPushNotification`;
@@ -155,7 +187,9 @@ El push del chat pasa también por la capa central, con el mismo título, texto 
 
 ## 7. Despliegue (manual)
 
-- Al desplegar, Firebase pedirá confirmación para borrar `onAppointmentStatusPushNotification`.
+El orden exacto, las verificaciones y el rollback están en [`production-release-checklist.md`](production-release-checklist.md). En resumen:
+
+- Primero los índices (`fieldOverrides` de `fcmTokens`), después las reglas y por último las functions.
+- Al desplegar las functions, Firebase pedirá confirmación para borrar `onAppointmentStatusPushNotification`. Es la única función que se debe aceptar borrar.
 - Los schedulers necesitan Cloud Scheduler, que se activa automáticamente al desplegarlos.
-- Despliega también `firestore.rules`: añaden la regla de `notifications` y protegen `notificationOperationId` en las citas recurrentes.
 - Los secretos antiguos de Make y Resend no se han tocado.

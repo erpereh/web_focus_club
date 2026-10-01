@@ -41,7 +41,15 @@ export interface DeliveryDocument {
   event: string;
   status: DeliveryStatus;
   attempts: number;
+  /**
+   * Due time of the next run. Only `pending`/`retrying` deliveries carry a
+   * number; terminal ones store `null`, so a range query on this single field
+   * returns exactly the due work (no composite index needed).
+   */
   nextAttemptAtMillis: number | null;
+  createdAtMillis: number;
+  /** Appointments this notice is about; lets reminders see recent notices. */
+  appointmentIds: string[];
   notification: CustomerNotification;
   push: PushContent | null;
   channels: Partial<Record<ChannelName, StoredChannel>>;
@@ -95,8 +103,8 @@ async function runChannel(
   const { notification } = delivery;
   try {
     if (name === "history") {
-      await recordNotification(deps.db, notificationId, notification, now());
-      return { status: "sent", lastError: null };
+      const result = await recordNotification(deps.db, notificationId, notification, now());
+      return { status: result === "owner_missing" ? "skipped" : "sent", lastError: null };
     }
     if (name === "push") {
       const outcome = await sendPushOnce({
@@ -148,10 +156,15 @@ export async function runDelivery(
   const now = deps.now ?? (() => Date.now());
   const channels = { ...delivery.channels };
   const order: ChannelName[] = ["history", "push", "email"];
+  // The customer was deleted after the notice was queued: never write into
+  // a removed account or keep emailing it.
+  const ownerExists = await customerExists(deps.db, delivery.uid);
 
   for (const name of order) {
     if (!(name in channels) || isDone(channels[name])) continue;
-    channels[name] = await runChannel(name, deps, notificationId, delivery);
+    channels[name] = ownerExists
+      ? await runChannel(name, deps, notificationId, delivery)
+      : { status: "skipped", lastError: null };
   }
 
   const failed = order.filter((name) => channels[name]?.status === "failed");
@@ -203,15 +216,41 @@ export async function runDelivery(
   };
 }
 
+async function customerExists(db: Firestore, uid: string): Promise<boolean> {
+  if (!uid) return false;
+  const snap = await db.collection("users").doc(uid).get();
+  return snap.exists;
+}
+
+function relatedAppointmentIds(notification: CustomerNotification): string[] {
+  const ids = new Set(notification.related.appointmentIds ?? []);
+  if (notification.related.appointmentId) ids.add(notification.related.appointmentId);
+  return [...ids];
+}
+
 /**
  * Central entry point: persists the delivery spec (idempotent per dedupe key),
  * then writes history, sends push and email. Safe to call again for the same
- * dedupe key: finished deliveries are not repeated.
+ * dedupe key: finished deliveries are not repeated. Customers without a
+ * `users/{uid}` document (deleted accounts) are not notified at all.
  */
 export async function notifyCustomer(deps: NotifyDeps, notification: CustomerNotification): Promise<DeliveryOutcome> {
   const now = deps.now ?? (() => Date.now());
   const notificationId = notificationIdFor(notification.dedupeKey);
   const ref = deps.db.collection(NOTIFICATION_DELIVERY_COLLECTION).doc(notificationId);
+
+  if (!(await customerExists(deps.db, notification.uid))) {
+    console.log("[Notify] Skipped: customer account no longer exists", {
+      notificationId,
+      event: notification.event,
+    });
+    return {
+      notificationId,
+      status: "complete",
+      channels: Object.fromEntries(Object.keys(initialChannels(notification))
+        .map((name) => [name, { status: "skipped" as const }])),
+    };
+  }
 
   const delivery = await deps.db.runTransaction<DeliveryDocument>(async (transaction) => {
     const snap = await transaction.get(ref);
@@ -225,6 +264,8 @@ export async function notifyCustomer(deps: NotifyDeps, notification: CustomerNot
       attempts: 0,
       // Acts as a lease: if this run crashes, the retry sweep picks it up.
       nextAttemptAtMillis: now() + DELIVERY_STALE_PENDING_MS,
+      createdAtMillis: now(),
+      appointmentIds: relatedAppointmentIds(notification),
       notification,
       push: notification.channels.push ? buildPushContent(notification, notificationId) : null,
       channels: initialChannels(notification),
@@ -264,20 +305,32 @@ export async function notifyCustomerSafely(
 }
 
 /**
+ * Deletes the notification ledger entries of a removed customer. The account
+ * itself (including `notifications` and `fcmTokens`) is removed with a
+ * recursive delete by the caller. Returns the number of deleted documents.
+ */
+export async function purgeCustomerDeliveries(db: Firestore, uid: string): Promise<number> {
+  const snap = await db.collection(NOTIFICATION_DELIVERY_COLLECTION).where("uid", "==", uid).get();
+  await Promise.all(snap.docs.map((docSnap) => docSnap.ref.delete()));
+  return snap.docs.length;
+}
+
+/**
  * Retries deliveries whose failed channels are due, plus deliveries stuck in
- * `pending` (the process died mid-send). Returns the number processed.
+ * `pending` (the process died mid-send), oldest due first. Only due documents
+ * are read, so deliveries scheduled further in the future can never crowd
+ * out the ones that are due. Returns the number processed.
  */
 export async function retryDueDeliveries(deps: NotifyDeps, limit = 100): Promise<number> {
   const now = deps.now ?? (() => Date.now());
   const snap = await deps.db.collection(NOTIFICATION_DELIVERY_COLLECTION)
-    .where("status", "in", ["retrying", "pending"])
-    .limit(limit * 2)
+    .where("nextAttemptAtMillis", "<=", now())
+    .orderBy("nextAttemptAtMillis", "asc")
+    .limit(limit)
     .get();
   const due = snap.docs
     .map((docSnap) => ({ id: docSnap.id, delivery: docSnap.data() as DeliveryDocument }))
-    .filter(({ delivery }) => typeof delivery.nextAttemptAtMillis === "number"
-      && delivery.nextAttemptAtMillis <= now())
-    .slice(0, limit);
+    .filter(({ delivery }) => delivery.status === "retrying" || delivery.status === "pending");
 
   for (const { id, delivery } of due) {
     try {

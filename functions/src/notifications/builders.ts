@@ -61,6 +61,17 @@ export interface AppointmentNoticeInput {
   sessionType: string;
   trainerName: string;
   duration?: string;
+  /**
+   * True only when the appointment document records an actual refund
+   * (`minutesRefundedAt`). Copy never claims a refund otherwise.
+   */
+  minutesRefunded?: boolean;
+}
+
+const REFUND_SENTENCE = "Los minutos reservados se han devuelto a tu bono.";
+
+function withRefund(text: string, refunded: boolean | undefined): string {
+  return refunded ? `${text} ${REFUND_SENTENCE}` : text;
 }
 
 const APPOINTMENT_PUSH: Record<CustomerAppointmentEvent, { title: string; body: (when: string, input: AppointmentNoticeInput) => string }> = {
@@ -84,11 +95,11 @@ const APPOINTMENT_PUSH: Record<CustomerAppointmentEvent, { title: string; body: 
   },
   appointment_cancelled: {
     title: "Cita cancelada",
-    body: (when) => `Tu cita del ${when} ha sido cancelada. Si tenías minutos reservados, se han devuelto a tu bono.`,
+    body: (when, input) => withRefund(`Tu cita del ${when} ha sido cancelada.`, input.minutesRefunded),
   },
   appointment_deleted: {
     title: "Cita eliminada",
-    body: (when) => `Tu cita del ${when} se ha eliminado de tu agenda.`,
+    body: (when, input) => withRefund(`Tu cita del ${when} se ha eliminado de tu agenda.`, input.minutesRefunded),
   },
 };
 
@@ -109,6 +120,7 @@ export function buildAppointmentNotice(input: AppointmentNoticeInput): CustomerN
     sessionType: input.sessionType,
     trainerName: input.trainerName,
     duration: input.duration,
+    minutesRefunded: input.minutesRefunded === true,
   }, input.previousSlot);
 
   return {
@@ -158,6 +170,8 @@ export interface SeriesNoticeInput {
   cancelledSessions?: EffectiveAppointmentSlot[];
   customerName: string;
   customerEmail?: string;
+  /** Minutes the operation verifiably returned to the bono (0 = none). */
+  refundedMinutes?: number;
 }
 
 const SERIES_PUSH: Record<SeriesNotificationEvent, { title: string; body: (n: number) => string }> = {
@@ -206,6 +220,7 @@ export function buildSeriesNotice(input: SeriesNoticeInput): CustomerNotificatio
     customerName: input.customerName,
     sessions,
     cancelledSessions: cancelled,
+    refundedMinutes: input.refundedMinutes ?? 0,
   });
   const firstAppointmentId = input.appointmentIds[0];
   return {
@@ -214,7 +229,7 @@ export function buildSeriesNotice(input: SeriesNoticeInput): CustomerNotificatio
     category: "appointment_status",
     event: input.event,
     title: copy.title,
-    body: copy.body(count),
+    body: withRefund(copy.body(count), (input.refundedMinutes ?? 0) > 0),
     related: {
       seriesId: input.seriesId,
       appointmentIds: input.appointmentIds,
@@ -242,6 +257,8 @@ export interface BonoNoticeInput {
   remainingMinutes: number;
   startDate?: string;
   expiryDate?: string;
+  /** Bulk administrative change: record it in the history, send nothing. */
+  historyOnly?: boolean;
 }
 
 function dayMonth(date?: string): string {
@@ -297,10 +314,12 @@ export function buildBonoNotice(input: BonoNoticeInput): CustomerNotification {
     body: copy.body(input),
     related: { bonoId: input.bonoId },
     navigation: { route: "bono", params: { bonoId: input.bonoId } },
-    channels: {
-      push: true,
-      email: customerEmail(input.customerEmail, input.customerName, "bono_customer", rendered, [input.event]),
-    },
+    channels: input.historyOnly
+      ? { push: false }
+      : {
+        push: true,
+        email: customerEmail(input.customerEmail, input.customerName, "bono_customer", rendered, [input.event]),
+      },
   };
 }
 

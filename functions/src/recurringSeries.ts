@@ -1023,6 +1023,9 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         customerEmail: occurrences[0]?.data.email ?? "",
         actor: input.requireOwner ? "customer" : "admin",
         createdAt: now,
+        refundedMinutes: refundPlan.appointmentPatches.reduce((total, patch) => (
+          total + (typeof patch.minutesRefundedAmount === "number" ? patch.minutesRefundedAmount : 0)
+        ), 0),
       });
 
       transaction.set(bonoRef, {

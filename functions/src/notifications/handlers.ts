@@ -9,14 +9,21 @@ import {
   buildSeriesNotice,
   buildSupportMessageNotice,
 } from "./builders.js";
-import { type NotifyDeps, notifyCustomerSafely, retryDueDeliveries } from "./dispatcher.js";
+import {
+  NOTIFICATION_DELIVERY_COLLECTION,
+  type NotifyDeps,
+  notifyCustomerSafely,
+  retryDueDeliveries,
+} from "./dispatcher.js";
 import type { NotificationOutboxEntry } from "./outbox.js";
 import {
   addMadridDays,
+  hasRecentScheduleNotice,
   type IdentifiedDoc,
   planAppointmentReminders,
   planBonoExpiryWarnings,
   planOverdueBonos,
+  type RecentNotice,
 } from "./schedules.js";
 import { getBonoTotalMinutes, type LifecycleBono } from "../appointmentLifecycle.js";
 import type { BonoNotificationEvent, DeliveryOutcome } from "./types.js";
@@ -58,6 +65,7 @@ export function createNotificationHandlers(deps: NotificationHandlerDeps) {
     bono: NotifiableBono,
     event: BonoNotificationEvent,
     dedupeKey: string,
+    { historyOnly = false }: { historyOnly?: boolean } = {},
   ): Promise<DeliveryOutcome | undefined> {
     if (!bono.userId) return undefined;
     const customer = await loadCustomer(bono.userId);
@@ -72,6 +80,7 @@ export function createNotificationHandlers(deps: NotificationHandlerDeps) {
       remainingMinutes: bonoRemainingMinutes(bono),
       startDate: bonoCivilDate(bono.fechaAsignacion),
       expiryDate: bonoCivilDate(bono.fechaExpiracion),
+      historyOnly,
     }));
   }
 
@@ -100,6 +109,7 @@ export function createNotificationHandlers(deps: NotificationHandlerDeps) {
         sessionType: appointment.sessionType || appointment.serviceType || "",
         trainerName: await trainerName(appointment.assignedTrainer),
         duration: appointment.duration === undefined ? undefined : String(appointment.duration),
+        minutesRefunded: Boolean(appointment.minutesRefundedAt),
       }));
     },
 
@@ -124,7 +134,7 @@ export function createNotificationHandlers(deps: NotificationHandlerDeps) {
         : change.event === "bono_expired"
           ? `bono:${input.bonoId}:expired`
           : `bono:${input.bonoId}:${change.event}:${input.eventId}`;
-      return bonoNotice(input.bonoId, after, change.event, dedupeKey);
+      return bonoNotice(input.bonoId, after, change.event, dedupeKey, { historyOnly: change.quiet });
     },
 
     async onOutboxCreated(input: {
@@ -146,6 +156,7 @@ export function createNotificationHandlers(deps: NotificationHandlerDeps) {
         cancelledSessions: entry.cancelledSessions,
         customerName: entry.customerName || customer.name,
         customerEmail: entry.customerEmail || customer.email,
+        refundedMinutes: typeof entry.refundedMinutes === "number" ? entry.refundedMinutes : 0,
       }));
     },
 
@@ -211,10 +222,16 @@ export function createNotificationHandlers(deps: NotificationHandlerDeps) {
         data: docSnap.data() as NotifiableAppointment,
       }));
       const reminders = planAppointmentReminders(appointments, now);
+      let sent = 0;
       for (const reminder of reminders) {
+        const notices = await db.collection(NOTIFICATION_DELIVERY_COLLECTION)
+          .where("appointmentIds", "array-contains", reminder.appointmentId)
+          .get();
+        if (hasRecentScheduleNotice(notices.docs.map((docSnap) => docSnap.data() as RecentNotice), now)) continue;
         await notifyCustomerSafely(deps, buildAppointmentReminderNotice(reminder));
+        sent += 1;
       }
-      return reminders.length;
+      return sent;
     },
 
     async runDeliveryRetries(): Promise<number> {

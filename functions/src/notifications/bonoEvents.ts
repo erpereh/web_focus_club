@@ -17,11 +17,19 @@ export interface NotifiableBono {
   modalidad?: string;
   fechaAsignacion?: string;
   fechaExpiracion?: string;
+  /**
+   * Stamped by administrative bulk edits (e.g. recalculating every bono's
+   * expiry). A write carrying a new value is recorded in the history only:
+   * no push and no email, so a bulk change never fans out to every customer.
+   */
+  notificationBulkOperationId?: string;
 }
 
 export interface BonoChange {
   event: Extract<BonoNotificationEvent, "bono_assigned" | "bono_renewed" | "bono_exhausted" | "bono_expired" | "bono_validity_changed">;
   bono: NotifiableBono;
+  /** History only (bulk administrative change). */
+  quiet: boolean;
 }
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -52,13 +60,24 @@ export function bonoRemainingMinutes(bono: NotifiableBono): number {
   return getBonoRemainingMinutes({ id: "", estado: "activo", ...bono } as LifecycleBono);
 }
 
-const USABLE_STATES = new Set(["activo", "agotado"]);
+/** True when this write belongs to an administrative bulk edit. */
+export function isBulkBonoWrite(before: NotifiableBono | undefined, after: NotifiableBono): boolean {
+  const operationId = after.notificationBulkOperationId;
+  return Boolean(operationId && operationId !== before?.notificationBulkOperationId);
+}
 
 /**
  * Maps a bono write to the customer notice it deserves, or `null`.
- * "Exhausted" means no minutes left for new bookings (minutes are reserved at
- * booking time), so it fires only when remaining minutes drop to 0 — replacing
- * a bono on renewal (estado → agotado with minutes left) is not an exhaustion.
+ *
+ * - "Exhausted" means no minutes left for new bookings (minutes are reserved
+ *   at booking time), so it fires only when remaining minutes drop to 0 —
+ *   replacing a bono on renewal (estado → agotado with minutes left) is not an
+ *   exhaustion.
+ * - Only a bono the customer could still use (`activo` with minutes left) is
+ *   announced as expired. A replaced bono (`agotado` with minutes) or one that
+ *   was already exhausted is marked `expirado` silently: the customer either
+ *   has a newer bono or already got the exhaustion notice.
+ * - Validity changes are announced for the active bono only.
  */
 export function classifyBonoChange(
   before: NotifiableBono | undefined,
@@ -66,27 +85,29 @@ export function classifyBonoChange(
   { hadPreviousBono }: { hadPreviousBono: boolean },
 ): BonoChange | null {
   if (!after) return null;
+  const quiet = isBulkBonoWrite(before, after);
 
   if (!before) {
     if (after.estado !== "activo") return null;
-    return { event: hadPreviousBono ? "bono_renewed" : "bono_assigned", bono: after };
+    return { event: hadPreviousBono ? "bono_renewed" : "bono_assigned", bono: after, quiet };
   }
 
   if (after.estado === "eliminado" || before.estado === "eliminado") return null;
 
   if (after.estado === "expirado" && before.estado !== "expirado") {
-    return { event: "bono_expired", bono: after };
+    if (before.estado !== "activo" || bonoRemainingMinutes(before) <= 0) return null;
+    return { event: "bono_expired", bono: after, quiet };
   }
   if (after.estado === "expirado") return null;
 
   if (bonoRemainingMinutes(before) > 0 && bonoRemainingMinutes(after) === 0) {
-    return { event: "bono_exhausted", bono: after };
+    return { event: "bono_exhausted", bono: after, quiet };
   }
 
   const datesChanged = bonoCivilDate(before.fechaAsignacion) !== bonoCivilDate(after.fechaAsignacion)
     || bonoCivilDate(before.fechaExpiracion) !== bonoCivilDate(after.fechaExpiracion);
-  if (datesChanged && USABLE_STATES.has(after.estado ?? "")) {
-    return { event: "bono_validity_changed", bono: after };
+  if (datesChanged && after.estado === "activo") {
+    return { event: "bono_validity_changed", bono: after, quiet };
   }
   return null;
 }

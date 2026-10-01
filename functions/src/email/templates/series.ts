@@ -16,6 +16,8 @@ export interface SeriesEmailData {
   sessions: Array<{ date: string; time: string }>;
   /** Sessions cancelled by the same operation (schedule reductions). */
   cancelledSessions?: Array<{ date: string; time: string }>;
+  /** Minutes verifiably returned to the bono by this operation. */
+  refundedMinutes?: number;
 }
 
 const COPY: Record<SeriesEmailEvent, { subject: string; heading: string; intro: (n: number) => string; list: string }> = {
@@ -34,13 +36,13 @@ const COPY: Record<SeriesEmailEvent, { subject: string; heading: string; intro: 
   appointment_series_rejected: {
     subject: "No hemos podido confirmar tus citas recurrentes · Focus Club",
     heading: "No hemos podido confirmar tus citas recurrentes",
-    intro: (n) => `lamentamos no poder confirmar tu solicitud de ${n} ${n === 1 ? "sesión" : "sesiones"}. Los minutos reservados se han devuelto a tu bono.`,
+    intro: (n) => `lamentamos no poder confirmar tu solicitud de ${n} ${n === 1 ? "sesión" : "sesiones"}.`,
     list: "Sesiones no confirmadas",
   },
   appointment_series_cancelled: {
     subject: "Tus citas recurrentes han sido canceladas · Focus Club",
     heading: "Citas recurrentes canceladas",
-    intro: (n) => `te confirmamos la cancelación de ${n} ${n === 1 ? "sesión" : "sesiones"}. Los minutos reservados se han devuelto a tu bono.`,
+    intro: (n) => `te confirmamos la cancelación de ${n} ${n === 1 ? "sesión" : "sesiones"}.`,
     list: "Sesiones canceladas",
   },
   appointment_series_rescheduled: {
@@ -75,7 +77,9 @@ export function appointmentSeriesEmail(event: SeriesEmailEvent, data: SeriesEmai
     preheader: copy.heading,
     eyebrow: "Tus citas recurrentes",
     heading: copy.heading,
-    intro: `Hola ${firstName}, ${copy.intro(count)}`,
+    intro: `Hola ${firstName}, ${copy.intro(count)}${(data.refundedMinutes ?? 0) > 0
+      ? ` Se han devuelto ${data.refundedMinutes} minutos reservados a tu bono.`
+      : ""}`,
     listTitle: copy.list,
     listItems,
     footerNote: "Recibes este email porque tienes citas en Focus Club.",

@@ -58,6 +58,8 @@ import {
 } from "./email/notifications.js";
 import type { AppointmentEmailData, AppointmentEmailStatus } from "./email/templates/index.js";
 import { createNotificationHandlers } from "./notifications/handlers.js";
+import { purgeCustomerDeliveries } from "./notifications/dispatcher.js";
+import { claimFcmTokenForUser, pruneStaleFcmTokens } from "./notifications/tokens.js";
 import type { NotifiableAppointment } from "./notifications/appointmentEvents.js";
 import type { NotifiableBono } from "./notifications/bonoEvents.js";
 import type { NotificationOutboxEntry } from "./notifications/outbox.js";
@@ -1227,8 +1229,11 @@ export const deleteUserFromAdmin = onCall<DeleteUserFromAdminRequest>(
     }
 
     try {
+      // Stop queued notices first, then remove the profile together with its
+      // subcollections (`notifications`, `fcmTokens`) so nothing is orphaned.
+      await purgeCustomerDeliveries(db, input.targetUid);
       await Promise.all([
-        targetRef.delete(),
+        db.recursiveDelete(targetRef),
         deleteTrainerProfile(input.targetUid),
       ]);
     } catch (error) {
@@ -2404,6 +2409,29 @@ export const appointmentRemindersScheduled = onSchedule(
   async () => {
     const count = await notifications.runAppointmentReminders();
     console.log("[Notify] Appointment reminders processed", { count });
+  },
+);
+
+export const onFcmTokenWritten = onDocumentWritten(
+  {
+    document: "users/{uid}/fcmTokens/{tokenId}",
+    region: REGION,
+  },
+  async (event) => {
+    const after = event.data?.after;
+    if (!after?.exists) return;
+    const token = (after.data() as { token?: unknown }).token;
+    if (typeof token !== "string" || !token.trim()) return;
+    const removed = await claimFcmTokenForUser(db, String(event.params.uid), token.trim());
+    if (removed > 0) console.log("[Push] Token moved to its latest account", { removed });
+  },
+);
+
+export const pruneStaleFcmTokensScheduled = onSchedule(
+  { ...SCHEDULE_OPTIONS, schedule: "30 4 * * 1" },
+  async () => {
+    const count = await pruneStaleFcmTokens(db, new Date());
+    console.log("[Push] Stale FCM tokens pruned", { count });
   },
 );
 

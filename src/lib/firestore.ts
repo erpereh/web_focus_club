@@ -26,6 +26,7 @@ import {
     calculateManualBonoAdjustment,
     manualBonoAdjustmentErrorMessage,
 } from './bono-adjustments';
+import { isBonoOverdue, planBonoExpirationRecalculation } from './bono-expiration';
 import { v4 as uuidv4 } from 'uuid';
 import type {
     UserProfile,
@@ -1961,35 +1962,37 @@ export async function manualDeductBonoMinutes(bonoId: string, minutes: number, a
     });
 }
 
-/** Recalcular la fecha de expiración de todos los bonos activos */
-export async function recalculateAllBonoExpirations(newMonths: number): Promise<void> {
+/**
+ * Recalcular la fecha de expiración de todos los bonos activos.
+ * Es una edición masiva: cada escritura lleva el mismo
+ * `notificationBulkOperationId`, así que los clientes solo ven el cambio en
+ * su historial (sin push ni email masivo).
+ */
+export async function recalculateAllBonoExpirations(newMonths: number): Promise<number> {
     const activeBonos = await getAllActiveBonos();
-    if (activeBonos.length === 0) return;
+    if (activeBonos.length === 0) return 0;
 
-    const batch = writeBatch(db);
-    const today = new Date();
-
-    for (const bono of activeBonos) {
-        const assignDate = new Date(bono.fechaAsignacion);
-        const newExpiration = new Date(assignDate);
-        newExpiration.setMonth(newExpiration.getMonth() + newMonths);
-
-        const newEstado = newExpiration < today ? 'expirado' : 'activo';
-
-        batch.update(doc(db, 'bonos', bono.id), {
-            fechaExpiracion: newExpiration.toISOString(),
-            estado: newEstado,
-        });
+    const updates = planBonoExpirationRecalculation(
+        activeBonos,
+        newMonths,
+        new Date(),
+        `bulk-expiration-${uuidv4()}`,
+    );
+    for (let index = 0; index < updates.length; index += 450) {
+        const batch = writeBatch(db);
+        for (const { id, ...update } of updates.slice(index, index + 450)) {
+            batch.update(doc(db, 'bonos', id), update);
+        }
+        await batch.commit();
     }
-
-    await batch.commit();
+    return updates.length;
 }
 
 /** Expirar bonos cuya fecha de expiración ya pasó */
 export async function expireOverdueBonos(): Promise<void> {
     const activeBonos = await getAllActiveBonos();
     const now = new Date();
-    const overdue = activeBonos.filter((b) => new Date(b.fechaExpiracion) < now);
+    const overdue = activeBonos.filter((b) => isBonoOverdue(b, now));
 
     if (overdue.length === 0) return;
 
