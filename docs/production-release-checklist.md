@@ -6,8 +6,10 @@ Este documento está igual en `web_focus_club/docs/` y en `app_focus_club/docs/`
 - **Codebases de Functions:**
   - `default` (`web_focus_club/functions`, Node 20): todo el backend.
   - `portal` (`app_focus_club/functions`, Node 22): solo `deleteOwnAccount`.
-- **Fuente de verdad** de reglas, índices y storage: `web_focus_club`. Los `predeploy` de `app_focus_club/firebase.json` bloquean su despliegue desde la app.
-- **Versión de la app que se publica:** `1.4.5+15` (ver apartado 0.3).
+- **Fuente de verdad** de reglas e índices: `web_focus_club`. Los `predeploy` de `app_focus_club/firebase.json` bloquean su despliegue desde la app.
+- **Producción ejecuta hoy el commit `98bc5ec`** (tag `pre-notifications-prod`). Por eso este despliegue incluye también la **migración de emails a Brevo** (`89cd43e`, `0f29264`), además de las notificaciones (`a7496df`, `f851314`).
+- **Versión de la app que se publica:** `1.4.5+15` (ver 0.3).
+- **Fuera del despliegue inicial:** las reglas de Storage (ver 2.8).
 
 > Todo lo de este documento es **manual**. Nada se despliega ni se publica de forma automática al hacer push.
 
@@ -15,23 +17,26 @@ Este documento está igual en `web_focus_club/docs/` y en `app_focus_club/docs/`
 
 - Todos los bloques están pensados para **PowerShell 7** en Windows. También funcionan en bash salvo donde se indica.
 - Los valores que tienes que rellenar van en variables al principio del bloque (`$commit = 'COMMIT_SHA'`). No uses `<...>`: en PowerShell `<` es un operador.
-- Las listas separadas por comas (`--only "firestore:rules,storage"`) van **entre comillas**. Sin comillas, PowerShell las convierte en un array y el CLI recibe un argumento distinto.
-- **Ningún comando de este documento muestra valores de secretos.** No ejecutes `firebase functions:secrets:access` ni imprimas `key.properties`, `google-services.json` o `GoogleService-Info.plist` en terminales compartidos o capturas.
+- Las listas separadas por comas (`--only "a,b"`) van **entre comillas**. Sin comillas, PowerShell las convierte en un array y el CLI recibe un argumento distinto.
+- **Ningún comando de este documento muestra valores de secretos.** No ejecutes `firebase functions:secrets:access` ni imprimas `key.properties`, claves de cuentas de servicio, `google-services.json` o `GoogleService-Info.plist` en terminales compartidos o capturas.
 
 ## 0. Antes de empezar
 
-### 0.1 Pendientes manuales (bloquean la publicación)
+### 0.1 Requisitos externos
 
-- [ ] **APNs:** subir la clave de autenticación APNs (.p8) en Firebase Console > Configuración del proyecto > Cloud Messaging > app iOS. Sin ella, iOS no recibe push en producción.
+- [x] **APNs:** clave de autenticación configurada y verificada en Firebase para desarrollo y producción (04/10/2026).
 - [ ] **Apple Developer:** el App ID `es.focusclub.clientes.appFocusClub` tiene activada la capability *Push Notifications*, y el perfil de distribución la incluye. La configuración Release usa `RunnerRelease.entitlements` (`aps-environment = production`).
-- [ ] **Brevo:** el secreto `BREVO_API_KEY` existe y tiene una versión `ENABLED`. Este comando muestra solo metadatos (versiones y estado), nunca el valor:
+- [ ] **Brevo, inmediatamente antes de 2.3:**
+  - el remitente `info@focusclub.es` sigue **verificado** en el panel de Brevo. Con este despliegue, todos los emails de la web (cliente, admin, contacto y bienvenida) salen por Brevo;
+  - el secreto `BREVO_API_KEY` tiene una versión `ENABLED`. Este comando muestra solo metadatos, nunca el valor:
 
-  ```powershell
-  firebase functions:secrets:get BREVO_API_KEY
-  ```
+    ```powershell
+    firebase functions:secrets:get BREVO_API_KEY
+    firebase functions:secrets:get GOOGLE_CALENDAR_ID
+    ```
 
-  El remitente debe estar verificado en el panel de Brevo.
-- [ ] **Cloud Scheduler:** se habilita solo al desplegar los schedulers. El proyecto debe estar en el plan Blaze.
+  Los secretos antiguos (`MAKE_WEBHOOK_URL`, `MAKE_WELCOME_WEBHOOK_URL`, `RESEND_API_KEY`) **no se borran**.
+- [x] **Plan Blaze:** facturación activa. Cloud Scheduler se habilita al desplegar los schedulers.
 - [ ] **Firma Android:** el keystore de release y `android/key.properties` están en la máquina que genera el AAB. No están en el repo y no se deben abrir ni imprimir. Para comprobar que existen:
 
   ```powershell
@@ -40,30 +45,29 @@ Este documento está igual en `web_focus_club/docs/` y en `app_focus_club/docs/`
 
 ### 0.2 Copia de seguridad y punto de retorno
 
-- [ ] Exportar Firestore (rollback de datos de último recurso):
+- [x] **Backup local de Firestore**, verificado: `C:\Users\david\Archivos\AA_Clientes\focus_db_backup\2026-10-04_20-38-41` (5.967 documentos). Para repetirlo justo antes de desplegar (desde `focus_db_backup\_tools`, ver su `README.md`):
 
   ```powershell
-  $bucket = 'gs://NOMBRE-DEL-BUCKET-DE-BACKUPS'
-  $fecha = Get-Date -Format 'yyyyMMdd'
-  gcloud firestore export "$bucket/pre-notifications-$fecha" --project focus-club-f73b8
+  $key = 'RUTA\A\LA\CLAVE-DE-CUENTA-DE-SERVICIO.json'
+  node firestore-backup.mjs estimate --key $key
+  node firestore-backup.mjs export --confirm --key $key
   ```
 
-- [ ] Anotar qué se está ejecutando ahora:
+- [x] **Tag de rollback** `pre-notifications-prod` → `98bc5ec`, el commit que ejecuta producción. Se identificó comparando los exports y los secretos de `firebase functions:list` con el historial. Para comprobarlo (en `web_focus_club`):
+
+  ```powershell
+  git rev-parse --short 'pre-notifications-prod^{commit}'
+  git ls-remote --tags origin pre-notifications-prod
+  ```
+
+- [x] **Reglas de Firestore desplegadas:** coinciden con `firestore.rules` del tag `pre-notifications-prod`. El historial de Firebase Console también permite restaurarlas.
+- [ ] Anotar qué se está ejecutando justo antes de desplegar:
 
   ```powershell
   firebase functions:list
   ```
 
-  Se espera ver `onAppointmentStatusPushNotification` y ninguna de las funciones nuevas.
-- [ ] Anotar el commit de la web desplegado ahora (el último anterior a `a7496df`) y marcarlo con un tag (en `web_focus_club`):
-
-  ```powershell
-  $commit = 'COMMIT_SHA'
-  git tag pre-notifications-prod $commit
-  git push origin pre-notifications-prod
-  ```
-
-- [ ] Descargar las reglas desplegadas ahora (Firebase Console > Firestore > Reglas > historial) para poder restaurarlas.
+  Se esperan 41 funciones, entre ellas `onAppointmentStatusPushNotification`, `adminRestoreSuggestion` y `deleteOwnAccount` (codebase `portal`).
 
 ### 0.3 Versión y build number
 
@@ -121,6 +125,7 @@ npm --prefix functions test
 ```
 
 - [ ] Todo pasa en verde.
+- [ ] `npm --prefix functions test` (web) incluye `deployGuards.test.cjs`: los 10 índices compuestos de producción siguen en `firestore.indexes.json` y el filtro de despliegue cubre todos los exports.
 - [ ] `npm --prefix functions test` (app) imprime `[check-exports] OK: deleteOwnAccount`.
 - [ ] El build de iOS se genera en macOS con `flutter build ipa --release`. Comprobar en Xcode (Signing & Capabilities, Release) que aparece Push Notifications con entorno *production*.
 
@@ -134,29 +139,32 @@ Cada paso se hace solo cuando el anterior está verificado. Todos los comandos d
 firebase deploy --only firestore:indexes
 ```
 
-- Añade los `fieldOverrides` de `fcmTokens.token` y `fcmTokens.updatedAt` con alcance de grupo de colecciones. Los usan `onFcmTokenWritten` y `pruneStaleFcmTokensScheduled`.
+- `firestore.indexes.json` contiene los 10 índices compuestos que ya existen en producción, más los `fieldOverrides` nuevos de `fcmTokens.token` y `fcmTokens.updatedAt` con alcance de grupo de colecciones (los usan `onFcmTokenWritten` y `pruneStaleFcmTokensScheduled`).
+- **No se espera ninguna propuesta de borrado.** Si el CLI propone borrar algún índice, responde **No** y revisa el fichero.
 - [ ] En Firebase Console > Firestore > Índices > Exenciones de campo única, los dos overrides aparecen como **Habilitado** (no "Compilando").
-- Si el CLI propone borrar índices que no están en el archivo, responde **No**.
 
-### 2.2 Reglas de Firestore y Storage
+### 2.2 Reglas de Firestore (Storage **no**)
 
 ```powershell
-firebase deploy --only "firestore:rules,storage"
+firebase deploy --only firestore:rules
 ```
 
-- [ ] Las reglas incluyen `users/{uid}/notifications` (lectura del propietario y solo `read`/`readAt` escribibles) y `fcmTokens`.
+- Añade `users/{uid}/notifications` (lectura del propietario y solo `read`/`readAt` escribibles) y protege `notificationOperationId` en las citas recurrentes. El resto es igual a lo desplegado.
+- **No uses `--only firestore`, `storage` ni `firebase deploy` sin filtro:** las reglas de Storage quedan fuera (ver 2.8).
 - [ ] Prueba rápida: un cliente con la app actual abre el perfil sin errores de permisos.
 
-### 2.3 Functions del backend (codebase `default`)
+### 2.3 Functions del backend (codebase `default`), con filtro
+
+Un `firebase deploy --only functions` sin filtro propondría borrar **dos** funciones en una sola pregunta: `onAppointmentStatusPushNotification` y `adminRestoreSuggestion`. Como se decidió **conservar `adminRestoreSuggestion`**, el despliegue se hace con un filtro que lista exactamente las funciones del código. Con filtro, el CLI **no propone borrar nada**. La función antigua de push se retira después, de forma explícita.
 
 ```powershell
 npm --prefix functions test
-firebase deploy --only functions
+$only = node functions/scripts/deploy-filter.cjs
+($only -split ',').Count     # 47 funciones
+firebase deploy --only "$only"
 ```
 
-- El CLI pedirá confirmación para **borrar `onAppointmentStatusPushNotification`**. Es la única función que se debe aceptar borrar.
-- **Si propone borrar cualquier otra función** (sobre todo `deleteOwnAccount`), responde **No** y aborta. No uses `--force`.
-- Funciones nuevas esperadas:
+- Funciones nuevas esperadas (9):
   - `onAppointmentCustomerNotification`
   - `onNotificationOutboxCreated`
   - `onBonoCustomerNotification`
@@ -166,12 +174,26 @@ firebase deploy --only functions
   - `appointmentRemindersScheduled`
   - `retryNotificationDeliveriesScheduled`
   - `pruneStaleFcmTokensScheduled`
-- [ ] `firebase functions:list` muestra las funciones nuevas y `deleteOwnAccount` sigue ahí, con Node 22.
+- Se actualizan las 38 restantes del codebase `default`.
+- **Si a pesar del filtro el CLI propone borrar alguna función, responde No y aborta.** No uses `--force`.
+- [ ] `firebase functions:list` muestra 50 funciones:
+  - las 9 nuevas;
+  - `adminRestoreSuggestion` y `onAppointmentStatusPushNotification`, que siguen ahí;
+  - `deleteOwnAccount` (Node 22, `portal`).
 - [ ] Cloud Scheduler muestra los 5 jobs en `Europe/Madrid`:
 
   ```powershell
   gcloud scheduler jobs list --location europe-west1 --project focus-club-f73b8
   ```
+
+**2.3.b Retirar la función antigua de push.** Hazlo **justo después** de comprobar que `onAppointmentCustomerNotification` está `ACTIVE`. Mientras convivan las dos, un cambio de cita puede generar dos push.
+
+```powershell
+firebase functions:delete onAppointmentStatusPushNotification --region europe-west1
+```
+
+- El CLI pide confirmación y lista **solo** esa función. Comprueba el nombre antes de aceptar.
+- [ ] `firebase functions:list` muestra 49 funciones: `adminRestoreSuggestion` y `deleteOwnAccount` siguen ahí y `onAppointmentStatusPushNotification` ya no.
 
 ### 2.4 Hosting de la web (panel admin)
 
@@ -199,15 +221,16 @@ npm --prefix functions run deploy
 ### 2.6 Verificaciones en producción (con una cuenta de prueba)
 
 - [ ] **Cita:** crear una cita desde la app.
-  - Llega "Solicitud de cita recibida" (push, historial y email).
+  - Llega "Solicitud de cita recibida" (push, historial y email desde `info@focusclub.es`).
   - En los logs aparece `[Notify] Delivered`:
 
     ```powershell
     firebase functions:log --only onAppointmentCustomerNotification
     ```
 
-- [ ] **Confirmación:** aprobarla desde el admin. Llega "Cita confirmada".
+- [ ] **Confirmación:** aprobarla desde el admin. Llega "Cita confirmada" **una sola vez**, lo que confirma que la función antigua de push ya no existe.
   - Si la cita es dentro de menos de 24 h, el recordatorio no llega justo después: tarda al menos 6 h o no llega.
+- [ ] **Brevo:** llegan el email de la cita al cliente y el aviso al admin. Si se puede, probar también el formulario de contacto.
 - [ ] **Cancelación:**
   - Una cita con minutos devueltos: el aviso menciona la devolución.
   - Una cita sin bono: el aviso no la menciona.
@@ -241,6 +264,25 @@ Solo cuando 2.2 y 2.3 estén verificados. Sin la regla de `notifications`, el hi
   - ignoran el `channelId` si no tienen el canal;
   - no ven el historial hasta que se actualizan.
 
+### 2.8 Reglas de Storage: **aplazadas** (fuera del despliegue inicial)
+
+- **Bloqueo:**
+  - Las reglas del repo limitan los avatares (`user-avatars/{uid}/*`) a 5 MB.
+  - Ya existe un avatar de 10,27 MB, y ni la web (`uploadUserAvatar`) ni la app (`imagePicker` con `imageQuality: 88`, sin reducir la resolución) redimensionan antes de subir.
+  - Con esas reglas fallarían subidas que hoy funcionan.
+- **Compatibilidad revisada:**
+  - Las rutas en uso son compatibles: `media/root/*` (subida, movimiento y borrado, admin; el mayor archivo actual pesa 7,13 MB, por debajo de 50 MB), `user-avatars/{uid}/*` y `public/*` (solo lectura).
+  - Los borrados de avatares antiguos que se rechacen se ignoran sin error.
+- **Antes de desplegarlas** hay que redimensionar o comprimir los avatares en la web y la app por debajo de 5 MB, o subir el límite en `storage.rules`, y añadir tests.
+- El primer despliegue de esas reglas pedirá conceder al agente de Storage acceso de lectura a Firestore, porque usan `firestore.get`.
+- Cuando estén listas:
+
+  ```powershell
+  firebase deploy --only storage
+  ```
+
+  Comprobar después la subida de un avatar desde la web y desde la app, y la subida de un archivo en el panel de medios.
+
 ## 3. Rollback
 
 Hay que deshacer los pasos en orden inverso y solo lo necesario. Las apps nuevas son compatibles con el backend anterior: navegan con `type` y, sin historial, muestran el error controlado.
@@ -250,10 +292,10 @@ Hay que deshacer los pasos en orden inverso y solo lo necesario. Las apps nuevas
 | 2.7 Apps | **Play Console:** detener el lanzamiento escalonado. **App Store Connect:** pausar el lanzamiento por fases. Publicar después la versión anterior con un build number mayor (16 o superior). | No se puede "despublicar" una versión ya instalada. No subir `minAndroidBuild`/`minIosBuild` si hay rollback. |
 | 2.5 Functions `portal` | Ver bloque A. | Sin `--force`. Ese commit todavía exporta las callables antiguas: usa el filtro de función exacto. |
 | 2.4 Hosting | Firebase Console > Hosting > historial de versiones > **Revertir** a la versión anterior. | Instantáneo. |
-| 2.3 Functions `default` | **Corte rápido de avisos:** ver bloque B. **Rollback completo:** ver bloque C, y aceptar solo el borrado de las funciones nuevas de la lista de 2.3. | El rollback completo recrea `onAppointmentStatusPushNotification` y los emails antiguos al cliente. Las entregas pendientes de `notification_deliveries` quedan inertes al no haber scheduler de reintentos. |
-| 2.2 Reglas | Firebase Console > Firestore > Reglas > historial > restaurar la versión anotada en 0.2. O ver bloque D. | Sin la regla de `notifications`, la app nueva muestra error en el historial, sin cerrarse. |
-| 2.1 Índices | No hace falta revertirlos: los overrides de un solo campo no afectan a nada más. | Si se quisiera, quitarlos de `firestore.indexes.json` y redesplegar. |
-| Datos | Las colecciones nuevas (`notification_deliveries`, `notification_outbox`, `push_dispatches`, `email_dispatches`, `users/*/notifications`) no las lee el código anterior y pueden quedarse. | La exportación de 0.2 es el último recurso; no restaurar sobre datos vivos sin revisar. |
+| 2.3 Functions `default` | **Corte rápido de avisos:** ver bloque B. **Rollback completo:** ver bloque C. | El rollback completo recrea `onAppointmentStatusPushNotification` y los emails antiguos (Make/Resend, cuyos secretos siguen existiendo). `adminRestoreSuggestion` no se toca. Las entregas pendientes de `notification_deliveries` quedan inertes. |
+| 2.2 Reglas | Firebase Console > Firestore > Reglas > historial > restaurar la versión anterior. O ver bloque D. | Sin la regla de `notifications`, la app nueva muestra error en el historial, sin cerrarse. |
+| 2.1 Índices | No hace falta revertirlos: los índices compuestos ya existían y los overrides de un solo campo no afectan a nada más. | |
+| Datos | Las colecciones nuevas (`notification_deliveries`, `notification_outbox`, `push_dispatches`, `email_dispatches`, `users/*/notifications`) no las lee el código anterior y pueden quedarse. | El backup local de 0.2 es el último recurso; no restaurar sobre datos vivos sin revisar. |
 
 **A. Functions `portal`** (en `app_focus_club`):
 
@@ -261,7 +303,7 @@ Hay que deshacer los pasos en orden inverso y solo lo necesario. Las apps nuevas
 git switch --detach 8429862
 npm --prefix functions ci
 firebase deploy --only "functions:portal:deleteOwnAccount"
-git switch release/notifications-hardening
+git switch main
 ```
 
 **B. Corte rápido de avisos** (en `web_focus_club`):
@@ -270,27 +312,31 @@ git switch release/notifications-hardening
 firebase functions:delete onAppointmentCustomerNotification onBonoCustomerNotification onNotificationOutboxCreated --region europe-west1
 ```
 
-**C. Rollback completo de las functions `default`** (en `web_focus_club`):
+**C. Rollback completo de las functions `default`** (en `web_focus_club`). Es un despliegue filtrado a las funciones del tag, para que no se proponga borrar nada, seguido del borrado explícito de las nuevas:
 
 ```powershell
 git switch --detach pre-notifications-prod
 npm --prefix functions ci
-firebase deploy --only functions
-git switch release/notifications-hardening
+$only = node -e "process.stdout.write([...require('fs').readFileSync('functions/src/index.ts','utf8').matchAll(/^export const (\w+)\s*=\s*on\w+/gm)].map(m=>'functions:'+m[1]).join(','))"
+firebase deploy --only "$only"
+firebase functions:delete onAppointmentCustomerNotification onNotificationOutboxCreated onBonoCustomerNotification onFcmTokenWritten bonoExpiryWarningsScheduled expireOverdueBonosScheduled appointmentRemindersScheduled retryNotificationDeliveriesScheduled pruneStaleFcmTokensScheduled --region europe-west1
+git switch main
 ```
 
-**D. Reglas desde el tag** (en `web_focus_club`):
+**D. Reglas de Firestore desde el tag** (en `web_focus_club`):
 
 ```powershell
 git switch --detach pre-notifications-prod
-firebase deploy --only "firestore:rules,storage"
-git switch release/notifications-hardening
+firebase deploy --only firestore:rules
+git switch main
 ```
 
 ## 4. Referencia rápida de comandos que **no** se deben usar
 
+- `firebase deploy --only functions` **sin filtro** en `web_focus_club`: propondría borrar `adminRestoreSuggestion`, que se conserva. Usa siempre `functions/scripts/deploy-filter.cjs`.
+- `firebase deploy` sin `--only`, `--only firestore` o `--only storage` mientras Storage esté aplazado (2.8).
 - `firebase deploy` sin `--only` desde `app_focus_club`: se bloquea, pero no hay que intentarlo.
 - `firebase deploy --force` en cualquier repo: borra funciones sin preguntar.
-- `firebase functions:delete deleteOwnAccount`: la app la usa para "Eliminar cuenta" (requisito de las tiendas).
+- `firebase functions:delete deleteOwnAccount` o `adminRestoreSuggestion`: la primera la usa la app para "Eliminar cuenta" (requisito de las tiendas); la segunda se conserva por precaución.
 - `firebase functions:secrets:access ...`: imprime el valor del secreto. Para comprobar un secreto basta con `firebase functions:secrets:get`.
-- `firebase deploy --only firestore:rules,storage` sin comillas en PowerShell: la coma convierte el valor en un array.
+- `--only a,b` sin comillas en PowerShell: la coma convierte el valor en un array.

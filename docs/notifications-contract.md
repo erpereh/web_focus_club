@@ -189,7 +189,7 @@ El push del chat pasa también por la capa central, con el mismo título, texto 
 
 El orden exacto, las verificaciones y el rollback están en [`production-release-checklist.md`](production-release-checklist.md). En resumen:
 
-- Primero los índices (`fieldOverrides` de `fcmTokens`), después las reglas y por último las functions.
-- Al desplegar las functions, Firebase pedirá confirmación para borrar `onAppointmentStatusPushNotification`. Es la única función que se debe aceptar borrar.
+- Primero los índices (`fieldOverrides` de `fcmTokens`, más los 10 índices compuestos que ya existen en producción), después las reglas de Firestore y por último las functions. Las reglas de Storage quedan fuera del despliegue inicial.
+- Las functions se despliegan **con filtro** (`functions/scripts/deploy-filter.cjs`), así que Firebase no propone borrar nada. `adminRestoreSuggestion` se conserva, y `onAppointmentStatusPushNotification` se retira después de forma explícita con `firebase functions:delete`.
 - Los schedulers necesitan Cloud Scheduler, que se activa automáticamente al desplegarlos.
 - Los secretos antiguos de Make y Resend no se han tocado.
