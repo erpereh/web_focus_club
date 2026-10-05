@@ -1,26 +1,26 @@
-# Migración de emails a Brevo Transactional Email
+# Emails transaccionales con Brevo
 
-Todos los emails transaccionales de las Cloud Functions salen ahora por la API REST de Brevo (`POST https://api.brevo.com/v3/smtp/email`). Se eliminan los webhooks de Make y el SDK de Resend. Solo cambia la infraestructura: mismos eventos y mismos destinatarios. Flutter, FCM y los emails de Firebase Auth (verificación y recuperación de contraseña) no se tocan.
+Todos los emails transaccionales de las Cloud Functions salen por la API REST de Brevo (`POST https://api.brevo.com/v3/smtp/email`). Brevo (email), FCM (push) y Firestore (historial y entregas) son el único sistema de notificaciones; no hay otros proveedores ni webhooks externos. Los emails de Firebase Auth (verificación y recuperación de contraseña) los envía Firebase Auth.
 
 > **Actualización:** los emails de citas al cliente ya no se envían desde `onAppointmentApproved`, `onAppointmentDeleted` ni `createAppointmentFromAdmin`. Ahora los gestiona la capa central de notificaciones (`functions/src/notifications/`), que añade push, historial y reintentos. Los emails al admin siguen como aparece aquí abajo. El detalle está en [notifications-contract.md](notifications-contract.md).
 
-## Flujos migrados
+## Flujos
 
 Todos están en `functions/src/index.ts`.
 
-| Función | Cuándo | Antes | Destinatarios |
-|---|---|---|---|
-| `onAppointmentCreated` | Cita nueva en `pending` (no recurrente) | Make | admin |
-| `onAppointmentApproved` | Cambio a `approved` / `rejected` / `cancelled` (salvo recurrentes omitidas) | Make | cliente + admin |
-| `onAppointmentDeleted` | Cita borrada | Make | cliente + admin |
-| `createAppointmentFromAdmin` | Admin crea una cita ya `approved` | Make | cliente + admin |
-| `onCustomerSuggestionCreated` | Nueva sugerencia de cliente | Make | `info@focusclub.es`, replyTo = cliente |
-| `onUserProfileCreatedWelcomeEmail` | Nuevo `users/{uid}` | Make (webhook de bienvenida) | cliente |
-| `sendContactMessage` | Formulario de contacto web | Resend | receptor de `site_content/main`, replyTo = cliente |
+| Función | Cuándo | Destinatarios |
+|---|---|---|
+| `onAppointmentCreated` | Cita nueva en `pending` (no recurrente) | admin |
+| `onAppointmentApproved` | Cambio a `approved` / `rejected` / `cancelled` (salvo recurrentes omitidas) | cliente + admin |
+| `onAppointmentDeleted` | Cita borrada | cliente + admin |
+| `createAppointmentFromAdmin` | Admin crea una cita ya `approved` | cliente + admin |
+| `onCustomerSuggestionCreated` | Nueva sugerencia de cliente | `info@focusclub.es`, replyTo = cliente |
+| `onUserProfileCreatedWelcomeEmail` | Nuevo `users/{uid}` | cliente |
+| `sendContactMessage` | Formulario de contacto web | receptor de `site_content/main`, replyTo = cliente |
 
-- Admin: `infofocusclub2026@gmail.com` (`ADMIN_NOTIFICATION_EMAIL`, igual que antes). Los avisos al admin llevan replyTo al cliente.
-- Remitente único: `Focus Club <info@focusclub.es>` (el contacto usaba antes `noreply@focusclub.es`).
-- Se mantiene el comportamiento anterior: cancelar una cita y después borrarla envía dos avisos, porque son dos eventos distintos.
+- Admin: `infofocusclub2026@gmail.com` (`ADMIN_NOTIFICATION_EMAIL`). Los avisos al admin llevan replyTo al cliente.
+- Remitente único: `Focus Club <info@focusclub.es>`.
+- Cancelar una cita y después borrarla envía dos avisos, porque son dos eventos distintos.
 
 ## Arquitectura (`functions/src/email/`)
 
@@ -51,18 +51,18 @@ Claves de deduplicación:
 ## Trazabilidad
 
 - Los logs usan el prefijo `[Email]` e incluyen categoría, `relatedId`, `dispatchId` y `messageId` de Brevo. Nunca registran la API key ni URLs.
-- `contact_submissions` guarda `brevoMessageId`, que sustituye a `resendEmailId`.
+- `contact_submissions` guarda `brevoMessageId`.
 - `users/{uid}` guarda `welcomeEmailMessageId`, además de los campos `welcomeEmail*` que ya existían.
 
 ## Despliegue (manual, no automático)
 
+Desplegado y validado el 05/10/2026 (ver `production-release-checklist.md`). Para futuros despliegues:
+
 1. Comprueba que `BREVO_API_KEY` existe y tiene una versión `ENABLED`: `firebase functions:secrets:get BREVO_API_KEY`. Solo muestra metadatos; no uses `functions:secrets:access`, que imprime el valor.
 2. En Brevo, verifica el dominio `focusclub.es` (SPF, DKIM y DMARC) y el remitente `info@focusclub.es`.
-3. Despliega: `cd functions && npm run deploy`.
+3. Despliega con el filtro de la checklist (paso 2.3): `firebase deploy --only "$only"` con `$only = node functions/scripts/deploy-filter.cjs`.
 4. Prueba con cuentas propias: formulario de contacto, alta de usuario, crear/aprobar/cancelar/borrar una cita y una sugerencia. Revisa los logs `[Email]` y el panel de Brevo, en Transactional > Logs.
-5. Cuando todo esté validado, desactiva los escenarios de Make y borra los secretos antiguos: `MAKE_WEBHOOK_URL`, `MAKE_WELCOME_WEBHOOK_URL` y `RESEND_API_KEY`, con `firebase functions:secrets:destroy`.
-
-**Rollback:** vuelve a desplegar el commit anterior. Los secretos de Make y Resend no deben borrarse hasta completar el paso 5.
+**Rollback:** vuelve a desplegar un commit anterior ya validado con Brevo (bloque C de la checklist). La retirada de los secretos de la integración anterior está en el paso 2.9 de la checklist.
 
 ## Tests
 

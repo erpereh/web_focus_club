@@ -138,9 +138,9 @@ test("rejects missing API key, idempotency key or recipients before calling Brev
 });
 
 test("sanitizeEmailError redacts keys and URLs and truncates", () => {
-  const sanitized = sanitizeEmailError(new Error(`boom ${API_KEY} at https://hook.eu1.make.com/secret ${"x".repeat(300)}`));
+  const sanitized = sanitizeEmailError(new Error(`boom ${API_KEY} at https://hooks.example.test/secret ${"x".repeat(300)}`));
   assert.equal(sanitized.includes(API_KEY), false);
-  assert.equal(sanitized.includes("make.com"), false);
+  assert.equal(sanitized.includes("hooks.example.test"), false);
   assert.ok(sanitized.length <= 180);
   assert.equal(sanitizeEmailError(undefined, "fallback"), "fallback");
 });

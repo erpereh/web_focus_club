@@ -56,6 +56,21 @@ test("firestore.indexes.json keeps the fcmTokens collection-group overrides", ()
   ]);
 });
 
+test("customers may delete only their own notification history", () => {
+  const rules = fs.readFileSync(path.join(root, "firestore.rules"), "utf8");
+  const block = rules.match(/match \/notifications\/\{notificationId\} \{([\s\S]*?)\n\s*\}/);
+  assert.ok(block, "users/{uid}/notifications rules not found");
+  const body = block[1];
+  assert.match(body, /allow delete: if isVerified\(\) && request\.auth\.uid == uid;/);
+  assert.match(body, /allow create: if false;/);
+  assert.doesNotMatch(body, /allow (write|delete)[^;]*isAdmin/);
+  // Backend records stay closed to clients (no rule = denied).
+  for (const collection of ["notification_deliveries", "email_dispatches", "push_dispatches", "notification_outbox"]) {
+    assert.doesNotMatch(rules, new RegExp(`match /${collection}/`), `${collection} must not be client-accessible`);
+  }
+  assert.doesNotMatch(rules, /match \/\{document=\*\*\}/);
+});
+
 test("the deploy filter lists every exported function and nothing else", () => {
   const names = exportedFunctionNames(source);
   const declared = (source.match(/^export const \w+\s*=/gm) ?? []).length;

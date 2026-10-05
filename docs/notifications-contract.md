@@ -95,7 +95,7 @@ Ejemplos:
 | `appointmentIds` | string[] | Vacío si no aplica. |
 | `navigation` | `{ route, params }` | Por ejemplo, `{ route: "appointment", params: { appointmentId } }`. |
 
-Reglas: el propietario (o un admin) puede leer. El propietario solo puede actualizar `read` y `readAt`. Crear y borrar lo hacen únicamente las Cloud Functions.
+Reglas: el propietario (o un admin) puede leer. El propietario solo puede actualizar `read` y `readAt`, y puede borrar sus propias entradas (deslizar para eliminar o "Vaciar notificaciones" en la app). Crear lo hacen únicamente las Cloud Functions. Borrar el historial nunca toca `notification_deliveries`, `notification_outbox`, `email_dispatches` ni `push_dispatches`, que no son accesibles desde los clientes; como el canal `history` de la entrega ya está `sent`, los reintentos no vuelven a crear una entrada borrada.
 
 ### Rutas de navegación
 
@@ -189,7 +189,7 @@ El push del chat pasa también por la capa central, con el mismo título, texto 
 
 El orden exacto, las verificaciones y el rollback están en [`production-release-checklist.md`](production-release-checklist.md). En resumen:
 
-- Primero los índices (`fieldOverrides` de `fcmTokens`, más los 10 índices compuestos que ya existen en producción), después las reglas de Firestore y por último las functions. Las reglas de Storage quedan fuera del despliegue inicial.
-- Las functions se despliegan **con filtro** (`functions/scripts/deploy-filter.cjs`), así que Firebase no propone borrar nada. `adminRestoreSuggestion` se conserva, y `onAppointmentStatusPushNotification` se retira después de forma explícita con `firebase functions:delete`.
-- Los schedulers necesitan Cloud Scheduler, que se activa automáticamente al desplegarlos.
-- Los secretos antiguos de Make y Resend no se han tocado.
+- Índices, reglas de Firestore y functions ya están desplegados y validados (49 functions). Las reglas de Storage quedan fuera.
+- Las functions se despliegan **con filtro** (`functions/scripts/deploy-filter.cjs`), así que Firebase no propone borrar nada. `adminRestoreSuggestion` se conserva y `onAppointmentStatusPushNotification` ya se retiró.
+- El permiso para que el cliente borre su historial requiere volver a desplegar solo `firestore:rules` (paso 2.2.b de la checklist).
+- Brevo + FCM + Firestore son el único sistema de notificaciones. Los secretos que quedan sin uso de la integración anterior se borran a mano (paso 2.9 de la checklist).

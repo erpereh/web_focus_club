@@ -57,6 +57,7 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "scripts/**/*.cjs",
     "functions/lib/**",
     "functions/test/**",
+    "functions/scripts/**",
   ]
 }];
 

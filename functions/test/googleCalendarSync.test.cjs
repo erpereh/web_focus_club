@@ -132,9 +132,17 @@ assert.equal(indexSource.includes('"rejected" | "confirmed" | "deleted"'), false
 assert.equal(indexSource.includes('action: "pending"'), false);
 assert.equal(indexSource.includes('action: "rejected"'), false);
 
-// Email infrastructure is Brevo only: no Make webhooks or Resend left.
-for (const legacy of ["MAKE_WEBHOOK_URL", "MAKE_WELCOME_WEBHOOK_URL", "RESEND_API_KEY", "sendMakeWebhook", "sendWelcomeWebhook", "Resend"]) {
-  assert.equal(indexSource.includes(legacy), false, `${legacy} should be removed`);
+// Notifications are Brevo + FCM + Firestore only: no Make webhooks or Resend
+// anywhere in the functions source or its dependencies.
+const LEGACY_EMAIL = /MAKE_[A-Z_]*WEBHOOK_URL|RESEND_API_KEY|sendMakeWebhook|sendWelcomeWebhook|\bResend\b|make\.com|"resend"/;
+function sourceFiles(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    return entry.isDirectory() ? sourceFiles(full) : [full];
+  });
+}
+for (const file of [...sourceFiles(path.join(__dirname, "../src")), path.join(__dirname, "../package.json")]) {
+  assert.doesNotMatch(fs.readFileSync(file, "utf8"), LEGACY_EMAIL, `${path.basename(file)} still references Make/Resend`);
 }
 assert.match(indexSource, /import \{ BREVO_API_KEY/);
 // 7 migrated email functions + 3 notification triggers + 2 email-capable schedulers.
