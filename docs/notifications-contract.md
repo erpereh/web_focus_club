@@ -36,6 +36,9 @@ El push y el historial usan exactamente los mismos campos:
 | appointment_status | `appointment_series_cancelled` | Serie pendiente cancelada por el cliente | ✔ | ✔ | ✔ |
 | appointment_status | `appointment_series_rescheduled` | Reprogramación de la serie completa o de las siguientes sesiones, o sustitución de horario por el admin | ✔ | ✔ | ✔ |
 | appointment_status | `appointment_series_returned_to_pending` | Una serie aprobada vuelve a pendiente | ✔ | ✔ | ✔ |
+| appointment_status | `appointment_proposed` | El admin propone otra hora para una solicitud pendiente (`proposal.proposedAt` nuevo). Dedupe `appt:{appointmentId}:proposal:{proposedAt}`; la copia usa la franja y el profesional propuestos | ✔ | ✔ | ✔ |
+| appointment_status | `appointment_proposal_declined` | El cliente rechaza la contrapropuesta (`rejected` + `cancellationReason: customer_declined_proposal`) | ✔ | ✔ | ✔ |
+| appointment_status | `appointment_series_renewal_pending` | El admin crea citas renovadas al asignar un bono ("Repetir citas del bono anterior"). Un aviso agrupado por intento de renovación (`notification_outbox/renewal_{renewalId}_{n}`, dedupe `op:{operationId}`); `seriesId` = `renewalId`, `route: appointments` | ✔ | ✔ | ✔ |
 | bono_status | `bono_assigned` | Primer bono del cliente | ✔ | ✔ | ✔ |
 | bono_status | `bono_renewed` | Bono nuevo cuando ya existía otro | ✔ | ✔ | ✔ |
 | bono_status | `bono_exhausted` | Los minutos disponibles pasan a 0 | ✔ | ✔ | ✔ |
@@ -46,6 +49,8 @@ El push y el historial usan exactamente los mismos campos:
 | support_message | `support_message` | El admin responde en el chat | — | ✔ | ✔ |
 
 ## 2. Payload FCM (`data`, todo en strings)
+
+Las versiones antiguas de la app no conocen los tres eventos anteriores: muestran el icono genérico de `appointment_status` y navegan por `route`, sin romperse.
 
 Siempre incluye `type`, `event`, `notificationId` (el id del documento de historial) y `route`. Además lleva los IDs relacionados que correspondan:
 

@@ -1,4 +1,5 @@
 import type { SiteConfig, SlotInterval } from '@/types';
+import { DEFAULT_BONO_SIZES_MINUTES, normalizeBonoSizesMinutes } from '@/lib/bono-sizes';
 
 export const DEFAULT_MAX_CAPACITY = 2;
 export const MIN_MAX_CAPACITY = 1;
@@ -11,6 +12,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
     bonoExpirationMonths: 1,
     maintenanceMode: false,
     maxCapacity: DEFAULT_MAX_CAPACITY,
+    bonoSizesMinutes: [...DEFAULT_BONO_SIZES_MINUTES],
 };
 
 export const ALLOWED_SLOT_INTERVALS = [15, 30, 45, 60] as const satisfies readonly SlotInterval[];
@@ -58,6 +60,7 @@ export function normalizeSiteConfig(config: Partial<SiteConfig> = {}): SiteConfi
         bonoExpirationMonths: Number.isFinite(expirationMonths) ? Math.max(1, Math.trunc(expirationMonths)) : 1,
         maintenanceMode: Boolean(config.maintenanceMode),
         maxCapacity: normalizeMaxCapacity(config.maxCapacity),
+        bonoSizesMinutes: normalizeBonoSizesMinutes(config.bonoSizesMinutes),
     };
 }
 
@@ -89,6 +92,10 @@ export function sanitizeSiteConfigUpdate(data: Partial<SiteConfig>): Partial<Sit
 
     if ('maxCapacity' in data) {
         sanitized.maxCapacity = normalizeMaxCapacity(data.maxCapacity);
+    }
+
+    if ('bonoSizesMinutes' in data) {
+        sanitized.bonoSizesMinutes = normalizeBonoSizesMinutes(data.bonoSizesMinutes);
     }
 
     return sanitized;

@@ -22,7 +22,6 @@ import {
   getMadridDateKey,
   isInsideCustomerRescheduleLockWindow,
   isRescheduleCapacityAvailable,
-  isSlotAtCapacity,
   madridCivilSlotToInstant,
   ONE_DAY_CHANGE_MESSAGE,
   ONE_DAY_CHANGE_NOT_ALLOWED,
@@ -42,6 +41,14 @@ import {
 import { createRecurringSeriesHandlers } from "./recurringSeries.js";
 import { createRecurringRescheduleHandlers } from "./recurringReschedule.js";
 import { createAdminAppointmentRescheduleHandlers } from "./adminAppointmentReschedule.js";
+import {
+  createAppointmentProposalHandlers,
+  type AppointmentProposal,
+  type CustomerConfirmation,
+  openCustomerConfirmation,
+  type ProposalHistoryEntry,
+} from "./appointmentProposals.js";
+import { createBonoRenewalHandlers } from "./bonoRenewal.js";
 import { createSupportChatHandlers } from "./supportChat";
 import {
   createCustomerSuggestionHandlers,
@@ -71,6 +78,19 @@ import {
   type StoredMigrationDocument,
 } from "./slotMigrations.js";
 import {
+  type AppointmentType,
+  evaluateSlot,
+  getAppointmentType,
+  loadCustomerActiveAppointments,
+  loadSiteConfig,
+  loadSlotDay,
+  loadTrainerActiveAppointments,
+  NUTRITION_DURATION_MINUTES,
+  parseAppointmentTypeInput,
+  SLOT_REJECTION_MESSAGES,
+  type SlotRejectionReason,
+} from "./slotValidation.js";
+import {
   createUserFromAdminCore,
   getTrainerDocsByUid,
   parseCreateUserFromAdminCommonData,
@@ -83,6 +103,7 @@ const db = getFirestore();
 const GOOGLE_CALENDAR_ID = defineSecret("GOOGLE_CALENDAR_ID");
 const REGION = "europe-west1";
 const APPOINTMENT_SERVICE_TYPE = "Bono Mensual de Entrenamiento";
+const NUTRITION_SERVICE_TYPE = "Consulta de nutrición";
 const CONTACT_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const CONTACT_RATE_LIMIT_MAX_REQUESTS = 5;
 const CONTACT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -108,7 +129,8 @@ interface TimeSlot {
 }
 
 interface CreateAppointmentRequest {
-  duration: AppointmentDuration;
+  duration?: AppointmentDuration;
+  appointmentType?: AppointmentType;
   preferredSlot: TimeSlot;
   reason?: string;
 }
@@ -180,6 +202,7 @@ interface CreateAppointmentFromAdminRequest {
   assignedTrainer?: unknown;
   status?: unknown;
   comment?: unknown;
+  appointmentType?: unknown;
 }
 
 interface ParsedAdminUserData {
@@ -199,6 +222,7 @@ interface ParsedAdminAppointmentData {
   assignedTrainer: string;
   status: "pending" | "approved";
   comment: string;
+  appointmentType: AppointmentType;
 }
 
 interface AppointmentDoc {
@@ -207,6 +231,8 @@ interface AppointmentDoc {
   email: string;
   phone: string;
   serviceType: string;
+  /** Missing on legacy documents, which are always training. */
+  appointmentType?: AppointmentType;
   duration: AppointmentDuration;
   preferredSlots: TimeSlot[];
   reason: string;
@@ -246,6 +272,10 @@ interface AppointmentDoc {
   previousPreferredSlot?: TimeSlot;
   recurrenceSeriesId?: string;
   recurrenceIndex?: number;
+  /** Present while (or after) the customer has to confirm it. */
+  customerConfirmation?: CustomerConfirmation | null;
+  proposal?: AppointmentProposal | null;
+  proposalHistory?: ProposalHistoryEntry[];
   createdAt: string;
   updatedAt?: string;
 }
@@ -275,6 +305,8 @@ interface TrainerDoc {
   uid: string;
   name: string;
   active?: boolean;
+  /** Professionals the admin marked as nutrition-capable (missing = false). */
+  offersNutrition?: boolean;
 }
 
 interface ServiceDoc {
@@ -451,10 +483,6 @@ function getBonoMinutosRestantes(bono: BonoDoc): number {
 
 function getNowDate(): Date {
   return new Date();
-}
-
-function slotDateTime(slot: TimeSlot): Date {
-  return new Date(`${slot.date}T${slot.time}:00`);
 }
 
 function toHttpsError(
@@ -856,6 +884,13 @@ function parseCreateAppointmentFromAdminData(data: unknown): ParsedAdminAppointm
   const assignedTrainer = normalizeTextField(data.assignedTrainer, "entrenador", 128);
   const status = data.status;
   const comment = normalizeTextField(data.comment, "comentario", 1000, false);
+  const appointmentType = parseAppointmentTypeInput(data.appointmentType);
+  if (!appointmentType) {
+    throw toHttpsError("invalid-argument", "El tipo de cita no es valido.");
+  }
+  if (appointmentType === "nutrition" && durationMinutes !== NUTRITION_DURATION_MINUTES) {
+    throw toHttpsError("invalid-argument", "Las consultas de nutricion duran 30 minutos.");
+  }
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
     throw toHttpsError("invalid-argument", "La fecha u hora no tiene un formato valido.");
@@ -876,6 +911,7 @@ function parseCreateAppointmentFromAdminData(data: unknown): ParsedAdminAppointm
     assignedTrainer,
     status,
     comment,
+    appointmentType,
   };
 }
 
@@ -943,45 +979,9 @@ async function addAdminUserActivityLog(data: Record<string, unknown>): Promise<v
   }
 }
 
-function validateAdminAppointmentSlot(
-  input: ParsedAdminAppointmentData,
-  config: SiteConfig,
-  blockedTimes: Set<string>,
-  occupancyByTime: Map<string, number>,
-  userAppointments: AppointmentDoc[],
-): void {
-  const slotBlocks = getCanonicalSlotBlocks(input.slot.time, input.durationMinutes);
-  const targetSlotKeys = new Set(slotBlocks.map((time) => `${input.slot.date}_${time}`));
-
-  const slotDate = slotDateTime(input.slot);
-  if (Number.isNaN(slotDate.getTime()) || slotDate <= getNowDate()) {
-    throw toHttpsError("failed-precondition", "La franja seleccionada ya no esta disponible.");
-  }
-
-  const validSlots = new Set(generateTimeSlots(config));
-  if (!validSlots.has(input.slot.time) || !doesSessionFitWithinSchedule(config, input.slot.time, input.durationMinutes)) {
-    throw toHttpsError("failed-precondition", "La franja seleccionada no es valida para el horario configurado.");
-  }
-
-  if (slotBlocks.some((time) => blockedTimes.has(time))) {
-    throw toHttpsError("failed-precondition", "La franja seleccionada esta bloqueada.");
-  }
-
-  if (slotBlocks.some((time) => isSlotAtCapacity(occupancyByTime.get(time) ?? 0, config.maxCapacity))) {
-    throw toHttpsError("failed-precondition", "La franja seleccionada esta llena.");
-  }
-
-  const hasConflict = userAppointments.some((appointment) => {
-    const existingKeys = appointmentSlotKeys(appointment);
-    for (const key of existingKeys) {
-      if (targetSlotKeys.has(key)) return true;
-    }
-    return false;
-  });
-
-  if (hasConflict) {
-    throw toHttpsError("failed-precondition", "El cliente ya tiene una cita en esta franja.");
-  }
+/** Admin-facing error for a refused slot; `details.reason` lets the UI explain it. */
+function slotRejectionError(reason: SlotRejectionReason): HttpsError {
+  return toHttpsError("failed-precondition", SLOT_REJECTION_MESSAGES[reason], { reason });
 }
 
 function applyApprovedAppointmentWrites(
@@ -999,6 +999,9 @@ function applyApprovedAppointmentWrites(
       { merge: true },
     );
   });
+
+  // Nutrition shares capacity but never consumes bono minutes.
+  if (input.appointmentType === "nutrition") return {};
 
   if (!bonoDoc) {
     return { bonoWarning: "Cita creada aprobada sin descuento: el cliente no tiene bono activo." };
@@ -1279,12 +1282,6 @@ export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminReque
     const serviceRef = input.serviceType.includes("/")
       ? null
       : db.collection("services").doc(input.serviceType);
-    const siteConfigRef = db.collection("site_config").doc("main");
-    const blockedSlotsQuery = db.collection("blocked_slots").where("date", "==", input.slot.date);
-    const occupancyQuery = db.collection("slot_occupancy").where("date", "==", input.slot.date);
-    const userAppointmentsQuery = db.collection("appointments")
-      .where("userId", "==", input.userId)
-      .where("status", "in", ["pending", "approved"]);
     const serviceTitleQuery = db.collection("services").where("title", "==", input.serviceType).limit(1);
     const bonosQuery = db.collection("bonos")
       .where("userId", "==", input.userId)
@@ -1292,27 +1289,29 @@ export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminReque
       .limit(1);
 
     const result = await db.runTransaction(async (transaction) => {
+      const isNutrition = input.appointmentType === "nutrition";
       const [
         userSnap,
         trainerSnap,
         serviceIdSnap,
-        siteConfigSnap,
-        blockedSlotsSnap,
-        occupancySnap,
-        userAppointmentsSnap,
+        config,
+        customerAppointments,
+        trainerAppointments,
         serviceTitleSnap,
         bonosSnap,
       ] = await Promise.all([
         transaction.get(userRef),
         transaction.get(trainerRef),
         serviceRef ? transaction.get(serviceRef) : Promise.resolve(undefined),
-        transaction.get(siteConfigRef),
-        transaction.get(blockedSlotsQuery),
-        transaction.get(occupancyQuery),
-        transaction.get(userAppointmentsQuery),
+        loadSiteConfig(transaction, db),
+        loadCustomerActiveAppointments(transaction, db, input.userId),
+        isNutrition
+          ? loadTrainerActiveAppointments(transaction, db, input.assignedTrainer)
+          : Promise.resolve([]),
         transaction.get(serviceTitleQuery),
         transaction.get(bonosQuery),
       ]);
+      const day = await loadSlotDay(transaction, db, config, input.slot.date);
 
       if (!userSnap.exists) {
         throw toHttpsError("failed-precondition", "No se ha encontrado el cliente indicado.");
@@ -1330,10 +1329,16 @@ export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminReque
       if (trainer.active === false) {
         throw toHttpsError("failed-precondition", "El entrenador seleccionado no esta activo.");
       }
+      if (isNutrition && trainer.offersNutrition !== true) {
+        throw slotRejectionError("trainer_not_nutrition");
+      }
 
-      const service = serviceIdSnap?.exists
-        ? serviceIdSnap.data() as ServiceDoc
-        : serviceTitleSnap.docs[0]?.data() as ServiceDoc | undefined;
+      // Nutrition is not a catalogue service: it always uses its own label.
+      const service = isNutrition
+        ? { title: NUTRITION_SERVICE_TYPE, active: true } as ServiceDoc
+        : serviceIdSnap?.exists
+          ? serviceIdSnap.data() as ServiceDoc
+          : serviceTitleSnap.docs[0]?.data() as ServiceDoc | undefined;
       if (!service) {
         throw toHttpsError("failed-precondition", "No se ha encontrado el servicio seleccionado.");
       }
@@ -1341,22 +1346,21 @@ export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminReque
         throw toHttpsError("failed-precondition", "El servicio seleccionado no esta activo.");
       }
 
-      const config = siteConfigSnap.exists
-        ? normalizeSiteConfig(siteConfigSnap.data() as Partial<SiteConfig>)
-        : normalizeSiteConfig();
-      const blockedTimes = new Set<string>();
-      blockedSlotsSnap.docs.forEach((docSnap) => {
-        const blocked = docSnap.data() as TimeSlot;
-        if (typeof blocked.time === "string") blockedTimes.add(blocked.time);
+      const rejection = evaluateSlot(day, {
+        slot: input.slot,
+        durationMinutes: input.durationMinutes,
+        appointmentType: input.appointmentType,
+        now: getNowDate(),
+        customerAppointments,
+        trainer: {
+          id: input.assignedTrainer,
+          exists: true,
+          active: true,
+          offersNutrition: trainer.offersNutrition === true,
+        },
+        trainerAppointments,
       });
-      const occupancyByTime = new Map<string, number>();
-      occupancySnap.docs.forEach((docSnap) => {
-        const occupancy = docSnap.data() as SlotOccupancy;
-        occupancyByTime.set(occupancy.time, occupancy.count ?? 0);
-      });
-      const userAppointments = userAppointmentsSnap.docs.map((docSnap) => docSnap.data() as AppointmentDoc);
-
-      validateAdminAppointmentSlot(input, config, blockedTimes, occupancyByTime, userAppointments);
+      if (rejection) throw slotRejectionError(rejection);
 
       const now = new Date().toISOString();
       const appointment: AppointmentDoc = {
@@ -1364,8 +1368,9 @@ export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminReque
         name: userProfile.name,
         email: userProfile.email,
         phone: userProfile.phone || "",
-        serviceType: input.serviceType,
+        serviceType: isNutrition ? NUTRITION_SERVICE_TYPE : input.serviceType,
         sessionType: service.title || input.serviceType,
+        appointmentType: input.appointmentType,
         duration: input.duration,
         preferredSlots: [input.slot],
         reason: input.comment,
@@ -1455,6 +1460,18 @@ const adminAppointmentReschedule = createAdminAppointmentRescheduleHandlers({
   getNowDate,
 });
 
+const appointmentProposals = createAppointmentProposalHandlers({
+  db,
+  requireAdmin,
+  getNowDate,
+});
+
+const bonoRenewal = createBonoRenewalHandlers({
+  db,
+  requireAdmin,
+  getNowDate,
+});
+
 export const createRecurringAppointmentsFromAdmin = onCall(
   { region: REGION },
   recurringSeries.createRecurringAppointmentsFromAdmin,
@@ -1518,6 +1535,26 @@ export const replaceRecurringSeriesScheduleFromAdmin = onCall(
 export const returnRecurringSeriesToPendingFromAdmin = onCall(
   { region: REGION },
   adminAppointmentReschedule.returnRecurringSeriesToPendingFromAdmin,
+);
+
+export const proposeAppointmentSlotFromAdmin = onCall(
+  { region: REGION },
+  appointmentProposals.proposeAppointmentSlotFromAdmin,
+);
+
+export const respondToAppointmentConfirmation = onCall(
+  { region: REGION },
+  appointmentProposals.respondToAppointmentConfirmation,
+);
+
+export const previewBonoAppointmentRenewalFromAdmin = onCall(
+  { region: REGION },
+  bonoRenewal.previewBonoAppointmentRenewalFromAdmin,
+);
+
+export const commitBonoAppointmentRenewalFromAdmin = onCall(
+  { region: REGION },
+  bonoRenewal.commitBonoAppointmentRenewalFromAdmin,
 );
 
 export const sendContactMessage = onCall<ContactMessageRequest>(
@@ -1697,11 +1734,17 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
     }
 
     const data = request.data;
-    if (!isRecord(data) || !isTimeSlot(data.preferredSlot) || !["30", "45", "60"].includes(String(data.duration))) {
+    const appointmentType = isRecord(data) ? parseAppointmentTypeInput(data.appointmentType) : undefined;
+    const isNutrition = appointmentType === "nutrition";
+    const rawDuration = isRecord(data) && data.duration !== undefined ? String(data.duration) : undefined;
+    const durationIsValid = isNutrition
+      ? rawDuration === undefined || rawDuration === String(NUTRITION_DURATION_MINUTES)
+      : ["30", "45", "60"].includes(rawDuration ?? "");
+    if (!isRecord(data) || !appointmentType || !isTimeSlot(data.preferredSlot) || !durationIsValid) {
       throw toHttpsError("invalid-argument", "Los datos de la reserva no son válidos.");
     }
 
-    const duration = String(data.duration) as AppointmentDuration;
+    const duration = (isNutrition ? String(NUTRITION_DURATION_MINUTES) : rawDuration) as AppointmentDuration;
     const preferredSlot = data.preferredSlot;
     const reason = typeof data.reason === "string" ? data.reason.trim() : "";
     const durationMinutes = Number.parseInt(duration, 10);
@@ -1709,41 +1752,19 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
 
     const appointmentRef = db.collection("appointments").doc();
     const userRef = db.collection("users").doc(userId);
-    const siteConfigRef = db.collection("site_config").doc("main");
-
-    const slotBlocks = getCanonicalSlotBlocks(preferredSlot.time, durationMinutes);
-    const targetSlotKeys = new Set(slotBlocks.map((time) => `${preferredSlot.date}_${time}`));
-
-    const blockedSlotsQuery = db.collection("blocked_slots")
-      .where("date", "==", preferredSlot.date);
-
-    const occupancyQuery = db.collection("slot_occupancy")
-      .where("date", "==", preferredSlot.date);
-
-    const userAppointmentsQuery = db.collection("appointments")
-      .where("userId", "==", userId)
-      .where("status", "in", ["pending", "approved"]);
 
     const bonosQuery = db.collection("bonos")
       .where("userId", "==", userId)
       .where("estado", "==", "activo");
 
     const appointmentId = await db.runTransaction(async (transaction) => {
-      const [
-        userSnap,
-        siteConfigSnap,
-        blockedSlotsSnap,
-        occupancySnap,
-        userAppointmentsSnap,
-        bonosSnap,
-      ] = await Promise.all([
+      const [userSnap, bonosSnap, config, customerAppointments] = await Promise.all([
         transaction.get(userRef),
-        transaction.get(siteConfigRef),
-        transaction.get(blockedSlotsQuery),
-        transaction.get(occupancyQuery),
-        transaction.get(userAppointmentsQuery),
         transaction.get(bonosQuery),
+        loadSiteConfig(transaction, db),
+        loadCustomerActiveAppointments(transaction, db, userId),
       ]);
+      const day = await loadSlotDay(transaction, db, config, preferredSlot.date);
 
       if (!userSnap.exists) {
         throw toHttpsError("failed-precondition", "No se ha encontrado tu perfil de usuario.");
@@ -1772,59 +1793,29 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
         throw toHttpsError("failed-precondition", "Tu bono activo está expirado. Consulta en el gimnasio para renovarlo.");
       }
 
+      // Nutrition requires an active bono but never consumes its minutes.
       const availableMinutes = getBonoMinutosRestantes(bono);
-      if (availableMinutes < durationMinutes) {
+      if (!isNutrition && availableMinutes < durationMinutes) {
         throw toHttpsError(
           "failed-precondition",
           `No tienes suficientes minutos disponibles. Te quedan ${availableMinutes} min y la sesión requiere ${durationMinutes} min.`,
         );
       }
 
-      const slotDate = slotDateTime(preferredSlot);
-      if (Number.isNaN(slotDate.getTime()) || slotDate <= getNowDate()) {
-        throw toHttpsError("failed-precondition", "La franja seleccionada ya no está disponible.");
-      }
-
-      const config = siteConfigSnap.exists
-        ? normalizeSiteConfig(siteConfigSnap.data() as Partial<SiteConfig>)
-        : normalizeSiteConfig();
-      const validSlots = new Set(generateTimeSlots(config));
-      if (!validSlots.has(preferredSlot.time) || !doesSessionFitWithinSchedule(config, preferredSlot.time, durationMinutes)) {
-        throw toHttpsError("failed-precondition", "La franja seleccionada no es válida.");
-      }
-
-      const blockedTimes = new Set<string>();
-      blockedSlotsSnap.docs.forEach((docSnap) => {
-        const blocked = docSnap.data() as TimeSlot;
-        if (typeof blocked.time === "string") {
-          blockedTimes.add(blocked.time);
-        }
+      const rejection = evaluateSlot(day, {
+        slot: preferredSlot,
+        durationMinutes,
+        appointmentType,
+        now: getNowDate(),
+        customerAppointments,
       });
-      if (slotBlocks.some((time) => blockedTimes.has(time))) {
-        throw toHttpsError("failed-precondition", "La franja seleccionada ya no está disponible.");
-      }
-
-      const occupancyByTime = new Map<string, number>();
-      occupancySnap.docs.forEach((docSnap) => {
-        const occupancy = docSnap.data() as SlotOccupancy;
-        occupancyByTime.set(occupancy.time, occupancy.count ?? 0);
-      });
-      if (slotBlocks.some((time) => isSlotAtCapacity(occupancyByTime.get(time) ?? 0, config.maxCapacity))) {
-        throw toHttpsError("failed-precondition", "La franja seleccionada ya no está disponible.");
-      }
-
-      const hasConflict = userAppointmentsSnap.docs.some((docSnap) => {
-        const appointment = docSnap.data() as AppointmentDoc;
-        const existingKeys = appointmentSlotKeys(appointment);
-        for (const key of existingKeys) {
-          if (targetSlotKeys.has(key)) {
-            return true;
-          }
-        }
-        return false;
-      });
-      if (hasConflict) {
-        throw toHttpsError("failed-precondition", "Ya tienes una sesión reservada en esta franja.");
+      if (rejection) {
+        const message = rejection === "outside_schedule"
+          ? "La franja seleccionada no es válida."
+          : rejection === "appointment_conflict"
+            ? "Ya tienes una sesión reservada en esta franja."
+            : "La franja seleccionada ya no está disponible.";
+        throw toHttpsError("failed-precondition", message, { reason: rejection });
       }
 
       const createdAt = new Date().toISOString();
@@ -1833,7 +1824,8 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
         name: userProfile.name,
         email: userProfile.email,
         phone: userProfile.phone || "",
-        serviceType: APPOINTMENT_SERVICE_TYPE,
+        serviceType: isNutrition ? NUTRITION_SERVICE_TYPE : APPOINTMENT_SERVICE_TYPE,
+        appointmentType,
         duration,
         preferredSlots: [preferredSlot],
         reason,
@@ -1843,6 +1835,11 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
         createdAt,
         updatedAt: createdAt,
       };
+
+      if (isNutrition) {
+        transaction.create(appointmentRef, appointment);
+        return appointmentRef.id;
+      }
 
       const deduction = await deductAppointmentMinutesInTransaction(
         transaction,
@@ -2109,9 +2106,26 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
       const approvalMetadataDeletes = Object.fromEntries(
         approvalFieldsToDelete.map((field) => [field, FieldValue.delete()]),
       );
+      // Moving it themselves turns it into a normal request for the admin.
+      const openConfirmation = openCustomerConfirmation(appointment);
+      const confirmationPatch: Record<string, unknown> = openConfirmation
+        ? {
+          customerConfirmation: FieldValue.delete(),
+          ...(appointment.proposal?.status === "pending"
+            ? {
+              proposal: { ...appointment.proposal, status: "superseded", respondedAt: now },
+              proposalHistory: [
+                ...(appointment.proposalHistory ?? []),
+                { event: "withdrawn", at: now, by: requestUid },
+              ],
+            }
+            : {}),
+        }
+        : {};
       transaction.set(appointmentRef, {
         ...appointmentPatch,
         ...approvalMetadataDeletes,
+        ...confirmationPatch,
         previousPreferredSlot: notificationSlot(appointment) ?? null,
       }, { merge: true });
     });
@@ -2203,6 +2217,7 @@ export const onAppointmentCreated = onDocumentCreated(
 
     if (!appointment || appointment.status !== "pending") return;
     if (appointment.recurrenceSeriesId) return;
+    if (appointment.customerConfirmation) return;
 
     await sendAppointmentEmailSafely(
       event.id,
@@ -2243,6 +2258,8 @@ export const onAppointmentApproved = onDocumentUpdated(
         if (!appointmentSnap.exists) return;
 
         const appointment = appointmentSnap.data() as AppointmentDoc;
+        // Nutrition consultations never consume or return bono minutes.
+        if (getAppointmentType(appointment) === "nutrition") return;
         const now = new Date().toISOString();
         if (changedToApproved) {
           if (!shouldReconcileAppointmentTransition("approved", appointment.status)) return;

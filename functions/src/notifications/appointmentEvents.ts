@@ -22,8 +22,21 @@ export interface NotifiableAppointment {
   serviceType?: string;
   recurrenceSeriesId?: string;
   notificationOperationId?: string;
+  /** Missing = training. */
+  appointmentType?: string;
+  /** Admin counter-proposal awaiting (or answered by) the customer. */
+  proposal?: NotifiableProposal | null;
+  cancellationReason?: string;
   /** Set only when minutes were actually returned to the bono. */
   minutesRefundedAt?: string | null;
+}
+
+export interface NotifiableProposal {
+  status?: string;
+  originalSlot?: AppointmentSlotLike | null;
+  proposedSlot?: AppointmentSlotLike | null;
+  proposedTrainer?: string | null;
+  proposedAt?: string;
 }
 
 export interface AppointmentChange {
@@ -84,6 +97,21 @@ export function classifyAppointmentChange(
   }
 
   if (!before || !after) return null;
+
+  // A new admin counter-proposal: tell the customer about the proposed slot.
+  const proposal = after.proposal;
+  if (after.status === "pending"
+    && proposal?.status === "pending"
+    && proposal.proposedAt
+    && proposal.proposedAt !== before.proposal?.proposedAt) {
+    const proposedSlot = proposal.proposedSlot ? getAppointmentEffectiveSlot({ approvedSlot: proposal.proposedSlot }) : undefined;
+    if (!proposedSlot || !startsAfter({ approvedSlot: proposedSlot }, now)) return null;
+    const originalSlot = proposal.originalSlot
+      ? getAppointmentEffectiveSlot({ approvedSlot: proposal.originalSlot })
+      : getAppointmentEffectiveSlot(before);
+    return { event: "appointment_proposed", appointment: after, previousSlot: originalSlot, status: "pending" };
+  }
+
   // Edits to sessions that already happened are bookkeeping, not news.
   if (!startsAfter(before, now) && !startsAfter(after, now)) return null;
 
@@ -94,6 +122,9 @@ export function classifyAppointmentChange(
       case "approved":
         return { event: "appointment_confirmed", appointment: after, status };
       case "rejected":
+        if (after.cancellationReason === "customer_declined_proposal") {
+          return { event: "appointment_proposal_declined", appointment: after, status };
+        }
         return { event: "appointment_rejected", appointment: after, status };
       case "cancelled":
         return { event: "appointment_cancelled", appointment: after, status };

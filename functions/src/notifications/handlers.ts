@@ -96,19 +96,28 @@ export function createNotificationHandlers(deps: NotificationHandlerDeps) {
       const appointment = change.appointment;
       if (!appointment.userId) return undefined;
       const customerName = appointment.name || (await loadCustomer(appointment.userId)).name;
+      // A proposal is described by the proposed slot/professional and is
+      // deduplicated per proposal, whatever trigger event delivers it.
+      const proposal = change.event === "appointment_proposed" ? appointment.proposal : undefined;
+      const slot = proposal?.proposedSlot
+        ? getAppointmentEffectiveSlot({ approvedSlot: proposal.proposedSlot })
+        : getAppointmentEffectiveSlot(appointment);
       return notifyCustomerSafely(deps, buildAppointmentNotice({
         uid: appointment.userId,
-        dedupeKey: `appt:${input.eventId}`,
+        dedupeKey: proposal
+          ? `appt:${input.appointmentId}:proposal:${proposal.proposedAt}`
+          : `appt:${input.eventId}`,
         event: change.event as CustomerAppointmentEvent,
         appointmentId: input.appointmentId,
         status: change.status,
         customerName,
         customerEmail: appointment.email,
-        slot: getAppointmentEffectiveSlot(appointment),
+        slot,
         previousSlot: change.previousSlot,
         sessionType: appointment.sessionType || appointment.serviceType || "",
-        trainerName: await trainerName(appointment.assignedTrainer),
+        trainerName: await trainerName(proposal ? proposal.proposedTrainer ?? appointment.assignedTrainer : appointment.assignedTrainer),
         duration: appointment.duration === undefined ? undefined : String(appointment.duration),
+        appointmentType: appointment.appointmentType,
         minutesRefunded: Boolean(appointment.minutesRefundedAt),
       }));
     },

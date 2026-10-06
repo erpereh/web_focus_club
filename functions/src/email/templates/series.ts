@@ -8,7 +8,8 @@ export type SeriesEmailEvent =
   | "appointment_series_rejected"
   | "appointment_series_cancelled"
   | "appointment_series_rescheduled"
-  | "appointment_series_returned_to_pending";
+  | "appointment_series_returned_to_pending"
+  | "appointment_series_renewal_pending";
 
 export interface SeriesEmailData {
   customerName: string;
@@ -56,6 +57,12 @@ const COPY: Record<SeriesEmailEvent, { subject: string; heading: string; intro: 
     heading: "Citas recurrentes pendientes de confirmación",
     intro: (n) => `${n} ${n === 1 ? "sesión" : "sesiones"} de tu serie vuelven a estar pendientes de confirmación. Te avisaremos en cuanto las revisemos.`,
     list: "Sesiones pendientes",
+  },
+  appointment_series_renewal_pending: {
+    subject: "Tienes citas renovadas pendientes de confirmar · Focus Club",
+    heading: "Citas renovadas pendientes de confirmar",
+    intro: (n) => `hemos preparado ${n} ${n === 1 ? "cita renovada" : "citas renovadas"} con tu nuevo bono. Revísalas y confírmalas desde la app.`,
+    list: "Citas por confirmar",
   },
 };
 

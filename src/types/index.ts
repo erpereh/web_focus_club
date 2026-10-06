@@ -92,6 +92,48 @@ export interface TimeSlot {
 
 export type SlotInterval = 15 | 30 | 45 | 60;
 
+/** Tipo de cita. Los documentos antiguos no lo tienen y son siempre entrenamiento. */
+export type AppointmentType = 'training' | 'nutrition';
+
+/** Las consultas de nutrición duran siempre 30 minutos y no consumen minutos del bono. */
+export const NUTRITION_DURATION_MINUTES = 30;
+
+export function getAppointmentType(appointment: { appointmentType?: unknown } | null | undefined): AppointmentType {
+    return appointment?.appointmentType === 'nutrition' ? 'nutrition' : 'training';
+}
+
+/**
+ * Las citas que esperan respuesta del cliente siguen en `status: 'pending'`
+ * (las apps instaladas no aceptan estados nuevos) y llevan este marcador.
+ */
+export interface CustomerConfirmation {
+    kind: 'proposal' | 'renewal';
+    requestedAt: string;
+    requestedBy: string;
+    renewalId?: string;
+    response?: 'accepted' | 'declined' | null;
+    respondedAt?: string | null;
+}
+
+export interface AppointmentProposal {
+    status: 'pending' | 'accepted' | 'declined' | 'superseded';
+    originalSlot: TimeSlot | null;
+    originalTrainer: string | null;
+    proposedSlot: TimeSlot;
+    proposedTrainer: string | null;
+    proposedBy: string;
+    proposedAt: string;
+    respondedAt?: string | null;
+}
+
+export interface ProposalHistoryEntry {
+    event: 'proposed' | 'superseded' | 'accepted' | 'declined' | 'withdrawn';
+    at: string;
+    by: string;
+    slot?: TimeSlot | null;
+    trainer?: string | null;
+}
+
 export interface Appointment {
     id: string;
     userId: string;
@@ -126,8 +168,25 @@ export interface Appointment {
     previousPreferredSlot?: TimeSlot | null;
     recurrenceSeriesId?: string;
     recurrenceIndex?: number;
+    /** Ausente en citas antiguas (= entrenamiento). */
+    appointmentType?: AppointmentType;
+    customerConfirmation?: CustomerConfirmation | null;
+    proposal?: AppointmentProposal | null;
+    proposalHistory?: ProposalHistoryEntry[];
+    /** Citas creadas por "Repetir citas del bono anterior". */
+    renewalId?: string;
+    renewalSourceSeriesId?: string;
+    renewalOriginalSlot?: TimeSlot;
+    renewalModified?: boolean;
     createdAt: string;
     updatedAt?: string;
+}
+
+/** Petición de confirmación abierta (propuesta o renovación) a la espera del cliente. */
+export function getOpenCustomerConfirmation(appointment: Pick<Appointment, 'status' | 'customerConfirmation'>): CustomerConfirmation | undefined {
+    const confirmation = appointment.customerConfirmation;
+    if (appointment.status !== 'pending' || !confirmation || confirmation.response) return undefined;
+    return confirmation;
 }
 
 
@@ -187,6 +246,8 @@ export interface Trainer {
     name: string;
     specialties?: string[];
     active: boolean;
+    /** Atiende consultas de nutrición. Ausente = no (los perfiles antiguos no cambian). */
+    offersNutrition?: boolean;
     createdAt: string;
 }
 
@@ -293,6 +354,7 @@ export interface SiteConfig {
     slotInterval: SlotInterval; // intervalo de inicio de sesiones (default: 30)
     bonoExpirationMonths: number; // meses de validez de los bonos (default: 1)
     maxCapacity: number;       // clientes simultáneos por franja (fallback: 2, rango: 1–10)
+    bonoSizesMinutes: number[]; // tamaños de bono disponibles al asignar, en minutos (default: 4h/6h/8h)
     maintenanceMode?: boolean; // modo mantenimiento para web pública y portal cliente
     // Legacy (compatibilidad hacia atrás)
     sessionDuration?: number;
@@ -312,7 +374,7 @@ export interface BonoHistorialEntry {
 export interface Bono {
     id: string;
     userId: string;            // ref a users/{uid}
-    tamano: 240 | 360 | 480;  // tamaño del bono: 4h, 6h u 8h en minutos
+    tamano: number;            // tamaño del bono en minutos (configurable; históricamente 240/360/480)
     minutosTotales: number;    // minutos totales al crear el bono
     minutosRestantes: number;  // minutos disponibles
     fechaAsignacion: string;   // ISO date de inicio del bono

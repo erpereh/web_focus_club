@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Repeat } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { cn } from '@/lib/utils';
-import type { Appointment, Trainer, UserProfile } from '@/types';
+import { getAppointmentType, getOpenCustomerConfirmation, type Appointment, type Trainer, type UserProfile } from '@/types';
 import { AppointmentReadOnlyModal, type AppointmentStatusVisual } from './AppointmentReadOnlyModal';
 import {
   MAX_VISIBLE_DAY_EVENTS,
@@ -169,7 +169,9 @@ export function AppointmentsCalendar({
                             </span>
                             <span className="mt-0.5 hidden truncate text-[10px] leading-tight opacity-80 sm:block">
                               {durationMinutes ? `${durationMinutes} min` : '—'}
+                              {getAppointmentType(appointment) === 'nutrition' ? ' · Nutrición' : ''}
                               {trainerName ? ` · ${trainerName}` : ''}
+                              {getOpenCustomerConfirmation(appointment) ? ' · Esperando cliente' : ''}
                             </span>
                           </button>
                         );

@@ -1,6 +1,9 @@
-import type { Appointment } from '@/types';
+import { getAppointmentType, type Appointment, type AppointmentType } from '@/types';
 
 export type AppointmentStatusFilter = 'all' | Appointment['status'];
+
+/** Citas antiguas sin tipo cuentan como entrenamiento. */
+export type AppointmentTypeFilter = 'all' | AppointmentType;
 
 export type TrainerFilter =
   | 'all'
@@ -11,6 +14,7 @@ export const TRAINER_FILTER_PREFIX = 'trainer:' as const;
 
 export type FilterableAppointment = Pick<Appointment, 'status' | 'name' | 'email'> & {
   assignedTrainer?: string | null;
+  appointmentType?: AppointmentType;
 };
 
 export function toTrainerFilter(trainerId: string): TrainerFilter {
@@ -27,10 +31,12 @@ export function filterAppointments<T extends FilterableAppointment>(
   {
     statusFilter,
     trainerFilter,
+    typeFilter = 'all',
     search,
   }: {
     statusFilter: AppointmentStatusFilter;
     trainerFilter: TrainerFilter;
+    typeFilter?: AppointmentTypeFilter;
     search: string;
   },
 ): T[] {
@@ -39,6 +45,10 @@ export function filterAppointments<T extends FilterableAppointment>(
 
   return appointments.filter((appointment) => {
     if (statusFilter !== 'all' && appointment.status !== statusFilter) {
+      return false;
+    }
+
+    if (typeFilter !== 'all' && getAppointmentType(appointment) !== typeFilter) {
       return false;
     }
 

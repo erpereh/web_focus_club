@@ -240,6 +240,11 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
       await requireAdmin(request.auth.uid);
       const adminUid = request.auth.uid;
       const adminEmail = request.auth.token.email ?? "";
+      if (isRecord(request.data) && request.data.appointmentType === "nutrition") {
+        throwHttps("invalid-argument", "Las consultas de nutrición no pueden ser recurrentes.", {
+          reason: "nutrition_not_recurring",
+        });
+      }
       const parsed = parseRecurringAppointmentsData(request.data);
       if (!parsed.ok) throwHttps("invalid-argument", parsed.message);
       const input = parsed.value;
@@ -463,6 +468,11 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         throwHttps("permission-denied", "Debes iniciar sesion para solicitar un entrenamiento recurrente.");
       }
       const userId = request.auth.uid;
+      if (isRecord(request.data) && request.data.appointmentType === "nutrition") {
+        throwHttps("invalid-argument", "Las consultas de nutrición no pueden ser recurrentes.", {
+          reason: "nutrition_not_recurring",
+        });
+      }
       const parsed = parseClientRecurringAppointmentsData(request.data);
       if (!parsed.ok) throwHttps("invalid-argument", parsed.message);
       const input = {

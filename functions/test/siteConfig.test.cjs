@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const {
   DEFAULT_SITE_CONFIG,
   generateTimeSlots,
+  normalizeBonoSizesMinutes,
   normalizeMaxCapacity,
   normalizeSiteConfig,
 } = require("../lib/siteConfig.js");
@@ -42,5 +43,13 @@ assert.deepEqual(generateTimeSlots({ startHour: 7, endHour: 20, slotInterval: 15
 assert.deepEqual(generateTimeSlots({ startHour: 7, endHour: 20, slotInterval: 30 }).slice(0, 5), ["07:00", "07:30", "08:00", "08:30", "09:00"]);
 assert.deepEqual(generateTimeSlots({ startHour: 7, endHour: 20, slotInterval: 45 }).slice(0, 5), ["07:00", "07:45", "08:30", "09:15", "10:00"]);
 assert.deepEqual(generateTimeSlots({ startHour: 7, endHour: 20, slotInterval: 60 }).slice(0, 5), ["07:00", "08:00", "09:00", "10:00", "11:00"]);
+
+// Configurable bono sizes: legacy configs keep 4h / 6h / 8h.
+assert.deepEqual(normalizeSiteConfig({}).bonoSizesMinutes, [240, 360, 480]);
+assert.deepEqual(normalizeBonoSizesMinutes(undefined), [240, 360, 480]);
+assert.deepEqual(normalizeBonoSizesMinutes([]), [240, 360, 480]);
+assert.deepEqual(normalizeBonoSizesMinutes([600, 240, 720]), [600, 240, 720], "admin order is kept");
+assert.deepEqual(normalizeBonoSizesMinutes([240, 240, "360", 0, -60, 45, 1.5, "x"]), [240, 360], "invalid and duplicate sizes are dropped");
+assert.deepEqual(normalizeSiteConfig({ bonoSizesMinutes: [240, 360, 480, 600, 720] }).bonoSizesMinutes, [240, 360, 480, 600, 720]);
 
 console.log("site config tests passed");

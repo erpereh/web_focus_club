@@ -5,6 +5,7 @@ import {
   getCanonicalSlotBlocks,
   isBonoExpiredAt,
   isSlotAtCapacity,
+  madridCivilSlotToInstant,
   selectExactlyOneActiveBono,
   slotOccupancyDocId,
   type LifecycleAppointment,
@@ -197,7 +198,7 @@ export function estimateRecurringSeriesWrites(occurrenceCount: number, occupancy
 }
 
 function slotDateTime(date: string, time: string): Date {
-  return new Date(`${date}T${time}:00`);
+  return madridCivilSlotToInstant({ date, time }) ?? new Date(Number.NaN);
 }
 
 function normalizeText(value: unknown, fieldName: string, maxLength: number, required = true):

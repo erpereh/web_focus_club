@@ -45,7 +45,7 @@ import { InteractiveCalendar } from '@/components/ui/interactive-calendar';
 import { useBrandingConfig } from '@/hooks/useBrandingConfig';
 import { useAuth } from '@/contexts/AuthContext';
 import type { TimeSlot, Appointment, Bono, Trainer } from '@/types';
-import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
+import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos, getOpenCustomerConfirmation } from '@/types';
 import {
   formatRecurringSeriesPreview,
   addUtcDays,
@@ -66,6 +66,7 @@ import {
   createRecurringAppointments,
   cancelOwnAppointment,
   cancelOwnRecurringAppointmentSeries,
+  respondToAppointmentConfirmation,
   updateOwnAppointmentSlot,
   rescheduleOwnRecurringAppointment,
   getAppointmentsByUser,
@@ -745,6 +746,26 @@ export default function PortalPage() {
       setAppointmentActionError(error instanceof Error && error.message
         ? error.message
         : 'No se pudo cancelar la cita. Inténtalo de nuevo.');
+    } finally {
+      setAppointmentActionBusy(false);
+    }
+  };
+
+  /** Respuesta del cliente a una contrapropuesta o a una cita renovada. */
+  const handleCustomerConfirmation = async (appointment: Appointment, action: 'accept' | 'decline') => {
+    if (action === 'decline' && !window.confirm(appointment.customerConfirmation?.kind === 'proposal'
+      ? '¿Rechazar la hora propuesta? Tu solicitud quedará rechazada.'
+      : '¿Rechazar esta cita renovada? Se cancelará y se devolverán los minutos.')) return;
+    setAppointmentActionBusy(true);
+    setAppointmentActionError('');
+    try {
+      await respondToAppointmentConfirmation({ appointmentId: appointment.id, action });
+      await refreshUserAppointments();
+    } catch (error) {
+      console.error('Error al responder a la cita:', error);
+      setAppointmentActionError(error instanceof Error && error.message
+        ? error.message
+        : 'No se pudo guardar tu respuesta. Inténtalo de nuevo.');
     } finally {
       setAppointmentActionBusy(false);
     }
@@ -1758,6 +1779,52 @@ export default function PortalPage() {
                             </div>
                           </div>
                         )}
+
+                        {(() => {
+                          const confirmation = getOpenCustomerConfirmation(appointment);
+                          if (!confirmation || appointment.userId !== user?.uid) return null;
+                          const isProposal = confirmation.kind === 'proposal';
+                          const slot = isProposal ? appointment.proposal?.proposedSlot : appointment.preferredSlots[0];
+                          const trainerId = isProposal ? appointment.proposal?.proposedTrainer : appointment.assignedTrainer;
+                          return (
+                            <div className="p-5 rounded-xl border border-sky-500/40 bg-sky-500/10 space-y-3">
+                              <h3 className="text-lg font-bold text-[var(--color-text-primary)]">
+                                {isProposal ? 'Te proponemos otra hora' : 'Cita renovada pendiente de tu confirmación'}
+                              </h3>
+                              <p className="text-sm text-[var(--color-text-secondary)]">
+                                {isProposal
+                                  ? 'La hora solicitada no está disponible. ¿Quieres confirmar esta nueva hora?'
+                                  : 'Hemos preparado esta cita con tu nuevo bono. Confírmala para reservar tu plaza.'}
+                              </p>
+                              {slot && (
+                                <p className="text-[var(--color-text-primary)] font-medium">
+                                  {new Date(`${slot.date}T12:00:00`).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })} a las {slot.time}
+                                  {trainerId ? ` · ${trainers.find(t => t.id === trainerId)?.name ?? ''}` : ''}
+                                </p>
+                              )}
+                              <div className="flex flex-col sm:flex-row gap-3">
+                                <PremiumButton
+                                  variant="cta"
+                                  onClick={() => handleCustomerConfirmation(appointment, 'accept')}
+                                  disabled={appointmentActionBusy}
+                                  icon={<CheckCircle className="w-4 h-4" />}
+                                  className="flex-1"
+                                >
+                                  {appointmentActionBusy ? 'Procesando...' : 'Aceptar'}
+                                </PremiumButton>
+                                <PremiumButton
+                                  variant="ghost"
+                                  onClick={() => handleCustomerConfirmation(appointment, 'decline')}
+                                  disabled={appointmentActionBusy}
+                                  icon={<XCircle className="w-4 h-4" />}
+                                  className="flex-1 text-destructive hover:bg-destructive/10"
+                                >
+                                  Rechazar
+                                </PremiumButton>
+                              </div>
+                            </div>
+                          );
+                        })()}
 
                         {canManageAppointment && (
                           <div className="flex flex-col sm:flex-row gap-3 pt-2">

@@ -13,6 +13,8 @@ export interface LifecycleBono {
 }
 
 export interface LifecycleAppointment {
+  /** Nutrition consultations never touch bono minutes (missing = training). */
+  appointmentType?: unknown;
   bonoId?: string;
   minutesDeducted?: boolean;
   minutesDeductedAmount?: number;
@@ -104,6 +106,9 @@ export function calculateAppointmentRefund(bono: LifecycleBono, appointment: Lif
  */
 export function reconcileAppointmentMinutes(input: ReconcileAppointmentMinutesInput):
   { ok: true; appointmentPatch: Record<string, unknown> } | { ok: false; reason: string } {
+  if (input.appointment.appointmentType === "nutrition") {
+    return { ok: false, reason: "nutrition-no-minutes" };
+  }
   if (input.action === "deduct") {
     if ((input.appointment.minutesDeducted === true || Boolean(input.appointment.minutesDeductedAt))
       && !input.appointment.minutesRefundedAt) {
@@ -394,8 +399,8 @@ export function validateOwnFutureAppointment(
 ): "not-owner" | "invalid-status" | "not-future" | undefined {
   if (appointment.userId !== uid) return "not-owner";
   if (appointment.status !== "pending" && appointment.status !== "approved") return "invalid-status";
-  const date = appointment.date && appointment.time ? new Date(`${appointment.date}T${appointment.time}:00`) : undefined;
-  if (!date || Number.isNaN(date.getTime()) || date.getTime() <= nowMillis) return "not-future";
+  const date = madridCivilSlotToInstant({ date: appointment.date, time: appointment.time });
+  if (!date || date.getTime() <= nowMillis) return "not-future";
   return undefined;
 }
 

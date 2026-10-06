@@ -10,8 +10,32 @@ export interface SiteConfig {
   slotInterval: SlotInterval;
   bonoExpirationMonths: number;
   maxCapacity: number;
+  /** Bono sizes offered when assigning a bono, in minutes, in display order. */
+  bonoSizesMinutes: number[];
   maintenanceMode?: boolean;
   sessionDuration?: number;
+}
+
+export const DEFAULT_BONO_SIZES_MINUTES: readonly number[] = [240, 360, 480];
+export const BONO_SIZE_STEP_MINUTES = 30;
+export const MAX_BONO_SIZES = 20;
+export const MAX_BONO_SIZE_MINUTES = 100 * 60;
+
+/**
+ * Keeps valid, unique sizes in their configured order. Anything unusable
+ * falls back to the historical 4h / 6h / 8h so assigning a bono never breaks.
+ */
+export function normalizeBonoSizesMinutes(value: unknown): number[] {
+  if (!Array.isArray(value)) return [...DEFAULT_BONO_SIZES_MINUTES];
+  const sizes: number[] = [];
+  for (const entry of value) {
+    const minutes = typeof entry === "number" ? entry : Number(entry);
+    if (!Number.isInteger(minutes) || minutes <= 0 || minutes > MAX_BONO_SIZE_MINUTES) continue;
+    if (minutes % BONO_SIZE_STEP_MINUTES !== 0 || sizes.includes(minutes)) continue;
+    sizes.push(minutes);
+    if (sizes.length === MAX_BONO_SIZES) break;
+  }
+  return sizes.length ? sizes : [...DEFAULT_BONO_SIZES_MINUTES];
 }
 
 export const DEFAULT_SITE_CONFIG: SiteConfig = {
@@ -21,6 +45,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
   bonoExpirationMonths: 1,
   maintenanceMode: false,
   maxCapacity: DEFAULT_MAX_CAPACITY,
+  bonoSizesMinutes: [...DEFAULT_BONO_SIZES_MINUTES],
 };
 
 export function normalizeSlotInterval(value: unknown): SlotInterval {
@@ -68,6 +93,7 @@ export function normalizeSiteConfig(config: Partial<SiteConfig> = {}): SiteConfi
     bonoExpirationMonths: Number.isFinite(expirationMonths) ? Math.max(1, Math.trunc(expirationMonths)) : 1,
     maintenanceMode: Boolean(config.maintenanceMode),
     maxCapacity: normalizeMaxCapacity(config.maxCapacity),
+    bonoSizesMinutes: normalizeBonoSizesMinutes(config.bonoSizesMinutes),
   };
 }
 

@@ -32,6 +32,7 @@ import type {
     UserProfile,
     Service,
     Appointment,
+    AppointmentType,
     Testimonial,
     CMSContent,
     SandraData,
@@ -547,6 +548,8 @@ export interface CreateAppointmentFromAdminInput {
     assignedTrainer: string;
     status: 'pending' | 'approved';
     comment: string;
+    /** Omitido = entrenamiento. Nutrición exige 30 min y un profesional de nutrición. */
+    appointmentType?: AppointmentType;
 }
 
 export interface CreateRecurringAppointmentsFromAdminInput {
@@ -871,6 +874,124 @@ export async function createAppointmentFromAdmin(
 
     const result = await callable(input);
     return result.data;
+}
+
+// ---------------------------------------------------------------- propuestas
+
+export async function proposeAppointmentSlotFromAdmin(input: {
+    appointmentId: string;
+    slot: TimeSlot;
+    assignedTrainer?: string | null;
+}): Promise<{ success: boolean; appointmentId: string; proposedAt: string }> {
+    const callable = httpsCallable<
+        typeof input,
+        { success: boolean; appointmentId: string; proposedAt: string }
+    >(firebaseFunctions, 'proposeAppointmentSlotFromAdmin');
+    const result = await callable(input);
+    return result.data;
+}
+
+/** El cliente acepta o rechaza una propuesta de horario o una cita renovada. */
+export async function respondToAppointmentConfirmation(input: {
+    appointmentId: string;
+    action: 'accept' | 'decline';
+}): Promise<{ success: boolean; appointmentId: string; status?: string; alreadyApplied?: boolean }> {
+    const callable = httpsCallable<
+        typeof input,
+        { success: boolean; appointmentId: string; status?: string; alreadyApplied?: boolean }
+    >(firebaseFunctions, 'respondToAppointmentConfirmation');
+    const result = await callable(input);
+    return result.data;
+}
+
+// ---------------------------------------------------------------- renovación de citas
+
+export type RenewalItemReason =
+    | 'slot_not_future'
+    | 'outside_schedule'
+    | 'slot_blocked'
+    | 'slot_full'
+    | 'appointment_conflict'
+    | 'trainer_unavailable'
+    | 'trainer_not_nutrition'
+    | 'professional_conflict'
+    | 'insufficient_minutes'
+    | 'outside_bono_period'
+    | 'already_created';
+
+export interface RenewalItem {
+    key: string;
+    sourceSeriesId: string;
+    originalSlot: TimeSlot;
+    slot: TimeSlot;
+    durationMinutes: 30 | 45 | 60;
+    trainerId: string | null;
+    trainerName?: string;
+    serviceType: string;
+    sessionType: string;
+    modified?: boolean;
+    status: 'ready' | 'conflict' | 'created' | 'already_created';
+    reason?: RenewalItemReason;
+    appointmentId?: string;
+}
+
+export interface PreviewBonoRenewalInput {
+    userId: string;
+    sourceBonoId: string;
+    periodStart: string;
+    periodEnd: string;
+    availableMinutes: number;
+    items?: RenewalItem[];
+}
+
+export async function previewBonoAppointmentRenewalFromAdmin(
+    input: PreviewBonoRenewalInput
+): Promise<{ items: RenewalItem[] }> {
+    const callable = httpsCallable<PreviewBonoRenewalInput, { items: RenewalItem[] }>(
+        firebaseFunctions,
+        'previewBonoAppointmentRenewalFromAdmin'
+    );
+    const result = await callable(input);
+    return result.data;
+}
+
+export interface CommitBonoRenewalInput {
+    renewalId: string;
+    userId: string;
+    bonoId: string;
+    sourceBonoId: string;
+    items: RenewalItem[];
+    skipped: Array<{ key: string; originalSlot: TimeSlot; reason: string }>;
+}
+
+export interface CommitBonoRenewalResult {
+    success: boolean;
+    renewalId: string;
+    created: RenewalItem[];
+    alreadyCreated: RenewalItem[];
+    conflicts: RenewalItem[];
+}
+
+export async function commitBonoAppointmentRenewalFromAdmin(
+    input: CommitBonoRenewalInput
+): Promise<CommitBonoRenewalResult> {
+    const callable = httpsCallable<CommitBonoRenewalInput, CommitBonoRenewalResult>(
+        firebaseFunctions,
+        'commitBonoAppointmentRenewalFromAdmin'
+    );
+    const result = await callable(input);
+    return result.data;
+}
+
+/** Series recurrentes aprobadas de un bono (para ofrecer "Repetir citas del bono anterior"). */
+export async function countApprovedSeriesForBono(userId: string, bonoId: string): Promise<number> {
+    const snap = await getDocs(query(
+        collection(db, 'appointment_recurrences'),
+        where('userId', '==', userId),
+        where('bonoId', '==', bonoId),
+        where('status', '==', 'approved'),
+    ));
+    return snap.size;
 }
 
 export async function createRecurringAppointmentsFromAdmin(
@@ -1593,6 +1714,11 @@ export async function addTrainer(data: Omit<Trainer, 'id' | 'createdAt'>): Promi
         createdAt: new Date().toISOString(),
     });
     return docRef.id;
+}
+
+/** Marca si un profesional atiende consultas de nutrición. */
+export async function updateTrainerNutrition(id: string, offersNutrition: boolean): Promise<void> {
+    await updateDoc(doc(db, 'trainers', id), { offersNutrition });
 }
 
 export async function deleteTrainer(id: string): Promise<void> {

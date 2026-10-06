@@ -8,6 +8,8 @@ import { sendPasswordResetEmail } from 'firebase/auth';
 import Link from 'next/link';
 import Image from 'next/image';
 import {
+  Apple,
+  Hourglass,
   LayoutDashboard,
   Calendar,
   CheckCircle,
@@ -72,6 +74,20 @@ import { MediaPicker } from '@/components/admin/MediaPicker';
 import { IconPicker } from '@/components/admin/IconPicker';
 import { AppointmentsCalendar } from '@/components/admin/appointments/AppointmentsCalendar';
 import { TrainerStatsModal } from '@/components/admin/TrainerStatsModal';
+import { AssignBonoModal } from '@/components/admin/AssignBonoModal';
+import { BonoSizesEditor } from '@/components/admin/BonoSizesEditor';
+import { formatBonoSize } from '@/lib/bono-sizes';
+import {
+  APPOINTMENT_TYPE_LABELS,
+  canProposeAlternative,
+  CUSTOMER_CONFIRMATION_LABELS,
+  customerConfirmationBadge,
+  formatSlotLabel,
+  hasProfessionalConflict,
+  PROPOSAL_STATUS_LABELS,
+  trainersForAppointmentType,
+} from '@/lib/appointment-types';
+import { AdminSlotPickerModal } from '@/components/admin/AdminSlotPickerModal';
 import { AppointmentRescheduleModal } from '@/components/admin/AppointmentRescheduleModal';
 import { getRecurringRescheduleErrorMessage } from '@/lib/recurring-reschedule';
 import { getCanonicalSlotBlocks } from '@/lib/appointment-slots';
@@ -84,6 +100,7 @@ import {
   filterAppointments,
   getTrainerIdFromFilter,
   toTrainerFilter,
+  type AppointmentTypeFilter,
   type TrainerFilter,
 } from '@/lib/admin-appointment-filters';
 import {
@@ -102,7 +119,7 @@ import { useMediaLibrary } from '@/hooks/useMediaLibrary';
 import { defaultCMS } from '@/hooks/useFirestore';
 import { toast } from '@/hooks/use-toast';
 import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, ContactoConfig, ContactoCard, BlockedSlot, Trainer, SiteConfig, Bono, BrandingConfig, HeroStat, SandraAchievement, SandraValue, CentroConfig, GaleriaTrainingItem, GaleriaResultado, GaleriaStat } from '@/types';
-import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos } from '@/types';
+import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos, getAppointmentType, NUTRITION_DURATION_MINUTES, type AppointmentType } from '@/types';
 import {
   formatRecurringSeriesPreview,
   generateRecurringOccurrenceDates,
@@ -161,6 +178,8 @@ import {
   updateUserProfile,
   getSiteConfig,
   updateSiteConfig as updateSiteConfigFS,
+  updateTrainerNutrition,
+  proposeAppointmentSlotFromAdmin,
   generateTimeSlots,
   normalizeSiteConfig,
   doesSessionFitWithinSchedule,
@@ -170,9 +189,7 @@ import {
   getAllActiveBonos,
   getActiveBonoByUser,
   getBonosByUser,
-  assignBono,
   updateBonoDates,
-  deactivateBono,
   deleteBono,
   addBonoMinutes,
   manualDeductBonoMinutes,
@@ -256,6 +273,7 @@ interface AdminAppointmentFormState {
   bookingType: 'single' | 'recurring';
   intervalDays: number;
   endDate: string;
+  appointmentType: AppointmentType;
 }
 
 const EMPTY_CREATE_CLIENT_FORM: CreateClientFormState = {
@@ -288,6 +306,7 @@ const EMPTY_ADMIN_APPOINTMENT_FORM: AdminAppointmentFormState = {
   bookingType: 'single',
   intervalDays: 1,
   endDate: '',
+  appointmentType: 'training',
 };
 
 const CLIENT_ROLE_OPTIONS: { value: AdminUserRole; label: string }[] = [
@@ -1058,6 +1077,9 @@ export default function AdminPage() {
   };
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [trainerFilter, setTrainerFilter] = useState<TrainerFilter>('all');
+  const [typeFilter, setTypeFilter] = useState<AppointmentTypeFilter>('all');
+  // "Proponer otra hora" (contrapropuesta al cliente)
+  const [proposalTarget, setProposalTarget] = useState<Appointment | null>(null);
   const [appointmentsView, setAppointmentsView] = useState<AppointmentsView>('list');
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<string | null>(null);
 
@@ -1175,11 +1197,6 @@ export default function AdminPage() {
   const [clientBonos, setClientBonos] = useState<Record<string, Bono | null>>({});
   const [showAssignBonoModal, setShowAssignBonoModal] = useState(false);
   const [assignBonoClient, setAssignBonoClient] = useState<UserProfile | null>(null);
-  const [assignBonoTamano, setAssignBonoTamano] = useState<240 | 360 | 480>(240);
-  const [assignBonoStartDate, setAssignBonoStartDate] = useState('');
-  const [assignBonoEndDate, setAssignBonoEndDate] = useState('');
-  const [assignBonoError, setAssignBonoError] = useState('');
-  const [savingBono, setSavingBono] = useState(false);
   const [showBonoHistoryModal, setShowBonoHistoryModal] = useState(false);
   const [bonoHistoryData, setBonoHistoryData] = useState<Bono[]>([]);
   const [bonoHistoryClientName, setBonoHistoryClientName] = useState('');
@@ -1401,9 +1418,10 @@ export default function AdminPage() {
     () => filterAppointments(appointments, {
       statusFilter,
       trainerFilter,
+      typeFilter,
       search: appointmentSearch,
     }),
-    [appointments, statusFilter, trainerFilter, appointmentSearch],
+    [appointments, statusFilter, trainerFilter, typeFilter, appointmentSearch],
   );
   const trainersForFilter = useMemo(
     () => [...trainers].sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })),
@@ -1613,7 +1631,11 @@ export default function AdminPage() {
     if (!createAppointmentForm.date) return 'Selecciona una fecha.';
     if (!createAppointmentForm.time) return 'Selecciona una hora disponible.';
     if (!createAppointmentForm.serviceType) return 'Selecciona un servicio.';
-    if (!createAppointmentForm.assignedTrainer) return 'Selecciona un entrenador.';
+    if (!createAppointmentForm.assignedTrainer) {
+      return createAppointmentForm.appointmentType === 'nutrition'
+        ? 'Selecciona el profesional de nutrición.'
+        : 'Selecciona un entrenador.';
+    }
     if (createAppointmentForm.bookingType === 'recurring') {
       if (!Number.isInteger(createAppointmentForm.intervalDays) || createAppointmentForm.intervalDays < 1) {
         return 'El intervalo debe ser un numero entero de dias mayor o igual a 1.';
@@ -1676,6 +1698,7 @@ export default function AdminPage() {
         assignedTrainer: createAppointmentForm.assignedTrainer,
         status: createAppointmentForm.status,
         comment: createAppointmentForm.comment.trim(),
+        appointmentType: createAppointmentForm.appointmentType,
       });
       await refreshData();
       closeCreateAppointmentModal();
@@ -3325,6 +3348,39 @@ export default function AdminPage() {
                           ))}
                         </PopoverContent>
                       </Popover>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-muted text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                          >
+                            {typeFilter === 'all' ? 'Todos los tipos' : APPOINTMENT_TYPE_LABELS[typeFilter]}
+                            <ChevronDown className="w-4 h-4 shrink-0" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          align="end"
+                          sideOffset={6}
+                          className="z-[200] w-44 p-1 bg-[#1a1a1a] border border-[var(--color-border-base)] rounded-xl shadow-2xl"
+                        >
+                          {(['all', 'training', 'nutrition'] as AppointmentTypeFilter[]).map((filter) => (
+                            <PopoverClose asChild key={filter}>
+                              <button
+                                type="button"
+                                onClick={() => setTypeFilter(filter)}
+                                className={cn(
+                                  'w-full text-left px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                                  typeFilter === filter
+                                    ? 'bg-accent text-[var(--color-bg-base)]'
+                                    : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
+                                )}
+                              >
+                                {filter === 'all' ? 'Todos los tipos' : APPOINTMENT_TYPE_LABELS[filter]}
+                              </button>
+                            </PopoverClose>
+                          ))}
+                        </PopoverContent>
+                      </Popover>
                       <button
                         type="button"
                         onClick={() => setAppointmentsView((view) => (view === 'list' ? 'calendar' : 'list'))}
@@ -3416,6 +3472,18 @@ export default function AdminPage() {
                                       <StatusIcon className="w-3 h-3" />
                                       {statusConfig[appointment.status].label}
                                     </span>
+                                    {getAppointmentType(appointment) === 'nutrition' && (
+                                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border border-lime-500/30 bg-lime-500/10 text-lime-400">
+                                        <Apple className="w-3 h-3" />
+                                        Nutrición
+                                      </span>
+                                    )}
+                                    {customerConfirmationBadge(appointment) && (
+                                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border border-sky-500/30 bg-sky-500/10 text-sky-400">
+                                        <Hourglass className="w-3 h-3" />
+                                        {CUSTOMER_CONFIRMATION_LABELS[customerConfirmationBadge(appointment)!]}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
 
@@ -3452,6 +3520,32 @@ export default function AdminPage() {
                                     <span className="text-[var(--color-text-primary)]">{serviceLabels[appointment.serviceType] || appointment.serviceType}</span>
                                   </div>
                                 </div>
+
+                                {appointment.proposal && (
+                                  <div className="p-3 rounded-lg border border-sky-500/30 bg-sky-500/[0.06] text-sm">
+                                    <p className="text-xs text-sky-400 mb-2 font-semibold">Contrapropuesta de horario</p>
+                                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-[var(--color-text-primary)]">
+                                      {appointment.proposal.originalSlot && (
+                                        <span>Solicitado: {formatSlotLabel(appointment.proposal.originalSlot)}</span>
+                                      )}
+                                      <span>Propuesto: <strong>{formatSlotLabel(appointment.proposal.proposedSlot)}</strong></span>
+                                      {appointment.proposal.proposedTrainer && (
+                                        <span>Profesional: {trainers.find(t => t.id === appointment.proposal?.proposedTrainer)?.name || appointment.proposal.proposedTrainer}</span>
+                                      )}
+                                      <span>Estado: {PROPOSAL_STATUS_LABELS[appointment.proposal.status]}</span>
+                                    </div>
+                                    <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+                                      Propuesto el {new Date(appointment.proposal.proposedAt).toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' })}
+                                      {appointment.proposal.respondedAt ? ` · Respondido el ${new Date(appointment.proposal.respondedAt).toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' })}` : ''}
+                                    </p>
+                                  </div>
+                                )}
+
+                                {appointment.renewalId && appointment.renewalOriginalSlot && appointment.renewalModified && (
+                                  <p className="text-xs text-[var(--color-text-secondary)]">
+                                    Renovada desde el bono anterior · patrón original {formatSlotLabel(appointment.renewalOriginalSlot)}
+                                  </p>
+                                )}
 
                                 {appointment.reason && (
                                   <div className="p-3 rounded-lg bg-muted/30">
@@ -3549,19 +3643,32 @@ export default function AdminPage() {
                                 )}
                                 {appointment.status === 'pending' && !appointment.recurrenceSeriesId && (
                                   <>
-                                    <PremiumButton
-                                      variant="cta"
-                                      size="sm"
-                                      icon={<Check className="w-4 h-4" />}
-                                      onClick={() => {
-                                        setSelectedAppointmentId(appointment.id);
-                                        setApprovalData({ assignedTrainer: '', sessionType: '' });
-                                        setShowApprovalModal(true);
-                                      }}
-                                      className="flex-1 lg:flex-none"
-                                    >
-                                      Aprobar
-                                    </PremiumButton>
+                                    {!customerConfirmationBadge(appointment) && (
+                                      <PremiumButton
+                                        variant="cta"
+                                        size="sm"
+                                        icon={<Check className="w-4 h-4" />}
+                                        onClick={() => {
+                                          setSelectedAppointmentId(appointment.id);
+                                          setApprovalData({ assignedTrainer: '', sessionType: '' });
+                                          setShowApprovalModal(true);
+                                        }}
+                                        className="flex-1 lg:flex-none"
+                                      >
+                                        Aprobar
+                                      </PremiumButton>
+                                    )}
+                                    {canProposeAlternative(appointment) && (
+                                      <PremiumButton
+                                        variant="outline"
+                                        size="sm"
+                                        icon={<CalendarClock className="w-4 h-4" />}
+                                        onClick={() => setProposalTarget(appointment)}
+                                        className="flex-1 lg:flex-none"
+                                      >
+                                        {customerConfirmationBadge(appointment) === 'proposal_pending' ? 'Cambiar propuesta' : 'Proponer otra hora'}
+                                      </PremiumButton>
+                                    )}
                                     <PremiumButton
                                       variant="outline"
                                       size="sm"
@@ -3972,12 +4079,7 @@ export default function AdminPage() {
                                 </button>
                                 <button
                                   onClick={() => {
-                                    const defaults = getDefaultBonoDateRange();
                                     setAssignBonoClient(client);
-                                    setAssignBonoTamano(240);
-                                    setAssignBonoStartDate(defaults.startDate);
-                                    setAssignBonoEndDate(defaults.endDate);
-                                    setAssignBonoError('');
                                     setShowAssignBonoModal(true);
                                   }}
                                   className={cn(BONO_ACTION_BTN_CLASS, 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)]')}
@@ -4010,12 +4112,7 @@ export default function AdminPage() {
                             <div className="flex flex-wrap gap-2">
                             <button
                               onClick={() => {
-                                const defaults = getDefaultBonoDateRange();
                                 setAssignBonoClient(client);
-                                setAssignBonoTamano(240);
-                                setAssignBonoStartDate(defaults.startDate);
-                                setAssignBonoEndDate(defaults.endDate);
-                                setAssignBonoError('');
                                 setShowAssignBonoModal(true);
                               }}
                               className={cn(BONO_ACTION_BTN_CLASS, 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] hover:bg-[var(--color-accent-dim)]')}
@@ -4173,8 +4270,13 @@ export default function AdminPage() {
                                 <Dumbbell className="h-6 w-6 text-[var(--color-accent-val)]" />
                               </div>
                               <div className="min-w-0 pt-0.5">
-                                <h3 className="truncate font-semibold uppercase tracking-wide text-[var(--color-text-primary)]">
-                                  {trainer.name}
+                                <h3 className="flex flex-wrap items-center gap-2 font-semibold uppercase tracking-wide text-[var(--color-text-primary)]">
+                                  <span className="truncate">{trainer.name}</span>
+                                  {trainer.offersNutrition === true && (
+                                    <span className="rounded-full border border-lime-500/30 bg-lime-500/10 px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-lime-400">
+                                      Nutrición
+                                    </span>
+                                  )}
                                 </h3>
                                 <p className="mt-2 text-sm leading-6 text-[var(--color-text-secondary)]">
                                   <span className="font-semibold text-[var(--color-text-primary)]">
@@ -4203,6 +4305,31 @@ export default function AdminPage() {
                                 onClick={() => setSelectedTrainerStatsId(trainer.id)}
                               >
                                 Estadísticas
+                              </PremiumButton>
+                              <PremiumButton
+                                variant="outline"
+                                size="sm"
+                                icon={<Apple className="h-4 w-4" />}
+                                aria-pressed={trainer.offersNutrition === true}
+                                onClick={async () => {
+                                  const next = trainer.offersNutrition !== true;
+                                  try {
+                                    await updateTrainerNutrition(trainer.id, next);
+                                    setTrainers((prev) => prev.map((item) => (
+                                      item.id === trainer.id ? { ...item, offersNutrition: next } : item
+                                    )));
+                                    await addActivityLog({
+                                      action: 'trainer_nutrition_updated',
+                                      adminEmail: user?.email || 'unknown',
+                                      details: `${trainer.name}: ${next ? 'atiende' : 'no atiende'} nutrición`,
+                                    });
+                                  } catch (err) {
+                                    console.error('Error updating trainer nutrition flag:', err);
+                                    alert('Error al actualizar el profesional.');
+                                  }
+                                }}
+                              >
+                                {trainer.offersNutrition === true ? 'Quitar nutrición' : 'Atiende nutrición'}
                               </PremiumButton>
                               <PremiumButton
                                 variant="ghost"
@@ -6724,11 +6851,28 @@ export default function AdminPage() {
                         )}
                       </div>
 
+                      <BonoSizesEditor
+                        key={siteConfig.bonoSizesMinutes.join(',')}
+                        savedSizes={siteConfig.bonoSizesMinutes}
+                        onSave={async (sizes) => {
+                          await updateSiteConfigFS({ bonoSizesMinutes: sizes });
+                          setSiteConfig(prev => ({ ...prev, bonoSizesMinutes: sizes }));
+                          await addActivityLog({
+                            action: 'bono_config_updated',
+                            adminEmail: user?.email || 'unknown',
+                            details: `Tamaños de bono: ${sizes.map(formatBonoSize).join(' / ')}`,
+                          });
+                        }}
+                      />
+
                       {/* Current saved bono config */}
                       <div className="mt-6 pt-4 border-t border-white/10">
                         <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-2">Configuración Actual</h3>
                         <div className="text-sm text-[var(--color-text-secondary)]">
                           Expiración: <strong className="text-[var(--color-text-primary)]">{siteConfig.bonoExpirationMonths || 1} mes(es)</strong>
+                        </div>
+                        <div className="text-sm text-[var(--color-text-secondary)]">
+                          Tamaños: <strong className="text-[var(--color-text-primary)]">{siteConfig.bonoSizesMinutes.map(formatBonoSize).join(' / ')}</strong>
                         </div>
                       </div>
                     </GlassCard>
@@ -7133,6 +7277,49 @@ export default function AdminPage() {
                         </div>
 
                         <div>
+                          <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Tipo de cita</label>
+                          <div className="grid grid-cols-2 gap-2">
+                            {(['training', 'nutrition'] as const).map((type) => (
+                              <button
+                                key={type}
+                                type="button"
+                                aria-pressed={createAppointmentForm.appointmentType === type}
+                                onClick={() => setCreateAppointmentForm(prev => {
+                                  if (prev.appointmentType === type) return prev;
+                                  const eligible = trainersForAppointmentType(trainers, type);
+                                  return {
+                                    ...prev,
+                                    appointmentType: type,
+                                    // Nutrición: 30 min, sin recurrencia y sin descontar minutos del bono.
+                                    bookingType: type === 'nutrition' ? 'single' : prev.bookingType,
+                                    durationMinutes: type === 'nutrition' ? NUTRITION_DURATION_MINUTES : prev.durationMinutes,
+                                    assignedTrainer: eligible.some((trainer) => trainer.id === prev.assignedTrainer)
+                                      ? prev.assignedTrainer
+                                      : eligible[0]?.id ?? '',
+                                    time: '',
+                                    endDate: '',
+                                  };
+                                })}
+                                className={cn(
+                                  'px-4 py-3 rounded-xl border text-sm font-medium transition-colors',
+                                  createAppointmentForm.appointmentType === type
+                                    ? 'bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)]'
+                                    : 'bg-muted/10 border-border text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                                )}
+                              >
+                                {APPOINTMENT_TYPE_LABELS[type]}
+                              </button>
+                            ))}
+                          </div>
+                          {createAppointmentForm.appointmentType === 'nutrition' && (
+                            <p className="mt-2 text-xs text-[var(--color-text-secondary)]">
+                              Consulta de 30 minutos. No descuenta minutos del bono y no admite recurrencia.
+                            </p>
+                          )}
+                        </div>
+
+                        {createAppointmentForm.appointmentType === 'training' && (
+                        <div>
                           <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Tipo de reserva</label>
                           <div className="grid grid-cols-2 gap-2">
                             {([
@@ -7155,6 +7342,7 @@ export default function AdminPage() {
                             ))}
                           </div>
                         </div>
+                        )}
 
                         <div className="grid sm:grid-cols-2 gap-4">
                           <div>
@@ -7172,6 +7360,7 @@ export default function AdminPage() {
                             <PremiumSelect
                               id="create-appointment-duration"
                               ariaLabel="Duracion"
+                              disabled={createAppointmentForm.appointmentType === 'nutrition'}
                               value={String(createAppointmentForm.durationMinutes)}
                               onChange={(value) => setCreateAppointmentForm(prev => ({ ...prev, durationMinutes: Number(value) as 30 | 45 | 60, time: '', endDate: '' }))}
                               options={[
@@ -7188,23 +7377,30 @@ export default function AdminPage() {
                             <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Servicio *</label>
                             <input
                               type="text"
-                              value={createAppointmentForm.serviceType}
+                              value={createAppointmentForm.appointmentType === 'nutrition' ? 'Consulta de nutrición' : createAppointmentForm.serviceType}
                               readOnly
                               className="w-full px-4 py-3 rounded-xl bg-muted/30 border border-border text-[var(--color-text-secondary)] cursor-not-allowed"
                             />
                           </div>
                           <div>
-                            <label htmlFor="create-appointment-trainer" className="block text-sm text-[var(--color-text-secondary)] mb-2">Entrenador *</label>
+                            <label htmlFor="create-appointment-trainer" className="block text-sm text-[var(--color-text-secondary)] mb-2">
+                              {createAppointmentForm.appointmentType === 'nutrition' ? 'Profesional de nutrición *' : 'Entrenador *'}
+                            </label>
                             <PremiumSelect
                               id="create-appointment-trainer"
                               ariaLabel="Entrenador"
                               value={createAppointmentForm.assignedTrainer}
                               onChange={(value) => setCreateAppointmentForm(prev => ({ ...prev, assignedTrainer: value }))}
                               options={[
-                                { value: '', label: 'Seleccionar entrenador' },
-                                ...activeTrainers.map((trainer) => ({ value: trainer.id, label: trainer.name })),
+                                { value: '', label: createAppointmentForm.appointmentType === 'nutrition' ? 'Seleccionar profesional' : 'Seleccionar entrenador' },
+                                ...trainersForAppointmentType(activeTrainers, createAppointmentForm.appointmentType)
+                                  .map((trainer) => ({ value: trainer.id, label: trainer.name })),
                               ]}
                             />
+                            {createAppointmentForm.appointmentType === 'nutrition'
+                              && trainersForAppointmentType(activeTrainers, 'nutrition').length === 0 && (
+                              <p className="mt-2 text-xs text-amber-400">No hay profesionales de nutrición. Márcalos en la pestaña Equipo.</p>
+                            )}
                           </div>
                         </div>
 
@@ -7731,187 +7927,33 @@ export default function AdminPage() {
                 ASSIGN BONO MODAL
                 ============================================ */}
             <AnimatePresence>
-              {showAssignBonoModal && assignBonoClient && (
-                <motion.div
-                  key="assign-bono-modal"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-                  onClick={() => setShowAssignBonoModal(false)}
-                >
-                  <motion.div
-                    initial={{ scale: 0.95, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.95, opacity: 0 }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-full max-w-lg"
-                  >
-                    <GlassCard className="p-6">
-                      <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-1">Asignar Bono</h2>
-                      <p className="text-sm text-[var(--color-text-secondary)] mb-6">
-                        Asigna un bono a <strong className="text-[var(--color-text-primary)]">{assignBonoClient.name}</strong>
-                      </p>
-
-                      {/* Warning if client already has active bono */}
-                      {clientBonos[assignBonoClient.uid] && (
-                        <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm flex items-center gap-2">
-                          <AlertCircle className="w-4 h-4 shrink-0" />
-                          Este cliente ya tiene un bono activo. Asignar uno nuevo reemplazará el actual.
-                        </div>
-                      )}
-
-                      <div className="space-y-5">
-                        {/* Tamaño del bono */}
-                        <div>
-                          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Tamaño del Bono</label>
-                          <div className="flex gap-3">
-                            {([240, 360, 480] as const).map((tamano) => (
-                              <button
-                                key={tamano}
-                                onClick={() => setAssignBonoTamano(tamano)}
-                                className={cn(
-                                  "flex-1 px-4 py-3 rounded-xl border text-sm font-medium transition-all",
-                                  assignBonoTamano === tamano
-                                    ? "bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)]"
-                                    : "bg-muted/20 border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                                )}
-                              >
-                                {tamano / 60}h / mes
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Fechas de validez */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Fecha de inicio</label>
-                            <input
-                              type="date"
-                              value={assignBonoStartDate}
-                              onChange={(e) => {
-                                setAssignBonoStartDate(e.target.value);
-                                setAssignBonoError('');
-                              }}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Fecha de fin</label>
-                            <input
-                              type="date"
-                              value={assignBonoEndDate}
-                              onChange={(e) => {
-                                setAssignBonoEndDate(e.target.value);
-                                setAssignBonoError('');
-                              }}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
-                            />
-                          </div>
-                        </div>
-
-                        {/* Summary */}
-                        <div className="p-4 rounded-xl bg-muted/10 border border-white/5">
-                          <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-3">Resumen del Bono</h3>
-                          <div className="space-y-2 text-sm">
-                            <div className="flex justify-between">
-                              <span className="text-[var(--color-text-secondary)]">Cliente</span>
-                              <span className="text-[var(--color-text-primary)]">{assignBonoClient.name}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-[var(--color-text-secondary)]">Tipo</span>
-                              <span className="text-[var(--color-text-primary)]">Bono Mensual</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-[var(--color-text-secondary)]">Horas</span>
-                              <span className="text-[var(--color-text-primary)]">
-                                {assignBonoTamano / 60}h ({assignBonoTamano} min)
-                              </span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-[var(--color-text-secondary)]">Validez</span>
-                              <span className="text-[var(--color-text-primary)]">
-                                {assignBonoStartDate || '--'} - {assignBonoEndDate || '--'}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {assignBonoError && (
-                        <div className="mt-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm flex items-center gap-2">
-                          <AlertCircle className="w-4 h-4 shrink-0" />
-                          {assignBonoError}
-                        </div>
-                      )}
-
-                      {/* Actions */}
-                      <div className="flex gap-3 justify-end mt-6">
-                        <button
-                          onClick={() => setShowAssignBonoModal(false)}
-                          className="px-4 py-2.5 rounded-xl border border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-                        >
-                          Cancelar
-                        </button>
-                        <button
-                          disabled={savingBono}
-                          onClick={async () => {
-                            const validationError = validateBonoDateInputs(assignBonoStartDate, assignBonoEndDate);
-                            const fechaAsignacion = startOfLocalDayIso(assignBonoStartDate);
-                            const fechaExpiracion = endOfLocalDayIso(assignBonoEndDate);
-
-                            if (validationError || !fechaAsignacion || !fechaExpiracion) {
-                              setAssignBonoError(validationError || 'Revisa las fechas del bono.');
-                              return;
-                            }
-
-                            setSavingBono(true);
-                            try {
-                              // Deactivate existing bono if any
-                              const existingBono = clientBonos[assignBonoClient.uid];
-                              if (existingBono) {
-                                await deactivateBono(existingBono.id);
-                              }
-
-                              await assignBono({
-                                userId: assignBonoClient.uid,
-                                tamano: assignBonoTamano,
-                                minutosTotales: assignBonoTamano,
-                                minutosRestantes: assignBonoTamano,
-                                fechaAsignacion,
-                                fechaExpiracion,
-                                estado: 'activo',
-                                historial: [],
-                                asignadoPor: user?.email || 'admin',
-                              });
-
-                              await addActivityLog({
-                                action: 'bono_assigned',
-                                adminEmail: user?.email || 'unknown',
-                                details: `Cliente: ${assignBonoClient.name}, Bono Mensual ${assignBonoTamano / 60}h, Validez: ${assignBonoStartDate} - ${assignBonoEndDate}`,
-                              });
-
-                              setShowAssignBonoModal(false);
-                              setAssignBonoError('');
-                              await refreshData();
-                            } catch (err) {
-                              console.error('Error assigning bono:', err);
-                              alert('Error al asignar el bono');
-                            } finally {
-                              setSavingBono(false);
-                            }
-                          }}
-                          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[var(--color-accent-val)] to-emerald-bright text-[var(--color-bg-base)] font-semibold hover:shadow-lg hover:shadow-emerald/25 transition-all disabled:opacity-50 flex items-center gap-2"
-                        >
-                          {savingBono ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Ticket className="w-4 h-4" />}
-                          {savingBono ? 'Asignando...' : 'Asignar Bono'}
-                        </button>
-                      </div>
-                    </GlassCard>
-                  </motion.div>
-                </motion.div>
-              )}
+              {showAssignBonoModal && assignBonoClient && (() => {
+                const defaults = getDefaultBonoDateRange();
+                return (
+                  <AssignBonoModal
+                    key="assign-bono-modal"
+                    client={assignBonoClient}
+                    activeBono={clientBonos[assignBonoClient.uid] ?? undefined}
+                    sizes={siteConfig.bonoSizesMinutes}
+                    defaultStartDate={defaults.startDate}
+                    defaultEndDate={defaults.endDate}
+                    buildDates={(startDate, endDate) => {
+                      const validationError = validateBonoDateInputs(startDate, endDate);
+                      const fechaAsignacion = startOfLocalDayIso(startDate);
+                      const fechaExpiracion = endOfLocalDayIso(endDate);
+                      if (validationError || !fechaAsignacion || !fechaExpiracion) {
+                        return { error: validationError || 'Revisa las fechas del bono.' };
+                      }
+                      return { fechaAsignacion, fechaExpiracion };
+                    }}
+                    trainers={trainers}
+                    appointments={appointments}
+                    adminEmail={user?.email || ''}
+                    onClose={() => setShowAssignBonoModal(false)}
+                    onAssigned={refreshData}
+                  />
+                );
+              })()}
             </AnimatePresence>
 
             {/* ============================================
@@ -8283,6 +8325,47 @@ export default function AdminPage() {
             </AnimatePresence>
 
             {/* ============================================
+                PROPONER OTRA HORA (contrapropuesta)
+                ============================================ */}
+            <AnimatePresence>
+              {proposalTarget && (
+                <AdminSlotPickerModal
+                  key="proposal-picker"
+                  title={`Proponer otra hora a ${proposalTarget.name}`}
+                  description={proposalTarget.preferredSlots[0]
+                    ? `Hora solicitada: ${formatSlotLabel(proposalTarget.preferredSlots[0])}. El cliente recibirá la propuesta y deberá aceptarla desde la app.`
+                    : 'El cliente recibirá la propuesta y deberá aceptarla desde la app.'}
+                  confirmLabel="Enviar propuesta"
+                  appointmentType={getAppointmentType(proposalTarget)}
+                  durationMinutes={Number(proposalTarget.duration) as 30 | 45 | 60}
+                  customerUserId={proposalTarget.userId}
+                  initialSlot={null}
+                  initialTrainerId={proposalTarget.proposal?.proposedTrainer ?? proposalTarget.assignedTrainer ?? null}
+                  trainers={trainers}
+                  appointments={appointments}
+                  excludeAppointmentIds={[proposalTarget.id]}
+                  onConfirm={async ({ slot, trainerId }) => {
+                    await proposeAppointmentSlotFromAdmin({
+                      appointmentId: proposalTarget.id,
+                      slot,
+                      assignedTrainer: trainerId,
+                    });
+                    await addActivityLog({
+                      action: 'appointment_slot_proposed',
+                      adminEmail: user?.email || 'unknown',
+                      details: `Cita ${proposalTarget.id}: propuesta ${slot.date} ${slot.time}`,
+                    });
+                    setProposalTarget(null);
+                    await refreshData();
+                    const t = toast({ title: 'Propuesta enviada', description: 'El cliente la verá en la app y recibirá un aviso.' });
+                    setTimeout(() => t.dismiss(), 3500);
+                  }}
+                  onClose={() => setProposalTarget(null)}
+                />
+              )}
+            </AnimatePresence>
+
+            {/* ============================================
                 APPROVAL MODAL
                 ============================================ */}
             <AnimatePresence>
@@ -8305,7 +8388,9 @@ export default function AdminPage() {
                     <GlassCard className="p-6">
                       <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-1">Aprobar Cita</h2>
                        <p className="text-sm text-[var(--color-text-secondary)] mb-6">
-                        Asigna un entrenador antes de confirmar. El campo es opcional.
+                        {getAppointmentType(appointments.find(a => a.id === selectedAppointmentId)) === 'nutrition'
+                          ? 'Consulta de nutrición: asigna el profesional de nutrición que la atenderá.'
+                          : 'Asigna un entrenador antes de confirmar. El campo es opcional.'}
                       </p>
 
                       {/* Pick one of the client's preferred slots as approved slot */}
@@ -8348,20 +8433,29 @@ export default function AdminPage() {
 
                       <div className="space-y-4 mb-6">
                         <div>
-                          <label htmlFor="appointment-approval-trainer" className="block text-sm text-[var(--color-text-secondary)] mb-2">Entrenador asignado</label>
-                          <PremiumSelect
-                            id="appointment-approval-trainer"
-                            ariaLabel="Entrenador asignado"
-                            value={approvalData.assignedTrainer}
-                            onChange={(value) => setApprovalData({ ...approvalData, assignedTrainer: value })}
-                            options={[
-                              { value: '', label: 'Sin asignar' },
-                              ...trainers.filter((trainer) => trainer.active).map((trainer) => ({
-                                value: trainer.id,
-                                label: trainer.name,
-                              })),
-                            ]}
-                          />
+                          <label htmlFor="appointment-approval-trainer" className="block text-sm text-[var(--color-text-secondary)] mb-2">
+                            {getAppointmentType(appointments.find(a => a.id === selectedAppointmentId)) === 'nutrition' ? 'Profesional de nutrición' : 'Entrenador asignado'}
+                          </label>
+                          {(() => {
+                            const approvalType = getAppointmentType(appointments.find(a => a.id === selectedAppointmentId));
+                            return (
+                              <PremiumSelect
+                                id="appointment-approval-trainer"
+                                ariaLabel="Entrenador asignado"
+                                value={approvalData.assignedTrainer}
+                                onChange={(value) => setApprovalData({ ...approvalData, assignedTrainer: value })}
+                                options={[
+                                  approvalType === 'nutrition'
+                                    ? { value: '', label: 'Selecciona un profesional', disabled: true }
+                                    : { value: '', label: 'Sin asignar' },
+                                  ...trainersForAppointmentType(trainers, approvalType).map((trainer) => ({
+                                    value: trainer.id,
+                                    label: trainer.name,
+                                  })),
+                                ]}
+                              />
+                            );
+                          })()}
                         </div>
                         <div>
                           <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Tipo de sesión</label>
@@ -8401,6 +8495,21 @@ export default function AdminPage() {
                             if (appt?.serviceType) extra.sessionType = appt.serviceType;
                             if (appt && appt.preferredSlots.length > 0) {
                               extra.approvedSlot = appt.preferredSlots[0];
+                            }
+                            if (appt && getAppointmentType(appt) === 'nutrition') {
+                              if (!extra.assignedTrainer) {
+                                alert('Selecciona el profesional de nutrición que atenderá la consulta.');
+                                return;
+                              }
+                              if (extra.approvedSlot && hasProfessionalConflict(appointments, {
+                                trainerId: extra.assignedTrainer,
+                                slot: extra.approvedSlot,
+                                durationMinutes: Number(appt.duration),
+                                excludeAppointmentId: appt.id,
+                              })) {
+                                alert('El profesional ya tiene otra cita en esta franja. Elige otro profesional o propón otra hora.');
+                                return;
+                              }
                             }
                             await handleStatusUpdate(selectedAppointmentId, 'approved', extra);
                           }}

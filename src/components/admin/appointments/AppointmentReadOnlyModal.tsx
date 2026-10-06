@@ -5,7 +5,7 @@ import { X } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { cn } from '@/lib/utils';
-import type { Appointment } from '@/types';
+import { getAppointmentType, getOpenCustomerConfirmation, type Appointment } from '@/types';
 import { formatLongDate, resolveAppointmentSchedule } from './appointment-calendar-utils';
 
 const EMPTY = '—';
@@ -122,7 +122,16 @@ export function AppointmentReadOnlyModal({
             <DetailRow label="Email" value={displayText(appointment.email)} />
             <DetailRow label="Teléfono" value={displayText(appointment.phone)} />
             <DetailRow label="Entrenador" value={displayText(trainerName)} />
+            <DetailRow label="Tipo de cita" value={getAppointmentType(appointment) === 'nutrition' ? 'Nutrición' : 'Entrenamiento'} />
             <DetailRow label="Tipo" value={displayText(appointment.sessionType || appointment.serviceType)} />
+            {getOpenCustomerConfirmation(appointment) && (
+              <DetailRow
+                label="Confirmación"
+                value={getOpenCustomerConfirmation(appointment)?.kind === 'proposal'
+                  ? 'Propuesta enviada, esperando al cliente'
+                  : 'Cita renovada, esperando confirmación del cliente'}
+              />
+            )}
             {appointment.recurrenceSeriesId && (
               <>
                 <DetailRow label="Reserva" value="Entrenamiento recurrente" />

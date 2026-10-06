@@ -23,6 +23,14 @@ import {
   normalizeSiteConfig,
   type SiteConfig,
 } from "./siteConfig.js";
+import { withdrawOpenProposalPatch } from "./appointmentProposals.js";
+import {
+  appointmentRangeKeys,
+  getAppointmentType,
+  rangesOverlap,
+  SLOT_REJECTION_MESSAGES,
+  slotRangeKeys,
+} from "./slotValidation.js";
 import {
   copyDefinedFields,
   firstReplacementIntersection,
@@ -72,11 +80,13 @@ interface AppointmentData {
   date?: string;
   time?: string;
   recurrenceSeriesId?: string;
+  appointmentType?: unknown;
   [key: string]: unknown;
 }
 
 interface TrainerData {
   active?: boolean;
+  offersNutrition?: boolean;
 }
 
 interface SlotOccupancyData {
@@ -458,6 +468,16 @@ async function rescheduleAppointmentFromAdmin(
         .where("status", "in", ["pending", "approved"])
       : undefined;
     const occupancyRefs = occupancyKeysToRead.map((key) => deps.db.collection("slot_occupancy").doc(key));
+    // Nutrition professionals cannot be double-booked (confirmed business rule).
+    const checkProfessional = getAppointmentType(appointment) === "nutrition"
+      && Boolean(input.assignedTrainer)
+      && (slotChanged || trainerChanged)
+      && targetState.isFuture;
+    const trainerAppointmentsQuery = checkProfessional && input.assignedTrainer
+      ? deps.db.collection("appointments")
+        .where("assignedTrainer", "==", input.assignedTrainer)
+        .where("status", "in", ["pending", "approved"])
+      : undefined;
     const [
       trainerSnap,
       recurrenceSeriesSnap,
@@ -466,6 +486,7 @@ async function rescheduleAppointmentFromAdmin(
       blockedSnap,
       userAppointmentsSnap,
       occupancySnaps,
+      trainerAppointmentsSnap,
     ] = await Promise.all([
       trainerRef ? transaction.get(trainerRef) : Promise.resolve(undefined),
       recurrenceSeriesRef ? transaction.get(recurrenceSeriesRef) : Promise.resolve(undefined),
@@ -474,6 +495,7 @@ async function rescheduleAppointmentFromAdmin(
       blockedQuery ? transaction.get(blockedQuery) : Promise.resolve(undefined),
       userAppointmentsQuery ? transaction.get(userAppointmentsQuery) : Promise.resolve(undefined),
       Promise.all(occupancyRefs.map((ref) => transaction.get(ref))),
+      trainerAppointmentsQuery ? transaction.get(trainerAppointmentsQuery) : Promise.resolve(undefined),
     ]);
 
     if (recurrenceSeriesId) {
@@ -495,6 +517,17 @@ async function rescheduleAppointmentFromAdmin(
         const currentState = currentSlot ? classifyMadridCivilSlot(currentSlot, transactionNow) : undefined;
         if (trainerChanged || !currentState?.isPast || !targetState.isPast) {
           throwHttps("failed-precondition", "El entrenador seleccionado no esta activo.", "trainer_inactive");
+        }
+      }
+      if (checkProfessional) {
+        if (trainer.offersNutrition !== true) {
+          throwHttps("failed-precondition", SLOT_REJECTION_MESSAGES.trainer_not_nutrition, "trainer_not_nutrition");
+        }
+        const target = slotRangeKeys(input.slot, duration);
+        const busy = trainerAppointmentsSnap?.docs.some((snap) => snap.id !== selectedRef.id
+          && rangesOverlap(target, appointmentRangeKeys(snap.data() as AppointmentData)));
+        if (busy) {
+          throwHttps("failed-precondition", SLOT_REJECTION_MESSAGES.professional_conflict, "professional_conflict");
         }
       }
     }
@@ -560,6 +593,13 @@ async function rescheduleAppointmentFromAdmin(
       if (appointment.status === "approved") patch.approvedSlot = input.slot;
     }
     if (trainerChanged) patch.assignedTrainer = input.assignedTrainer;
+    // An open counter-proposal no longer describes the appointment.
+    Object.assign(patch, withdrawOpenProposalPatch(
+      appointment as Parameters<typeof withdrawOpenProposalPatch>[0],
+      adminUid,
+      now,
+      () => FieldValue.delete(),
+    ) ?? {});
     transaction.set(selectedRef, patch, { merge: true });
     occupancyWrites.forEach((write) => {
       transaction.set(

@@ -355,7 +355,11 @@ assert.match(indexSource, /export const updateOwnAppointmentSlot\s*=\s*onCall/);
 assert.match(indexSource, /reconcileOwnAppointmentReschedule\(\{/);
 assert.match(indexSource, /releaseApprovedAppointmentOccupancyInTransaction/);
 assert.match(indexSource, /isRescheduleCapacityAvailable/);
-assert.match(indexSource, /isSlotAtCapacity/);
+// Booking capacity/blocked/conflict checks live in the shared slot validator.
+const slotValidationSource = fs.readFileSync(path.join(__dirname, "../src/slotValidation.ts"), "utf8");
+assert.match(indexSource, /evaluateSlot\(day, \{/);
+assert.match(slotValidationSource, /isRescheduleCapacityAvailable/);
+assert.match(slotValidationSource, /config\.maxCapacity/);
 assert.match(indexSource, /config\.maxCapacity/);
 assert.doesNotMatch(indexSource, /const MAX_CAPACITY\s*=\s*2/);
 assert.match(indexSource, /shouldReconcileAppointmentTransition\("approved", appointment\.status\)/);

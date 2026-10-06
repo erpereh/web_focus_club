@@ -50,6 +50,12 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // BONO RENEWALS (summary of "repeat previous appointments"; written by Cloud Functions only)
+    match /bono_renewals/{renewalId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
     // TRAINERS
     match /trainers/{trainerId} {
       allow read: if isVerified() || isAdmin();

@@ -207,6 +207,8 @@ export function getRecurringRescheduleErrorMessage(error: unknown, fallback: str
         series_has_historical_occurrences: 'Esta serie ya contiene sesiones pasadas y no puede volver completa a pendiente. Puedes modificar las sesiones futuras o corregir una cita individualmente.',
         trainer_not_found: 'No se ha encontrado el entrenador indicado.',
         trainer_inactive: 'El entrenador seleccionado no está activo.',
+        trainer_not_nutrition: 'El profesional seleccionado no atiende consultas de nutrición.',
+        professional_conflict: 'El profesional ya tiene otra cita en esta franja.',
         invalid_duration: 'La duración de la cita no es válida.',
         invalid_interval: 'El intervalo de la serie no es válido.',
         invalid_current_slot: 'La cita actual no tiene una franja válida.',

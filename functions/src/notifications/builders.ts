@@ -61,6 +61,8 @@ export interface AppointmentNoticeInput {
   sessionType: string;
   trainerName: string;
   duration?: string;
+  /** Missing = training. Nutrition copy says "consulta" instead of "sesión". */
+  appointmentType?: string;
   /**
    * True only when the appointment document records an actual refund
    * (`minutesRefundedAt`). Copy never claims a refund otherwise.
@@ -81,7 +83,7 @@ const APPOINTMENT_PUSH: Record<CustomerAppointmentEvent, { title: string; body: 
   },
   appointment_confirmed: {
     title: "Cita confirmada",
-    body: (when) => `Tu sesión del ${when} está confirmada.`,
+    body: (when, input) => `Tu ${sessionNoun(input)} del ${when} está confirmada.`,
   },
   appointment_rescheduled: {
     title: "Tu cita ha cambiado",
@@ -101,7 +103,19 @@ const APPOINTMENT_PUSH: Record<CustomerAppointmentEvent, { title: string; body: 
     title: "Cita eliminada",
     body: (when, input) => withRefund(`Tu cita del ${when} se ha eliminado de tu agenda.`, input.minutesRefunded),
   },
+  appointment_proposed: {
+    title: "Te proponemos otra hora",
+    body: (when) => `La hora solicitada no está disponible. Te proponemos el ${when}. ¿Quieres confirmarla?`,
+  },
+  appointment_proposal_declined: {
+    title: "Propuesta rechazada",
+    body: (_when, input) => withRefund("Has rechazado la hora propuesta. Puedes solicitar otra cita cuando quieras.", input.minutesRefunded),
+  },
 };
+
+function sessionNoun(input: AppointmentNoticeInput): string {
+  return input.appointmentType === "nutrition" ? "consulta de nutrición" : "sesión";
+}
 
 export function buildAppointmentNotice(input: AppointmentNoticeInput): CustomerNotification {
   const when = shortWhen(input.slot) || "tu próxima sesión";
@@ -110,7 +124,9 @@ export function buildAppointmentNotice(input: AppointmentNoticeInput): CustomerN
     ? input.status
     : "pending") as AppointmentEmailStatus;
   const rendered = appointmentCustomerEventEmail(input.event, {
-    action: input.event === "appointment_confirmed" || input.event === "appointment_requested" ? "confirmed" : "deleted",
+    action: input.event === "appointment_confirmed"
+      || input.event === "appointment_requested"
+      || input.event === "appointment_proposed" ? "confirmed" : "deleted",
     status: emailStatus,
     appointmentId: input.appointmentId,
     customerName: input.customerName,
@@ -199,6 +215,10 @@ const SERIES_PUSH: Record<SeriesNotificationEvent, { title: string; body: (n: nu
     title: "Citas recurrentes pendientes",
     body: (n) => `${n} ${n === 1 ? "sesión vuelve" : "sesiones vuelven"} a estar pendientes de confirmación.`,
   },
+  appointment_series_renewal_pending: {
+    title: "Citas renovadas por confirmar",
+    body: (n) => `Tienes ${n} ${n === 1 ? "cita renovada pendiente" : "citas renovadas pendientes"} de confirmar.`,
+  },
 };
 
 const SERIES_STATUS: Record<SeriesNotificationEvent, string> = {
@@ -208,6 +228,7 @@ const SERIES_STATUS: Record<SeriesNotificationEvent, string> = {
   appointment_series_cancelled: "cancelled",
   appointment_series_rescheduled: "approved",
   appointment_series_returned_to_pending: "pending",
+  appointment_series_renewal_pending: "pending",
 };
 
 export function buildSeriesNotice(input: SeriesNoticeInput): CustomerNotification {

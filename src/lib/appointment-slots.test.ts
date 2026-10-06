@@ -13,6 +13,7 @@ const config = (slotInterval: 15 | 30 | 45 | 60): SiteConfig => ({
     bonoExpirationMonths: 1,
     maintenanceMode: false,
     maxCapacity: 4,
+    bonoSizesMinutes: [240, 360, 480],
 });
 
 describe('generateTimeSlots', () => {

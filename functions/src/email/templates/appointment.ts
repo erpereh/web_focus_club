@@ -67,7 +67,9 @@ export type CustomerAppointmentEvent =
   | "appointment_rescheduled"
   | "appointment_rejected"
   | "appointment_cancelled"
-  | "appointment_deleted";
+  | "appointment_deleted"
+  | "appointment_proposed"
+  | "appointment_proposal_declined";
 
 function refundNote(data: AppointmentEmailData): string {
   return data.minutesRefunded ? " Los minutos reservados se han devuelto a tu bono." : "";
@@ -111,6 +113,20 @@ function customerEventCopy(event: CustomerAppointmentEvent, data: AppointmentEma
         heading: "No hemos podido confirmar tu cita",
         intro: `${hi} lamentamos no poder confirmar tu solicitud para esta fecha. Puedes elegir otro horario desde tu portal.`,
         preheader: `Tu solicitud para ${when} no ha podido confirmarse.`,
+      };
+    case "appointment_proposed":
+      return {
+        subject: "Te proponemos otra hora para tu cita · Focus Club",
+        heading: "Te proponemos otra hora",
+        intro: `${hi} la hora solicitada no está disponible. Te proponemos ${when}. ¿Quieres confirmarla? Puedes aceptarla o rechazarla desde la app.`,
+        preheader: `Nueva hora propuesta: ${when}.`,
+      };
+    case "appointment_proposal_declined":
+      return {
+        subject: "Has rechazado la hora propuesta · Focus Club",
+        heading: "Propuesta rechazada",
+        intro: `${hi} hemos registrado que no te viene bien la hora propuesta. Puedes solicitar otra cita cuando quieras.${refundNote(data)}`,
+        preheader: `Propuesta rechazada: ${when}.`,
       };
     case "appointment_deleted":
       return {
@@ -182,6 +198,9 @@ export function appointmentCustomerEventEmail(
       rows.push(["Antes", [formatDisplayDate(previousSlot.date), previousSlot.time].join(" · ")]);
     }
     rows.push(["Estado", STATUS_LABELS[data.status]]);
+  }
+  if (event === "appointment_proposed" && previousSlot) {
+    rows.push(["Hora solicitada", [formatDisplayDate(previousSlot.date), previousSlot.time].join(" · ")]);
   }
   const footerNote = "Recibes este email porque tienes una cita en Focus Club.";
 

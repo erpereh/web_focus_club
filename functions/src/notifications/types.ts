@@ -15,12 +15,15 @@ export const APPOINTMENT_EVENTS = [
   "appointment_cancelled",
   "appointment_deleted",
   "appointment_reminder",
+  "appointment_proposed",
+  "appointment_proposal_declined",
   "appointment_series_requested",
   "appointment_series_confirmed",
   "appointment_series_rejected",
   "appointment_series_cancelled",
   "appointment_series_rescheduled",
   "appointment_series_returned_to_pending",
+  "appointment_series_renewal_pending",
 ] as const;
 
 export const BONO_EVENTS = [

@@ -30,6 +30,8 @@ export interface CalendarAppointmentLike {
   sessionType?: unknown;
   reason?: unknown;
   comment?: unknown;
+  appointmentType?: unknown;
+  proposal?: unknown;
 }
 
 export interface CalendarClientInfo {
@@ -168,6 +170,17 @@ export function resolveAppointmentSlot(appointment: CalendarAppointmentLike): Ti
     ?? legacyDateTimeSlot(appointment);
 }
 
+function isNutrition(appointment: CalendarAppointmentLike): boolean {
+  return appointment.appointmentType === "nutrition";
+}
+
+/** Slot of an open admin counter-proposal, shown on the requested event. */
+function pendingProposalSlot(appointment: CalendarAppointmentLike): TimeSlot | undefined {
+  const proposal = appointment.proposal;
+  if (!isRecord(proposal) || proposal.status !== "pending") return undefined;
+  return isTimeSlot(proposal.proposedSlot) ? proposal.proposedSlot : undefined;
+}
+
 export function buildCalendarSyncHash(input: CalendarEventBuildInput): string {
   const appointment = input.appointment;
   const slot = resolveAppointmentSlot(appointment);
@@ -183,6 +196,9 @@ export function buildCalendarSyncHash(input: CalendarEventBuildInput): string {
     assignedTrainer: asString(appointment.assignedTrainer),
     trainerName: input.trainerName,
     comment: asString(appointment.comment) || asString(appointment.reason),
+    // Only present when relevant, so hashes of existing training events stay stable.
+    ...(isNutrition(appointment) ? { appointmentType: "nutrition" } : {}),
+    ...(pendingProposalSlot(appointment) ? { proposedSlot: pendingProposalSlot(appointment) } : {}),
   });
 
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
@@ -205,15 +221,18 @@ export function buildCalendarEventPayload(input: CalendarEventBuildInput): Calen
   const startDateTime = `${slot.date}T${slot.time}:00`;
   const endDateTime = addMinutesToLocalDateTime(slot, durationMinutes);
   const schedule = `${slot.date} ${slot.time} - ${durationMinutes} min`;
+  const proposedSlot = pendingProposalSlot(input.appointment);
+  const typeLabel = isNutrition(input.appointment) ? "Nutricion" : "Entrenamiento";
 
   return {
-    summary: `${label} - ${clientName} - ${serviceType || "Servicio"}`,
+    summary: `${label} - ${clientName} - ${serviceType || (isNutrition(input.appointment) ? "Nutricion" : "Servicio")}`,
     description: [
       `Cliente: ${clientName}`,
       `Email: ${email}`,
       `Telefono: ${phone}`,
       "",
       `Servicio: ${serviceType}`,
+      `Tipo de cita: ${typeLabel}`,
       `Tipo de sesion: ${sessionType}`,
       `Estado: ${status}`,
       `Entrenador: ${trainerName}`,
@@ -226,6 +245,7 @@ export function buildCalendarEventPayload(input: CalendarEventBuildInput): Calen
       "",
       "Horario:",
       schedule,
+      ...(proposedSlot ? ["", `Propuesta pendiente del cliente: ${proposedSlot.date} ${proposedSlot.time}`] : []),
     ].join("\n"),
     start: {
       dateTime: startDateTime,
