@@ -96,6 +96,8 @@ import {
   groupBlockedSlots,
   overlapsBlockedSelection,
 } from '@/lib/blocked-slots';
+import { countUpcomingBlockedSlots, splitBlockedDaysByToday } from '@/lib/blocked-slots-summary';
+import { getMadridDateKey } from '@/lib/madrid-date';
 import {
   filterAppointments,
   getTrainerIdFromFilter,
@@ -352,7 +354,9 @@ const durationLabels: Record<string, string> = {
   '90': '90 minutos', // legacy
 };
 
-const BONO_ACTION_BTN_CLASS = 'w-[150px] h-8 px-3 py-1.5 rounded-lg text-xs font-medium inline-flex items-center justify-center gap-1 transition-colors';
+const APPOINTMENTS_PAGE_SIZE = 20;
+const BLOCKED_DAYS_PAGE_SIZE = 10;
+const BONO_ACTION_BTN_CLASS ='w-[150px] h-8 px-3 py-1.5 rounded-lg text-xs font-medium inline-flex items-center justify-center gap-1 transition-colors';
 
 function formatDateInputLocal(date: Date): string {
   const year = date.getFullYear();
@@ -1078,6 +1082,8 @@ export default function AdminPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [trainerFilter, setTrainerFilter] = useState<TrainerFilter>('all');
   const [typeFilter, setTypeFilter] = useState<AppointmentTypeFilter>('all');
+  // Paginación visual de la lista de citas ("Ver más")
+  const [visibleAppointmentsCount, setVisibleAppointmentsCount] = useState(APPOINTMENTS_PAGE_SIZE);
   // "Proponer otra hora" (contrapropuesta al cliente)
   const [proposalTarget, setProposalTarget] = useState<Appointment | null>(null);
   const [appointmentsView, setAppointmentsView] = useState<AppointmentsView>('list');
@@ -1102,6 +1108,10 @@ export default function AdminPage() {
 
   // Estado para horarios bloqueados
   const [blockedSlots, setBlockedSlots] = useState<BlockedSlot[]>([]);
+  // Paginación visual de la lista de días bloqueados
+  const [visibleBlockedDays, setVisibleBlockedDays] = useState(BLOCKED_DAYS_PAGE_SIZE);
+  const [showPastBlockedDays, setShowPastBlockedDays] = useState(false);
+  const [visiblePastBlockedDays, setVisiblePastBlockedDays] = useState(BLOCKED_DAYS_PAGE_SIZE);
 
   // Interactive blocking calendar state
   const nowCal = new Date();
@@ -1422,6 +1432,22 @@ export default function AdminPage() {
       search: appointmentSearch,
     }),
     [appointments, statusFilter, trainerFilter, typeFilter, appointmentSearch],
+  );
+  // Al cambiar cualquier filtro, la lista vuelve a la primera página.
+  const appointmentFiltersKey = `${statusFilter}|${trainerFilter}|${typeFilter}|${appointmentSearch}`;
+  const [pagedAppointmentFiltersKey, setPagedAppointmentFiltersKey] = useState(appointmentFiltersKey);
+  if (pagedAppointmentFiltersKey !== appointmentFiltersKey) {
+    setPagedAppointmentFiltersKey(appointmentFiltersKey);
+    setVisibleAppointmentsCount(APPOINTMENTS_PAGE_SIZE);
+  }
+  const visibleAppointments = filteredAppointments.slice(0, visibleAppointmentsCount);
+  const hiddenAppointmentsCount = filteredAppointments.length - visibleAppointments.length;
+
+  // Franjas bloqueadas de hoy en adelante (Europe/Madrid)
+  const blockedTodayKey = getMadridDateKey(new Date());
+  const upcomingBlockedSlotsCount = useMemo(
+    () => countUpcomingBlockedSlots(blockedSlots, blockedTodayKey),
+    [blockedSlots, blockedTodayKey],
   );
   const trainersForFilter = useMemo(
     () => [...trainers].sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })),
@@ -2983,8 +3009,8 @@ export default function AdminPage() {
             >
               <CalendarOff className="w-5 h-5" />
               <span className="font-medium">Disponibilidad</span>
-              {blockedSlots.length > 0 && (
-                <span className="ml-auto text-xs text-[var(--color-text-secondary)]">{blockedSlots.length}</span>
+              {upcomingBlockedSlotsCount > 0 && (
+                <span className="ml-auto text-xs text-[var(--color-text-secondary)]">{upcomingBlockedSlotsCount}</span>
               )}
             </button>
 
@@ -3209,6 +3235,15 @@ export default function AdminPage() {
                             key={appointment.id}
                             className="flex items-center justify-between p-4 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer"
                             onClick={() => {
+                              // Que la cita esté dentro de la página visible antes de hacer scroll.
+                              const jumpIndex = filterAppointments(appointments, {
+                                statusFilter: 'all',
+                                trainerFilter,
+                                typeFilter,
+                                search: appointmentSearch,
+                              }).findIndex((item) => item.id === appointment.id);
+                              setPagedAppointmentFiltersKey(`all|${trainerFilter}|${typeFilter}|${appointmentSearch}`);
+                              setVisibleAppointmentsCount(Math.max(APPOINTMENTS_PAGE_SIZE, jumpIndex + 1));
                               setStatusFilter('all');
                               setActiveTab('appointments');
                               // Scroll to the appointment after tab switch
@@ -3430,7 +3465,7 @@ export default function AdminPage() {
                     />
                   ) : (
                   <div className="space-y-4">
-                    {filteredAppointments.map((appointment) => {
+                    {visibleAppointments.map((appointment) => {
                       const StatusIcon = statusConfig[appointment.status].icon;
                       const appointmentClient = getClientForAppointment(appointment);
                       return (
@@ -3666,7 +3701,7 @@ export default function AdminPage() {
                                         onClick={() => setProposalTarget(appointment)}
                                         className="flex-1 lg:flex-none"
                                       >
-                                        {customerConfirmationBadge(appointment) === 'proposal_pending' ? 'Cambiar propuesta' : 'Proponer otra hora'}
+                                        {customerConfirmationBadge(appointment) === 'proposal_pending' ? 'Cambiar propuesta' : 'Proponer hora'}
                                       </PremiumButton>
                                     )}
                                     <PremiumButton
@@ -3797,6 +3832,23 @@ export default function AdminPage() {
                         </motion.div>
                       );
                     })}
+                    {filteredAppointments.length > APPOINTMENTS_PAGE_SIZE && (
+                      <div className="flex flex-col items-center gap-3 pt-2">
+                        <p className="text-sm text-[var(--color-text-secondary)]">
+                          Mostrando {visibleAppointments.length} de {filteredAppointments.length} citas
+                        </p>
+                        {hiddenAppointmentsCount > 0 && (
+                          <PremiumButton
+                            variant="outline"
+                            size="sm"
+                            icon={<ChevronDown className="w-4 h-4" />}
+                            onClick={() => setVisibleAppointmentsCount((count) => count + APPOINTMENTS_PAGE_SIZE)}
+                          >
+                            Ver más ({hiddenAppointmentsCount} restantes)
+                          </PremiumButton>
+                        )}
+                      </div>
+                    )}
                     {filteredAppointments.length === 0 && (
                       <GlassCard className="p-12 text-center">
                         <Calendar className="w-16 h-16 mx-auto mb-4 text-[var(--color-text-secondary)] opacity-50" />
@@ -6036,7 +6088,7 @@ export default function AdminPage() {
                   <div className="flex items-center justify-between mb-6">
                     <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Gestión de Disponibilidad</h1>
                     <p className="text-sm text-[var(--color-text-secondary)]">
-                      {blockedSlots.length} franja{blockedSlots.length !== 1 ? 's' : ''} bloqueada{blockedSlots.length !== 1 ? 's' : ''}
+                      {upcomingBlockedSlotsCount} franja{upcomingBlockedSlotsCount !== 1 ? 's' : ''} bloqueada{upcomingBlockedSlotsCount !== 1 ? 's' : ''} de hoy en adelante
                     </p>
                   </div>
 
@@ -6469,16 +6521,7 @@ export default function AdminPage() {
 
                   {/* ── LIST OF BLOCKED SLOTS GROUPED BY DATE ── */}
                   <div className="space-y-3 mt-6">
-                    {blockedSlots.length === 0 ? (
-                      <GlassCard className="p-12 text-center">
-                        <CalendarOff className="w-16 h-16 mx-auto mb-4 text-[var(--color-text-secondary)] opacity-50" />
-                        <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">Sin franjas bloqueadas</h3>
-                        <p className="text-[var(--color-text-secondary)]">
-                          Todas las franjas horarias están disponibles para reservar.
-                        </p>
-                      </GlassCard>
-                    ) : (
-                      (() => {
+                    {(() => {
                         const logicalGroups = groupBlockedSlots(blockedSlots);
                         const grouped: Record<string, typeof logicalGroups> = {};
                         logicalGroups
@@ -6487,7 +6530,8 @@ export default function AdminPage() {
                             if (!grouped[group.date]) grouped[group.date] = [];
                             grouped[group.date].push(group);
                           });
-                        return Object.entries(grouped).map(([date, groups]) => {
+                        const renderBlockedDay = (date: string) => {
+                          const groups = grouped[date];
                           const slotDate = new Date(date + 'T00:00:00');
                           const isPast = slotDate < new Date(new Date().toDateString());
                           return (
@@ -6557,9 +6601,63 @@ export default function AdminPage() {
                               )}
                             </GlassCard>
                           );
-                        });
-                      })()
-                    )}
+                        };
+                        const { upcoming, past } = splitBlockedDaysByToday(Object.keys(grouped), blockedTodayKey);
+                        const hiddenUpcoming = upcoming.length - visibleBlockedDays;
+                        const hiddenPast = past.length - visiblePastBlockedDays;
+                        return (
+                          <>
+                            {upcoming.length === 0 ? (
+                              <GlassCard className="p-12 text-center">
+                                <CalendarOff className="w-16 h-16 mx-auto mb-4 text-[var(--color-text-secondary)] opacity-50" />
+                                <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">Sin franjas bloqueadas</h3>
+                                <p className="text-[var(--color-text-secondary)]">
+                                  Todas las franjas horarias están disponibles para reservar.
+                                </p>
+                              </GlassCard>
+                            ) : (
+                              upcoming.slice(0, visibleBlockedDays).map(renderBlockedDay)
+                            )}
+                            {hiddenUpcoming > 0 && (
+                              <div className="flex justify-center pt-1">
+                                <PremiumButton
+                                  variant="outline"
+                                  size="sm"
+                                  icon={<ChevronDown className="w-4 h-4" />}
+                                  onClick={() => setVisibleBlockedDays((count) => count + BLOCKED_DAYS_PAGE_SIZE)}
+                                >
+                                  Ver más días ({hiddenUpcoming} restantes)
+                                </PremiumButton>
+                              </div>
+                            )}
+                            {past.length > 0 && (
+                              <div className="flex justify-center pt-3">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowPastBlockedDays((open) => !open)}
+                                  className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors inline-flex items-center gap-1.5"
+                                >
+                                  <ChevronDown className={cn('w-4 h-4 transition-transform', showPastBlockedDays && 'rotate-180')} />
+                                  {showPastBlockedDays ? 'Ocultar días pasados' : `Mostrar días pasados (${past.length})`}
+                                </button>
+                              </div>
+                            )}
+                            {showPastBlockedDays && past.slice(0, visiblePastBlockedDays).map(renderBlockedDay)}
+                            {showPastBlockedDays && hiddenPast > 0 && (
+                              <div className="flex justify-center pt-1">
+                                <PremiumButton
+                                  variant="outline"
+                                  size="sm"
+                                  icon={<ChevronDown className="w-4 h-4" />}
+                                  onClick={() => setVisiblePastBlockedDays((count) => count + BLOCKED_DAYS_PAGE_SIZE)}
+                                >
+                                  Ver más días pasados ({hiddenPast} restantes)
+                                </PremiumButton>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                   </div>
                 </motion.div>
               )}
@@ -6782,7 +6880,7 @@ export default function AdminPage() {
                     </GlassCard>
 
                     {/* Configuración de Bonos */}
-                    <GlassCard className="p-6">
+                    <GlassCard className="p-6 lg:col-span-2">
                       <div className="flex items-center gap-3 mb-4">
                         <Ticket className="w-5 h-5 text-[var(--color-accent-val)]" />
                         <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Configuración de Bonos</h2>
@@ -6877,7 +6975,7 @@ export default function AdminPage() {
                       </div>
                     </GlassCard>
 
-                    <GlassCard className="p-6">
+                    <GlassCard className="p-6 lg:col-span-2">
                       <div className="flex items-center gap-3 mb-4">
                         <Users className="w-5 h-5 text-[var(--color-accent-val)]" />
                         <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Capacidad por franja</h2>
