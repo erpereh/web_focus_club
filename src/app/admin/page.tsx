@@ -6980,7 +6980,7 @@ export default function AdminPage() {
                       </div>
                     </GlassCard>
 
-                    <GlassCard className="p-6 lg:col-span-2">
+                    <GlassCard className="p-6">
                       <div className="flex items-center gap-3 mb-4">
                         <Users className="w-5 h-5 text-[var(--color-accent-val)]" />
                         <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Capacidad por franja</h2>
@@ -7067,7 +7067,7 @@ export default function AdminPage() {
                       </div>
                     </GlassCard>
 
-                    <GlassCard className="p-6 lg:col-span-2">
+                    <GlassCard className="p-6">
                       <div className="flex items-center gap-3 mb-4">
                         <Clock className="w-5 h-5 text-[var(--color-accent-val)]" />
                         <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Antelación mínima para reservar</h2>
