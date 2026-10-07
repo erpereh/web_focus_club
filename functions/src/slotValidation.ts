@@ -3,6 +3,7 @@ import {
   type AppointmentSlotLike,
   getAppointmentEffectiveSlot,
   getCanonicalSlotBlocks,
+  isInsideBookingNotice,
   isRescheduleCapacityAvailable,
   madridCivilSlotToInstant,
 } from "./appointmentLifecycle.js";
@@ -45,7 +46,8 @@ export type SlotRejectionReason =
   | "appointment_conflict"
   | "trainer_unavailable"
   | "trainer_not_nutrition"
-  | "professional_conflict";
+  | "professional_conflict"
+  | "booking_notice_too_short";
 
 export const SLOT_REJECTION_MESSAGES: Record<SlotRejectionReason, string> = {
   slot_not_future: "La franja seleccionada ya no está disponible.",
@@ -56,6 +58,7 @@ export const SLOT_REJECTION_MESSAGES: Record<SlotRejectionReason, string> = {
   trainer_unavailable: "El profesional seleccionado no existe o no está activo.",
   trainer_not_nutrition: "El profesional seleccionado no atiende consultas de nutrición.",
   professional_conflict: "El profesional ya tiene otra cita en esta franja.",
+  booking_notice_too_short: "La franja seleccionada no respeta la antelación mínima para reservar.",
 };
 
 export interface SlotAppointmentLike {
@@ -108,6 +111,8 @@ export interface SlotCheckInput {
   trainer?: TrainerSnapshot;
   /** Pending/approved appointments of `trainer`; required for nutrition overlap checks. */
   trainerAppointments?: IdentifiedAppointment[];
+  /** Customer booking notice in hours. Admin flows never pass it. */
+  minNoticeHours?: number;
 }
 
 export function appointmentDurationOf(appointment: SlotAppointmentLike): number {
@@ -142,6 +147,7 @@ const ACTIVE_STATUSES = new Set(["pending", "approved"]);
 export function evaluateSlot(day: SlotDayContext, input: SlotCheckInput): SlotRejectionReason | undefined {
   const start = madridCivilSlotToInstant(input.slot);
   if (!start || start.getTime() <= input.now.getTime()) return "slot_not_future";
+  if (isInsideBookingNotice(input.slot, input.now, input.minNoticeHours ?? 0)) return "booking_notice_too_short";
 
   const { config } = day;
   if (!new Set(generateTimeSlots(config)).has(input.slot.time)

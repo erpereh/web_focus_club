@@ -429,6 +429,7 @@ export default function PortalPage() {
           userBookedSlotKeys: bookedKeys,
           siteConfig: config,
           now: new Date(),
+          minBookingNoticeHours: config.minBookingNoticeHours,
         }));
         setHastaAvailabilityPhase('ready');
       })
@@ -2021,6 +2022,7 @@ export default function PortalPage() {
                         onSelectDate={handleSelectDate}
                         selectedDuration={parseInt(formData.duration, 10) as 30 | 45 | 60}
                         userBookedSlotKeys={userBookedSlotKeys}
+                        bookingNotice="booking"
                       />
                       {formData.bookingType === 'recurring' && (
                         <p className="mt-3 text-xs text-[var(--color-text-secondary)]">
@@ -2213,6 +2215,7 @@ export default function PortalPage() {
                       selectedDuration={parseInt(appointment.duration, 10) as 30 | 45 | 60}
                       userBookedSlotKeys={rescheduleCalendarContext.userBookedSlotKeys}
                       occupancyCreditsByKey={rescheduleCalendarContext.occupancyCreditsByKey}
+                      bookingNotice="modification"
                       minDate={appointment.recurrenceSeriesId
                         ? addUtcDays(getMadridDateKey(new Date()), 1)
                         : undefined}

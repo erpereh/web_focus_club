@@ -4,6 +4,7 @@ import {
   getBonoRemainingMinutes,
   getCanonicalSlotBlocks,
   isBonoExpiredAt,
+  isInsideBookingNotice,
   isSlotAtCapacity,
   madridCivilSlotToInstant,
   selectExactlyOneActiveBono,
@@ -61,7 +62,7 @@ export interface RecurringSeriesWritePlan {
 
 export type RecurringSeriesPlanResult =
   | { ok: true; writes: RecurringSeriesWritePlan }
-  | { ok: false; message: string; writes: [] };
+  | { ok: false; message: string; writes: []; reason?: "booking_notice_too_short" };
 
 export interface PlanRecurringAppointmentsInput {
   startDate: string;
@@ -76,6 +77,8 @@ export interface PlanRecurringAppointmentsInput {
   userSlotKeys: Set<string>;
   activeBonos: LifecycleBono[];
   requireBono?: boolean;
+  /** Customer booking notice in hours. Admin series never pass it. */
+  minBookingNoticeHours?: number;
 }
 
 export interface RecurringEndDateOption {
@@ -319,6 +322,15 @@ export function planRecurringAppointments(input: PlanRecurringAppointmentsInput)
     const slotTime = slotDateTime(date, input.startTime);
     if (Number.isNaN(slotTime.getTime()) || slotTime <= input.now) {
       return emptyFail(`La franja del ${formatDateEs(date)} a las ${input.startTime} ya no esta disponible.`);
+    }
+    const noticeHours = input.minBookingNoticeHours ?? 0;
+    if (isInsideBookingNotice({ date, time: input.startTime }, input.now, noticeHours)) {
+      return {
+        ok: false,
+        writes: [],
+        reason: "booking_notice_too_short",
+        message: `La franja del ${formatDateEs(date)} a las ${input.startTime} no respeta la antelacion minima de ${noticeHours} ${noticeHours === 1 ? "hora" : "horas"} para reservar.`,
+      };
     }
 
     if (!validTimes.has(input.startTime) || !doesSessionFitWithinSchedule(config, input.startTime, input.durationMinutes)) {

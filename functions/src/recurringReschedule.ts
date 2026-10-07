@@ -1,8 +1,11 @@
 import { FieldValue, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import {
+  BOOKING_NOTICE_TOO_SHORT,
+  bookingNoticeMessage,
   calculateAppointmentDeduction,
   calculateAppointmentRefund,
+  checkCustomerModificationSlots,
   classifyMadridCivilSlot,
   getBonoTotalMinutes,
   getAppointmentEffectiveSlot,
@@ -57,7 +60,8 @@ export type RecurringRescheduleReason =
   | "outside_schedule"
   | "slot_not_future"
   | "invalid_occupancy"
-  | "recurring_occurrence_unavailable";
+  | "recurring_occurrence_unavailable"
+  | "booking_notice_too_short";
 
 export interface RecurringRescheduleSlot {
   date: string;
@@ -773,12 +777,12 @@ async function runCustomerSingleRecurringReschedule(
     if (!targetInstant || targetInstant <= nowDate) {
       throwCustomerSingleError("slot_not_future", "La nueva franja debe estar en el futuro.", parsed.preferredSlot, selectedRef.id);
     }
-    if (isInsideCustomerRescheduleLockWindow(currentSlot, nowDate)
-      || isInsideCustomerRescheduleLockWindow(parsed.preferredSlot, nowDate)) {
+    const lockBlock = checkCustomerModificationSlots({ currentSlot, targetSlot: parsed.preferredSlot, now: nowDate });
+    if (lockBlock) {
       throwCustomerSingleError(
         "one_day_change_not_allowed",
         "Esta cita ya esta dentro del plazo de 24 horas previo al entrenamiento y no puede modificarse.",
-        isInsideCustomerRescheduleLockWindow(currentSlot, nowDate) ? currentSlot : parsed.preferredSlot,
+        lockBlock === "current_locked" ? currentSlot : parsed.preferredSlot,
         selectedRef.id,
       );
     }
@@ -800,6 +804,19 @@ async function runCustomerSingleRecurringReschedule(
     ]);
 
     const config = normalizeSiteConfig(configSnap.exists ? configSnap.data() as Partial<SiteConfig> : undefined);
+    if (checkCustomerModificationSlots({
+      currentSlot,
+      targetSlot: parsed.preferredSlot,
+      now: nowDate,
+      minBookingNoticeHours: config.minBookingNoticeHours,
+    }) === BOOKING_NOTICE_TOO_SHORT) {
+      throwCustomerSingleError(
+        BOOKING_NOTICE_TOO_SHORT,
+        bookingNoticeMessage(config.minBookingNoticeHours),
+        parsed.preferredSlot,
+        selectedRef.id,
+      );
+    }
     if (!new Set(generateTimeSlots(config)).has(parsed.preferredSlot.time)
       || !doesSessionFitWithinSchedule(config, parsed.preferredSlot.time, duration)) {
       throwCustomerSingleError("outside_schedule", "La franja seleccionada queda fuera del horario del centro.", parsed.preferredSlot, selectedRef.id);
@@ -1155,7 +1172,7 @@ async function runCustomerSeriesReplacement(
       if (!instant || instant <= nowDate) {
         throwCustomerSeriesError("slot_not_future", "Todas las nuevas sesiones deben estar en el futuro.", slot);
       }
-      if (isInsideCustomerRescheduleLockWindow(slot, nowDate)) {
+      if (checkCustomerModificationSlots({ targetSlot: slot, now: nowDate })) {
         throwCustomerSeriesError(
           "one_day_change_not_allowed",
           "La nueva programacion debe comenzar fuera del plazo de 24 horas.",
@@ -1165,6 +1182,18 @@ async function runCustomerSeriesReplacement(
       return { slot, keys: slotKeys(slot, seriesDuration) };
     });
     const config = normalizeSiteConfig(configSnap.exists ? configSnap.data() as Partial<SiteConfig> : undefined);
+    const noticeSlot = desired.find(({ slot }) => checkCustomerModificationSlots({
+      targetSlot: slot,
+      now: nowDate,
+      minBookingNoticeHours: config.minBookingNoticeHours,
+    }) === BOOKING_NOTICE_TOO_SHORT);
+    if (noticeSlot) {
+      throwCustomerSeriesError(
+        BOOKING_NOTICE_TOO_SHORT,
+        bookingNoticeMessage(config.minBookingNoticeHours),
+        noticeSlot.slot,
+      );
+    }
     const validTimes = new Set(generateTimeSlots(config));
     if (!validTimes.has(input.startSlot.time)
       || !doesSessionFitWithinSchedule(config, input.startSlot.time, seriesDuration)) {

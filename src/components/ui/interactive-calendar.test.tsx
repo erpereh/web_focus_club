@@ -201,4 +201,64 @@ describe('InteractiveCalendar', () => {
     expect(screen.getByRole('button', { name: /17 de Septiembre/i })).toBeDisabled();
     expect(onAvailabilityStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'error' }));
   });
+
+  describe('customer booking notice', () => {
+    const withNotice = (hours: number) => {
+      subscribeSiteConfig.mockImplementation((callback: (config: typeof DEFAULT_SITE_CONFIG) => void) => {
+        callback({ ...DEFAULT_SITE_CONFIG, startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 4, minBookingNoticeHours: hours });
+        return vi.fn();
+      });
+    };
+
+    const renderCalendar = (bookingNotice?: 'booking' | 'modification') => render(
+      <InteractiveCalendar
+        selectedSlot={null}
+        onSelectSlot={vi.fn()}
+        onClearSlot={vi.fn()}
+        selectedDuration={60}
+        bookingNotice={bookingNotice}
+      />,
+    );
+
+    it('greys out slots that start inside the notice and keeps +24h bookable', async () => {
+      withNotice(24); // now = 16 Sep 10:00 Madrid
+      renderCalendar('booking');
+      await waitFor(() => expect(screen.queryByText('Cargando disponibilidad...')).not.toBeInTheDocument());
+
+      fireEvent.click(screen.getByRole('button', { name: /16 de Septiembre/i }));
+      expect(screen.getByRole('button', { name: /18:00, No disponible/i })).toBeDisabled();
+
+      fireEvent.click(screen.getByRole('button', { name: /17 de Septiembre/i }));
+      expect(screen.getByRole('button', { name: /08:00, No disponible/i })).toBeDisabled();
+      // The exact +24:00 boundary is covered by booking-notice.test.ts (the fake clock advances here).
+      expect(screen.getByRole('button', { name: /18:00, Libre/i })).toBeEnabled();
+    });
+
+    it('0h books normally', async () => {
+      withNotice(0);
+      renderCalendar('booking');
+      await waitFor(() => expect(screen.queryByText('Cargando disponibilidad...')).not.toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: /16 de Septiembre/i }));
+      expect(screen.getByRole('button', { name: /18:00, Libre/i })).toBeEnabled();
+    });
+
+    it('admin calendars (no bookingNotice prop) are never limited', async () => {
+      withNotice(24);
+      renderCalendar();
+      await waitFor(() => expect(screen.queryByText('Cargando disponibilidad...')).not.toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: /16 de Septiembre/i }));
+      expect(screen.getByRole('button', { name: /18:00, Libre/i })).toBeEnabled();
+    });
+
+    it('modifications only apply the notice above the fixed 24h lock', async () => {
+      withNotice(48);
+      renderCalendar('modification');
+      await waitFor(() => expect(screen.queryByText('Cargando disponibilidad...')).not.toBeInTheDocument());
+      fireEvent.click(screen.getByRole('button', { name: /17 de Septiembre/i }));
+      expect(screen.getByRole('button', { name: /18:00, No disponible/i })).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: /18 de Septiembre/i }));
+      expect(screen.getByRole('button', { name: /08:00, No disponible/i })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /18:00, Libre/i })).toBeEnabled();
+    });
+  });
 });

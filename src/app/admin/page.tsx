@@ -221,6 +221,7 @@ import {
   normalizeMaxCapacity,
   normalizeSlotInterval,
 } from '@/lib/site-config';
+import { MAX_MIN_BOOKING_NOTICE_HOURS, normalizeMinBookingNoticeHours } from '@/lib/booking-notice';
 import type { AdminUserAccessMethod, AdminUserRole } from '@/lib/firestore';
 import { auth } from '@/lib/firebase';
 import { subscribeSupportConversations } from '@/lib/support-chat';
@@ -1204,6 +1205,8 @@ export default function AdminPage() {
   const [savingBonoConfig, setSavingBonoConfig] = useState(false);
   const [editMaxCapacity, setEditMaxCapacity] = useState(DEFAULT_SITE_CONFIG.maxCapacity);
   const [savingMaxCapacity, setSavingMaxCapacity] = useState(false);
+  const [editMinBookingNotice, setEditMinBookingNotice] = useState(DEFAULT_SITE_CONFIG.minBookingNoticeHours);
+  const [savingMinBookingNotice, setSavingMinBookingNotice] = useState(false);
   const [clientBonos, setClientBonos] = useState<Record<string, Bono | null>>({});
   const [showAssignBonoModal, setShowAssignBonoModal] = useState(false);
   const [assignBonoClient, setAssignBonoClient] = useState<UserProfile | null>(null);
@@ -1259,6 +1262,7 @@ export default function AdminPage() {
     setEditConfig(config);
     setEditBonoConfig(config.bonoExpirationMonths || 1);
     setEditMaxCapacity(config.maxCapacity);
+    setEditMinBookingNotice(config.minBookingNoticeHours);
     setBrandingConfig(branding);
     if (cms) {
       const mergedCms = {
@@ -1355,6 +1359,7 @@ export default function AdminPage() {
         setEditConfig(config);
         setEditBonoConfig(config.bonoExpirationMonths || 1);
         setEditMaxCapacity(config.maxCapacity);
+        setEditMinBookingNotice(config.minBookingNoticeHours);
       }
     }, console.error);
     const unsubscribeBranding = subscribeBrandingConfig(setBrandingConfig, console.error);
@@ -7058,6 +7063,93 @@ export default function AdminPage() {
                         <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-2">Configuración Actual</h3>
                         <div className="text-sm text-[var(--color-text-secondary)]">
                           Máximo: <strong className="text-[var(--color-text-primary)]">{siteConfig.maxCapacity} persona(s)</strong>
+                        </div>
+                      </div>
+                    </GlassCard>
+
+                    <GlassCard className="p-6 lg:col-span-2">
+                      <div className="flex items-center gap-3 mb-4">
+                        <Clock className="w-5 h-5 text-[var(--color-accent-val)]" />
+                        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Antelación mínima para reservar</h2>
+                      </div>
+                      <p className="text-sm text-[var(--color-text-secondary)] mb-6">
+                        Con 24h, los clientes no podrán reservar ninguna cita que empiece dentro de las próximas 24 horas. Se aplica a entrenamiento, nutrición y citas recurrentes solicitadas por el cliente. No afecta a las citas que crea, modifica, renueva o propone el administrador. Usa 0 para no limitar.
+                      </p>
+
+                      <div>
+                        <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">Antelación mínima</label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="number"
+                            min={0}
+                            max={MAX_MIN_BOOKING_NOTICE_HOURS}
+                            step={1}
+                            value={editMinBookingNotice}
+                            onChange={(e) => setEditMinBookingNotice(normalizeMinBookingNoticeHours(e.target.value))}
+                            className="w-24 px-3 py-2 rounded-lg bg-muted/50 border border-white/10 text-[var(--color-text-primary)] focus:border-[var(--color-accent-val)] focus:outline-none"
+                          />
+                          <span className="text-sm text-[var(--color-text-secondary)]">horas</span>
+                        </div>
+                      </div>
+
+                      <div className="mt-6 flex items-center gap-4">
+                        <button
+                          disabled={savingMinBookingNotice || editMinBookingNotice === siteConfig.minBookingNoticeHours}
+                          onClick={async () => {
+                            const nextHours = normalizeMinBookingNoticeHours(editMinBookingNotice);
+                            setSavingMinBookingNotice(true);
+                            try {
+                              await updateSiteConfigFS({ minBookingNoticeHours: nextHours });
+                              setSiteConfig((prev) => ({ ...prev, minBookingNoticeHours: nextHours }));
+                              setEditMinBookingNotice(nextHours);
+                              await addActivityLog({
+                                action: 'min_booking_notice_updated',
+                                adminEmail: user?.email || 'unknown',
+                                details: `Antelación mínima para reservar: ${nextHours} h`,
+                              });
+                              const t = toast({
+                                title: 'Antelación actualizada',
+                                description: nextHours === 0
+                                  ? 'Los clientes pueden reservar sin antelación mínima.'
+                                  : `Los clientes deberán reservar con al menos ${nextHours} h de antelación.`,
+                              });
+                              setTimeout(() => t.dismiss(), 3500);
+                            } catch (err) {
+                              console.error('Error saving booking notice:', err);
+                              const t = toast({
+                                title: 'Error al guardar la antelación',
+                                description: 'No se ha modificado la configuración. Inténtalo de nuevo.',
+                                variant: 'destructive',
+                              });
+                              setTimeout(() => t.dismiss(), 4500);
+                            } finally {
+                              setSavingMinBookingNotice(false);
+                            }
+                          }}
+                          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[var(--color-accent-val)] to-emerald-bright text-[var(--color-bg-base)] font-semibold hover:shadow-lg hover:shadow-emerald/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                          {savingMinBookingNotice ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Save className="w-4 h-4" />
+                          )}
+                          {savingMinBookingNotice ? 'Guardando...' : 'Guardar antelación'}
+                        </button>
+
+                        {editMinBookingNotice !== siteConfig.minBookingNoticeHours && (
+                          <button
+                            onClick={() => setEditMinBookingNotice(siteConfig.minBookingNoticeHours)}
+                            className="px-4 py-2.5 rounded-xl border border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-white/20 transition-colors text-sm"
+                          >
+                            Descartar cambios
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="mt-6 pt-4 border-t border-white/10">
+                        <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-2">Configuración Actual</h3>
+                        <div className="text-sm text-[var(--color-text-secondary)]">
+                          Antelación mínima: <strong className="text-[var(--color-text-primary)]">{siteConfig.minBookingNoticeHours === 0 ? 'sin límite' : `${siteConfig.minBookingNoticeHours} h`}</strong>
                         </div>
                       </div>
                     </GlassCard>

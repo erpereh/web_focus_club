@@ -3,6 +3,7 @@ import { getCanonicalSlotBlocks, slotOccupancyKey, doesSessionFitWithinSchedule,
 import { generateRecurringOccurrenceDates, type RecurringEndDateOption } from '@/lib/recurring-appointments';
 import { classifyMadridCivilSlot } from '@/lib/madrid-date';
 import { normalizeSiteConfig } from '@/lib/site-config';
+import { isInsideBookingNotice } from '@/lib/booking-notice';
 
 export type RecurringHastaAvailability =
     | 'available'
@@ -42,6 +43,7 @@ function evaluateOccurrence(input: {
     userBookedSlotKeys: Set<string>;
     siteConfig: SiteConfig;
     now: Date;
+    minBookingNoticeHours: number;
 }): Omit<RecurringHastaOptionStatus, 'option'> | null {
     const config = normalizeSiteConfig(input.siteConfig);
     const maxCapacity = config.maxCapacity;
@@ -54,6 +56,15 @@ function evaluateOccurrence(input: {
             problemDate: input.date,
             problemTime: input.startTime,
             message: `La franja del ${dateShort} a las ${input.startTime} ya no está disponible.`,
+        };
+    }
+
+    if (isInsideBookingNotice({ date: input.date, time: input.startTime }, input.now, input.minBookingNoticeHours)) {
+        return {
+            availability: 'past',
+            problemDate: input.date,
+            problemTime: input.startTime,
+            message: `La franja del ${dateShort} a las ${input.startTime} no respeta la antelación mínima para reservar.`,
         };
     }
 
@@ -117,6 +128,8 @@ export function evaluateRecurringHastaOptions(input: {
     userBookedSlotKeys: Set<string>;
     siteConfig: SiteConfig;
     now: Date;
+    /** Customer booking notice in hours. Admin callers omit it. */
+    minBookingNoticeHours?: number;
 }): RecurringHastaOptionStatus[] {
     let firstProblem: Omit<RecurringHastaOptionStatus, 'option'> | null = null;
     const checkedDates = new Set<string>();
@@ -137,6 +150,7 @@ export function evaluateRecurringHastaOptions(input: {
                     userBookedSlotKeys: input.userBookedSlotKeys,
                     siteConfig: input.siteConfig,
                     now: input.now,
+                    minBookingNoticeHours: input.minBookingNoticeHours ?? 0,
                 });
                 if (firstProblem) break;
             }

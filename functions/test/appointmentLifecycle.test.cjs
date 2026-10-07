@@ -398,7 +398,8 @@ const updateOwnSource = indexSource.slice(
   indexSource.indexOf("export const updateOwnAppointmentSlot"),
   indexSource.indexOf("export const onUserProfileCreatedWelcomeEmail"),
 );
-assert.match(updateOwnSource, /isInsideCustomerRescheduleLockWindow/);
+// The 24h lock goes through the shared customer-modification helper.
+assert.match(updateOwnSource, /checkCustomerModificationSlots/);
 assert.match(updateOwnSource, /throwOneDayChangeNotAllowed/);
 assert.doesNotMatch(updateOwnSource, /throwSameDayChangeNotAllowed/);
 assert.ok(

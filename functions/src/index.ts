@@ -16,11 +16,13 @@ import {
   shouldDeleteRecurringPendingCalendarEvent,
 } from "./googleCalendarSync";
 import {
+  BOOKING_NOTICE_TOO_SHORT,
+  bookingNoticeMessage,
+  checkCustomerModificationSlots,
   clientOwnAppointmentMutationBlockedReason,
   getAppointmentEffectiveSlot,
   getCanonicalSlotBlocks,
   getMadridDateKey,
-  isInsideCustomerRescheduleLockWindow,
   isRescheduleCapacityAvailable,
   madridCivilSlotToInstant,
   ONE_DAY_CHANGE_MESSAGE,
@@ -1808,13 +1810,16 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
         appointmentType,
         now: getNowDate(),
         customerAppointments,
+        minNoticeHours: day.config.minBookingNoticeHours,
       });
       if (rejection) {
         const message = rejection === "outside_schedule"
           ? "La franja seleccionada no es válida."
           : rejection === "appointment_conflict"
             ? "Ya tienes una sesión reservada en esta franja."
-            : "La franja seleccionada ya no está disponible.";
+            : rejection === BOOKING_NOTICE_TOO_SHORT
+              ? bookingNoticeMessage(day.config.minBookingNoticeHours)
+              : "La franja seleccionada ya no está disponible.";
         throw toHttpsError("failed-precondition", message, { reason: rejection });
       }
 
@@ -1988,8 +1993,8 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
           reason: "slot_not_future",
         });
       }
-      if (isInsideCustomerRescheduleLockWindow(currentSlot, nowDate)
-        || isInsideCustomerRescheduleLockWindow(preferredSlot, nowDate)) {
+      // Fixed 24h lock first; the configured notice is checked once site_config is read.
+      if (checkCustomerModificationSlots({ currentSlot, targetSlot: preferredSlot, now: nowDate })) {
         throwOneDayChangeNotAllowed();
       }
 
@@ -2082,6 +2087,7 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
         preferredSlot,
         nowMillis: nowDate.getTime(),
         now,
+        minBookingNoticeHours: config.minBookingNoticeHours,
         transaction: {
           releaseApprovedOccupancy: () => { shouldReleaseApprovedOccupancy = true; },
           clearApprovalMetadata: (fields) => { approvalFieldsToDelete = fields; },
@@ -2097,6 +2103,11 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
         }
         if (reschedule.reason === "one-day-lock") {
           throwOneDayChangeNotAllowed();
+        }
+        if (reschedule.reason === "booking-notice") {
+          throw toHttpsError("failed-precondition", bookingNoticeMessage(config.minBookingNoticeHours), {
+            reason: BOOKING_NOTICE_TOO_SHORT,
+          });
         }
         throw toHttpsError("failed-precondition", "Esta cita ya no se puede modificar.");
       }

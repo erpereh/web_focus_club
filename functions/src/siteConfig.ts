@@ -12,6 +12,8 @@ export interface SiteConfig {
   maxCapacity: number;
   /** Bono sizes offered when assigning a bono, in minutes, in display order. */
   bonoSizesMinutes: number[];
+  /** Minimum hours between "now" and the start of a customer booking. 0 = no limit. */
+  minBookingNoticeHours: number;
   maintenanceMode?: boolean;
   sessionDuration?: number;
 }
@@ -38,6 +40,16 @@ export function normalizeBonoSizesMinutes(value: unknown): number[] {
   return sizes.length ? sizes : [...DEFAULT_BONO_SIZES_MINUTES];
 }
 
+export const MAX_MIN_BOOKING_NOTICE_HOURS = 720;
+
+/** Integer hours >= 0. Missing or invalid values mean "no notice" (legacy behaviour). */
+export function normalizeMinBookingNoticeHours(value: unknown): number {
+  if (value == null || value === "") return 0;
+  const parsed = typeof value === "number" || typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.min(MAX_MIN_BOOKING_NOTICE_HOURS, Math.trunc(parsed));
+}
+
 export const DEFAULT_SITE_CONFIG: SiteConfig = {
   startHour: 8,
   endHour: 20,
@@ -46,6 +58,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
   maintenanceMode: false,
   maxCapacity: DEFAULT_MAX_CAPACITY,
   bonoSizesMinutes: [...DEFAULT_BONO_SIZES_MINUTES],
+  minBookingNoticeHours: 0,
 };
 
 export function normalizeSlotInterval(value: unknown): SlotInterval {
@@ -94,6 +107,7 @@ export function normalizeSiteConfig(config: Partial<SiteConfig> = {}): SiteConfi
     maintenanceMode: Boolean(config.maintenanceMode),
     maxCapacity: normalizeMaxCapacity(config.maxCapacity),
     bonoSizesMinutes: normalizeBonoSizesMinutes(config.bonoSizesMinutes),
+    minBookingNoticeHours: normalizeMinBookingNoticeHours(config.minBookingNoticeHours),
   };
 }
 

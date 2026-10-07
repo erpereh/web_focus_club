@@ -355,6 +355,7 @@ export interface SiteConfig {
     bonoExpirationMonths: number; // meses de validez de los bonos (default: 1)
     maxCapacity: number;       // clientes simultáneos por franja (fallback: 2, rango: 1–10)
     bonoSizesMinutes: number[]; // tamaños de bono disponibles al asignar, en minutos (default: 4h/6h/8h)
+    minBookingNoticeHours: number; // antelación mínima (horas) para reservas de clientes; 0 = sin límite
     maintenanceMode?: boolean; // modo mantenimiento para web pública y portal cliente
     // Legacy (compatibilidad hacia atrás)
     sessionDuration?: number;

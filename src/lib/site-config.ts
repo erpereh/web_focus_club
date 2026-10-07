@@ -1,5 +1,6 @@
 import type { SiteConfig, SlotInterval } from '@/types';
 import { DEFAULT_BONO_SIZES_MINUTES, normalizeBonoSizesMinutes } from '@/lib/bono-sizes';
+import { normalizeMinBookingNoticeHours } from '@/lib/booking-notice';
 
 export const DEFAULT_MAX_CAPACITY = 2;
 export const MIN_MAX_CAPACITY = 1;
@@ -13,6 +14,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
     maintenanceMode: false,
     maxCapacity: DEFAULT_MAX_CAPACITY,
     bonoSizesMinutes: [...DEFAULT_BONO_SIZES_MINUTES],
+    minBookingNoticeHours: 0,
 };
 
 export const ALLOWED_SLOT_INTERVALS = [15, 30, 45, 60] as const satisfies readonly SlotInterval[];
@@ -61,6 +63,7 @@ export function normalizeSiteConfig(config: Partial<SiteConfig> = {}): SiteConfi
         maintenanceMode: Boolean(config.maintenanceMode),
         maxCapacity: normalizeMaxCapacity(config.maxCapacity),
         bonoSizesMinutes: normalizeBonoSizesMinutes(config.bonoSizesMinutes),
+        minBookingNoticeHours: normalizeMinBookingNoticeHours(config.minBookingNoticeHours),
     };
 }
 
@@ -96,6 +99,10 @@ export function sanitizeSiteConfigUpdate(data: Partial<SiteConfig>): Partial<Sit
 
     if ('bonoSizesMinutes' in data) {
         sanitized.bonoSizesMinutes = normalizeBonoSizesMinutes(data.bonoSizesMinutes);
+    }
+
+    if ('minBookingNoticeHours' in data) {
+        sanitized.minBookingNoticeHours = normalizeMinBookingNoticeHours(data.minBookingNoticeHours);
     }
 
     return sanitized;

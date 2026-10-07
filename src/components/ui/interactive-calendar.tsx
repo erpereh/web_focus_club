@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { AlertCircle, Check, ChevronLeft, ChevronRight, Clock, Lock, Users } from 'lucide-react';
 import { getSlotAvailability, type SlotAvailabilityResult } from '@/lib/appointment-slots';
 import { classifyMadridCivilSlot, getMadridDateKey } from '@/lib/madrid-date';
+import { effectiveBookingNoticeHours, isInsideBookingNotice, type BookingNoticeMode } from '@/lib/booking-notice';
 import {
   generateTimeSlots,
   subscribeMonthAvailability,
@@ -35,6 +36,12 @@ export interface InteractiveCalendarProps {
   showSelectedSlotSummary?: boolean;
   availabilityLabelMode?: 'remaining' | 'occupancy';
   onAvailabilityStateChange?: (state: CalendarAvailabilityState) => void;
+  /**
+   * Customer calendars only: applies site_config.minBookingNoticeHours
+   * ('booking') or max(24h, notice) for modifications ('modification').
+   * Admin calendars leave it undefined and are never limited.
+   */
+  bookingNotice?: BookingNoticeMode;
 }
 
 const DAY_NAMES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
@@ -82,6 +89,7 @@ export function InteractiveCalendar({
   showSelectedSlotSummary = true,
   availabilityLabelMode = 'remaining',
   onAvailabilityStateChange,
+  bookingNotice,
 }: InteractiveCalendarProps) {
   const clearSlotRef = useRef(onClearSlot);
   const todayKey = getMadridDateKey(new Date());
@@ -221,10 +229,13 @@ export function InteractiveCalendar({
   };
 
   const isPastDay = (day: number): boolean => formatDateKey(currentYear, currentMonth, day) < todayKey;
-  const isPastTime = (day: number, time: string): boolean => !classifyMadridCivilSlot({
-    date: formatDateKey(currentYear, currentMonth, day),
-    time,
-  }, new Date()).isFuture;
+  const noticeHours = effectiveBookingNoticeHours(siteConfig.minBookingNoticeHours, bookingNotice);
+  // Past slots and slots inside the customer booking notice render the same: grey "No disponible".
+  const isPastTime = (day: number, time: string): boolean => {
+    const slot = { date: formatDateKey(currentYear, currentMonth, day), time };
+    const now = new Date();
+    return !classifyMadridCivilSlot(slot, now).isFuture || isInsideBookingNotice(slot, now, noticeHours);
+  };
 
   const dayHasAvailability = (day: number): boolean => {
     const dateKey = formatDateKey(currentYear, currentMonth, day);

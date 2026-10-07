@@ -566,8 +566,11 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           blockedKeys,
           userSlotKeys,
           activeBonos,
+          minBookingNoticeHours: config.minBookingNoticeHours,
         });
-        if (!plan.ok) throwHttps("failed-precondition", plan.message);
+        if (!plan.ok) {
+          throwHttps("failed-precondition", plan.message, plan.reason ? { reason: plan.reason } : undefined);
+        }
 
         const now = new Date().toISOString();
         const bonoRef = db.collection("bonos").doc(plan.writes.bono.bonoId);

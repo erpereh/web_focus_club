@@ -318,6 +318,41 @@ export function isInsideCustomerRescheduleLockWindow(slot: AppointmentSlotLike, 
     || appointmentStart.getTime() - now.getTime() <= CUSTOMER_RESCHEDULE_LOCK_WINDOW_MS;
 }
 
+export const BOOKING_NOTICE_TOO_SHORT = "booking_notice_too_short" as const;
+
+export function bookingNoticeMessage(hours: number): string {
+  return `Las reservas deben hacerse con al menos ${hours} ${hours === 1 ? "hora" : "horas"} de antelación.`;
+}
+
+/**
+ * True when a customer may not book `slot` because it starts before
+ * now + `hours` real hours (DST-safe). 0 hours never blocks. Invalid slots fail closed.
+ */
+export function isInsideBookingNotice(slot: AppointmentSlotLike, now: Date, hours: number): boolean {
+  if (!Number.isFinite(hours) || hours <= 0) return false;
+  const start = madridCivilSlotToInstant(slot);
+  return !start || start.getTime() < now.getTime() + hours * 60 * 60 * 1000;
+}
+
+export type CustomerModificationSlotBlock = "current_locked" | "target_locked" | typeof BOOKING_NOTICE_TOO_SHORT;
+
+/**
+ * Single rule for every customer modification: the current appointment keeps
+ * the fixed 24h lock, and the new slot must respect max(24h, booking notice).
+ * Callers keep their own messages for the 24h cases.
+ */
+export function checkCustomerModificationSlots(input: {
+  currentSlot?: AppointmentSlotLike;
+  targetSlot: AppointmentSlotLike;
+  now: Date;
+  minBookingNoticeHours?: number;
+}): CustomerModificationSlotBlock | undefined {
+  if (input.currentSlot && isInsideCustomerRescheduleLockWindow(input.currentSlot, input.now)) return "current_locked";
+  if (isInsideCustomerRescheduleLockWindow(input.targetSlot, input.now)) return "target_locked";
+  if (isInsideBookingNotice(input.targetSlot, input.now, input.minBookingNoticeHours ?? 0)) return BOOKING_NOTICE_TOO_SHORT;
+  return undefined;
+}
+
 /** Compares a civil gym slot against the Madrid wall clock without parsing it in the server timezone. */
 export function classifyMadridCivilSlot(slot: AppointmentSlotLike, now: Date): MadridCivilSlotState {
   const date = slot.date ?? "";
@@ -410,7 +445,8 @@ export function validateOwnReschedule(
   uid: string,
   preferredSlot: { date: string; time: string },
   nowMillis: number,
-): "not-owner" | "invalid-status" | "not-future" | "one-day-lock" | undefined {
+  minBookingNoticeHours = 0,
+): "not-owner" | "invalid-status" | "not-future" | "one-day-lock" | "booking-notice" | undefined {
   if (appointment.userId !== uid) return "not-owner";
   if (appointment.status !== "pending" && appointment.status !== "approved") return "invalid-status";
   const existingSlot = { date: appointment.date, time: appointment.time };
@@ -420,11 +456,14 @@ export function validateOwnReschedule(
     || !preferredDate || preferredDate.getTime() <= nowMillis) {
     return "not-future";
   }
-  const now = new Date(nowMillis);
-  if (isInsideCustomerRescheduleLockWindow(existingSlot, now)
-    || isInsideCustomerRescheduleLockWindow(preferredSlot, now)) {
-    return "one-day-lock";
-  }
+  const block = checkCustomerModificationSlots({
+    currentSlot: existingSlot,
+    targetSlot: preferredSlot,
+    now: new Date(nowMillis),
+    minBookingNoticeHours,
+  });
+  if (block === BOOKING_NOTICE_TOO_SHORT) return "booking-notice";
+  if (block) return "one-day-lock";
   return undefined;
 }
 
@@ -455,6 +494,8 @@ export interface ReconcileOwnAppointmentRescheduleInput {
   nowMillis: number;
   now: string;
   transaction: RescheduleTransactionAdapter;
+  /** Configured booking notice; the new slot must respect max(24h, this). */
+  minBookingNoticeHours?: number;
 }
 
 /**
@@ -463,12 +504,13 @@ export interface ReconcileOwnAppointmentRescheduleInput {
  * reschedule releases occupancy and clears approval metadata together.
  */
 export function reconcileOwnAppointmentReschedule(input: ReconcileOwnAppointmentRescheduleInput):
-  { ok: true } | { ok: false; reason: "not-owner" | "invalid-status" | "not-future" | "one-day-lock" } {
+  { ok: true } | { ok: false; reason: "not-owner" | "invalid-status" | "not-future" | "one-day-lock" | "booking-notice" } {
   const validation = validateOwnReschedule(
     input.appointment,
     input.uid,
     input.preferredSlot,
     input.nowMillis,
+    input.minBookingNoticeHours ?? 0,
   );
   if (validation) return { ok: false, reason: validation };
 
