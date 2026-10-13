@@ -15,6 +15,7 @@ const config = (slotInterval: 15 | 30 | 45 | 60): SiteConfig => ({
     maxCapacity: 4,
     bonoSizesMinutes: [240, 360, 480],
     minBookingNoticeHours: 0,
+    blockSameDayBooking: false,
 });
 
 describe('generateTimeSlots', () => {

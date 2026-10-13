@@ -66,6 +66,7 @@ import {
   Repeat,
 } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
+import { Switch } from '@/components/ui/switch';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { PremiumSelect } from '@/components/ui/premium-select';
 import { ContextualImageManager } from '@/components/ui/ContextualImageManager';
@@ -1207,6 +1208,8 @@ export default function AdminPage() {
   const [savingMaxCapacity, setSavingMaxCapacity] = useState(false);
   const [editMinBookingNotice, setEditMinBookingNotice] = useState(DEFAULT_SITE_CONFIG.minBookingNoticeHours);
   const [savingMinBookingNotice, setSavingMinBookingNotice] = useState(false);
+  const [editBlockSameDay, setEditBlockSameDay] = useState(DEFAULT_SITE_CONFIG.blockSameDayBooking);
+  const [savingBlockSameDay, setSavingBlockSameDay] = useState(false);
   const [clientBonos, setClientBonos] = useState<Record<string, Bono | null>>({});
   const [showAssignBonoModal, setShowAssignBonoModal] = useState(false);
   const [assignBonoClient, setAssignBonoClient] = useState<UserProfile | null>(null);
@@ -1263,6 +1266,7 @@ export default function AdminPage() {
     setEditBonoConfig(config.bonoExpirationMonths || 1);
     setEditMaxCapacity(config.maxCapacity);
     setEditMinBookingNotice(config.minBookingNoticeHours);
+    setEditBlockSameDay(config.blockSameDayBooking);
     setBrandingConfig(branding);
     if (cms) {
       const mergedCms = {
@@ -1360,6 +1364,7 @@ export default function AdminPage() {
         setEditBonoConfig(config.bonoExpirationMonths || 1);
         setEditMaxCapacity(config.maxCapacity);
         setEditMinBookingNotice(config.minBookingNoticeHours);
+        setEditBlockSameDay(config.blockSameDayBooking);
       }
     }, console.error);
     const unsubscribeBranding = subscribeBrandingConfig(setBrandingConfig, console.error);
@@ -7150,6 +7155,87 @@ export default function AdminPage() {
                         <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-2">Configuración Actual</h3>
                         <div className="text-sm text-[var(--color-text-secondary)]">
                           Antelación mínima: <strong className="text-[var(--color-text-primary)]">{siteConfig.minBookingNoticeHours === 0 ? 'sin límite' : `${siteConfig.minBookingNoticeHours} h`}</strong>
+                        </div>
+                      </div>
+                    </GlassCard>
+
+                    <GlassCard className="p-6 lg:col-span-2">
+                      <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <div className="flex items-center gap-3 mb-2">
+                            <CalendarOff className="w-5 h-5 text-[var(--color-accent-val)]" />
+                            <h2 id="block-same-day-booking-title" className="text-lg font-semibold text-[var(--color-text-primary)]">Bloquear reservas para el mismo día</h2>
+                          </div>
+                          <p id="block-same-day-booking-description" className="text-sm text-[var(--color-text-secondary)] max-w-3xl">
+                            Si está activado, los clientes no podrán reservar ninguna cita para hoy (hora de Madrid), sea cual sea la hora. Se aplica a entrenamiento, nutrición y citas recurrentes solicitadas por el cliente, y se combina con la antelación mínima: ambas restricciones se aplican por separado. No afecta a las citas que crea, modifica, renueva o propone el administrador, ni a las citas ya existentes.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={editBlockSameDay}
+                          onCheckedChange={setEditBlockSameDay}
+                          disabled={savingBlockSameDay}
+                          aria-labelledby="block-same-day-booking-title"
+                          aria-describedby="block-same-day-booking-description"
+                        />
+                      </div>
+
+                      <div className="mt-6 flex items-center gap-4">
+                        <button
+                          disabled={savingBlockSameDay || editBlockSameDay === siteConfig.blockSameDayBooking}
+                          onClick={async () => {
+                            const nextValue = editBlockSameDay;
+                            setSavingBlockSameDay(true);
+                            try {
+                              await updateSiteConfigFS({ blockSameDayBooking: nextValue });
+                              setSiteConfig((prev) => ({ ...prev, blockSameDayBooking: nextValue }));
+                              await addActivityLog({
+                                action: 'same_day_booking_block_updated',
+                                adminEmail: user?.email || 'unknown',
+                                details: `Bloqueo de reservas para el mismo día: ${nextValue ? 'activado' : 'desactivado'}`,
+                              });
+                              const t = toast({
+                                title: nextValue ? 'Reservas para hoy bloqueadas' : 'Reservas para hoy permitidas',
+                                description: nextValue
+                                  ? 'Los clientes ya no pueden reservar citas para el mismo día.'
+                                  : 'Los clientes vuelven a poder reservar citas para el mismo día.',
+                              });
+                              setTimeout(() => t.dismiss(), 3500);
+                            } catch (err) {
+                              console.error('Error saving same-day booking block:', err);
+                              const t = toast({
+                                title: 'Error al guardar el bloqueo',
+                                description: 'No se ha modificado la configuración. Inténtalo de nuevo.',
+                                variant: 'destructive',
+                              });
+                              setTimeout(() => t.dismiss(), 4500);
+                            } finally {
+                              setSavingBlockSameDay(false);
+                            }
+                          }}
+                          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[var(--color-accent-val)] to-emerald-bright text-[var(--color-bg-base)] font-semibold hover:shadow-lg hover:shadow-emerald/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                          {savingBlockSameDay ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Save className="w-4 h-4" />
+                          )}
+                          {savingBlockSameDay ? 'Guardando...' : 'Guardar bloqueo'}
+                        </button>
+
+                        {editBlockSameDay !== siteConfig.blockSameDayBooking && (
+                          <button
+                            onClick={() => setEditBlockSameDay(siteConfig.blockSameDayBooking)}
+                            className="px-4 py-2.5 rounded-xl border border-white/10 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-white/20 transition-colors text-sm"
+                          >
+                            Descartar cambios
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="mt-6 pt-4 border-t border-white/10">
+                        <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-2">Configuración Actual</h3>
+                        <div className="text-sm text-[var(--color-text-secondary)]">
+                          Reservas para el mismo día: <strong className="text-[var(--color-text-primary)]">{siteConfig.blockSameDayBooking ? 'bloqueadas' : 'permitidas'}</strong>
                         </div>
                       </div>
                     </GlassCard>

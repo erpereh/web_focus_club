@@ -18,6 +18,8 @@ import {
 import {
   BOOKING_NOTICE_TOO_SHORT,
   bookingNoticeMessage,
+  SAME_DAY_BOOKING_DISABLED,
+  SAME_DAY_BOOKING_MESSAGE,
   checkCustomerModificationSlots,
   clientOwnAppointmentMutationBlockedReason,
   getAppointmentEffectiveSlot,
@@ -1811,15 +1813,18 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
         now: getNowDate(),
         customerAppointments,
         minNoticeHours: day.config.minBookingNoticeHours,
+        blockSameDayBooking: day.config.blockSameDayBooking,
       });
       if (rejection) {
         const message = rejection === "outside_schedule"
           ? "La franja seleccionada no es válida."
           : rejection === "appointment_conflict"
             ? "Ya tienes una sesión reservada en esta franja."
-            : rejection === BOOKING_NOTICE_TOO_SHORT
-              ? bookingNoticeMessage(day.config.minBookingNoticeHours)
-              : "La franja seleccionada ya no está disponible.";
+            : rejection === SAME_DAY_BOOKING_DISABLED
+              ? SAME_DAY_BOOKING_MESSAGE
+              : rejection === BOOKING_NOTICE_TOO_SHORT
+                ? bookingNoticeMessage(day.config.minBookingNoticeHours)
+                : "La franja seleccionada ya no está disponible.";
         throw toHttpsError("failed-precondition", message, { reason: rejection });
       }
 

@@ -567,9 +567,14 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           userSlotKeys,
           activeBonos,
           minBookingNoticeHours: config.minBookingNoticeHours,
+          blockSameDayBooking: config.blockSameDayBooking,
         });
         if (!plan.ok) {
-          throwHttps("failed-precondition", plan.message, plan.reason ? { reason: plan.reason } : undefined);
+          throwHttps(
+            "failed-precondition",
+            plan.message,
+            plan.reason ? { reason: plan.reason, date: plan.problemDate, time: plan.problemTime } : undefined,
+          );
         }
 
         const now = new Date().toISOString();

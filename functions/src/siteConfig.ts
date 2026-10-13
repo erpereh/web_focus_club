@@ -14,6 +14,8 @@ export interface SiteConfig {
   bonoSizesMinutes: number[];
   /** Minimum hours between "now" and the start of a customer booking. 0 = no limit. */
   minBookingNoticeHours: number;
+  /** When true, customers cannot book any slot dated today in Europe/Madrid. */
+  blockSameDayBooking: boolean;
   maintenanceMode?: boolean;
   sessionDuration?: number;
 }
@@ -59,6 +61,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
   maxCapacity: DEFAULT_MAX_CAPACITY,
   bonoSizesMinutes: [...DEFAULT_BONO_SIZES_MINUTES],
   minBookingNoticeHours: 0,
+  blockSameDayBooking: false,
 };
 
 export function normalizeSlotInterval(value: unknown): SlotInterval {
@@ -108,6 +111,8 @@ export function normalizeSiteConfig(config: Partial<SiteConfig> = {}): SiteConfi
     maxCapacity: normalizeMaxCapacity(config.maxCapacity),
     bonoSizesMinutes: normalizeBonoSizesMinutes(config.bonoSizesMinutes),
     minBookingNoticeHours: normalizeMinBookingNoticeHours(config.minBookingNoticeHours),
+    // Only an explicit `true` enables it: legacy configs keep same-day booking.
+    blockSameDayBooking: config.blockSameDayBooking === true,
   };
 }
 

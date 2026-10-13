@@ -5,7 +5,13 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { AlertCircle, Check, ChevronLeft, ChevronRight, Clock, Lock, Users } from 'lucide-react';
 import { getSlotAvailability, type SlotAvailabilityResult } from '@/lib/appointment-slots';
 import { classifyMadridCivilSlot, getMadridDateKey } from '@/lib/madrid-date';
-import { effectiveBookingNoticeHours, isInsideBookingNotice, type BookingNoticeMode } from '@/lib/booking-notice';
+import {
+  customerBookingRestriction,
+  customerBookingRestrictionMessage,
+  effectiveBookingNoticeHours,
+  type BookingNoticeMode,
+  type CustomerBookingRestriction,
+} from '@/lib/booking-notice';
 import {
   generateTimeSlots,
   subscribeMonthAvailability,
@@ -39,6 +45,8 @@ export interface InteractiveCalendarProps {
   /**
    * Customer calendars only: applies site_config.minBookingNoticeHours
    * ('booking') or max(24h, notice) for modifications ('modification').
+   * site_config.blockSameDayBooking only applies to new bookings ('booking');
+   * modifications already keep the fixed 24h lock.
    * Admin calendars leave it undefined and are never limited.
    */
   bookingNotice?: BookingNoticeMode;
@@ -230,17 +238,34 @@ export function InteractiveCalendar({
 
   const isPastDay = (day: number): boolean => formatDateKey(currentYear, currentMonth, day) < todayKey;
   const noticeHours = effectiveBookingNoticeHours(siteConfig.minBookingNoticeHours, bookingNotice);
-  // Past slots and slots inside the customer booking notice render the same: grey "No disponible".
-  const isPastTime = (day: number, time: string): boolean => {
-    const slot = { date: formatDateKey(currentYear, currentMonth, day), time };
-    const now = new Date();
-    return !classifyMadridCivilSlot(slot, now).isFuture || isInsideBookingNotice(slot, now, noticeHours);
-  };
+  const blockSameDay = bookingNotice === 'booking' && siteConfig.blockSameDayBooking;
+  const isPastTime = (day: number, time: string): boolean => !classifyMadridCivilSlot({
+    date: formatDateKey(currentYear, currentMonth, day),
+    time,
+  }, new Date()).isFuture;
+  // Future slots closed by configuration keep their own reason; they render grey "No disponible" like past ones.
+  const getSlotRestriction = (day: number, time: string): CustomerBookingRestriction | undefined => (isPastTime(day, time)
+    ? undefined
+    : customerBookingRestriction(
+      { date: formatDateKey(currentYear, currentMonth, day), time },
+      new Date(),
+      { minBookingNoticeHours: noticeHours, blockSameDayBooking: blockSameDay },
+    ));
+  const isClosedTime = (day: number, time: string): boolean => isPastTime(day, time) || Boolean(getSlotRestriction(day, time));
+
+  // site_config is live: if the admin closes the selected slot (e.g. turns on the
+  // same-day block), drop the selection instead of letting the customer submit it.
+  useEffect(() => {
+    if (!selectedSlot || allowPastDates || bookingNotice !== 'booking') return;
+    if (customerBookingRestriction(selectedSlot, new Date(), { minBookingNoticeHours: noticeHours, blockSameDayBooking: blockSameDay })) {
+      clearSlotRef.current();
+    }
+  }, [selectedSlot?.date, selectedSlot?.time, noticeHours, blockSameDay, allowPastDates, bookingNotice]);
 
   const dayHasAvailability = (day: number): boolean => {
     const dateKey = formatDateKey(currentYear, currentMonth, day);
     if ((!allowPastDates && dateKey < todayKey) || (minDate && dateKey < minDate) || availabilityState.status !== 'ready') return false;
-    return timeSlots.some((time) => (allowPastDates || !isPastTime(day, time)) && !getDisplayAvailability(day, time).disabled);
+    return timeSlots.some((time) => (allowPastDates || !isClosedTime(day, time)) && !getDisplayAvailability(day, time).disabled);
   };
 
   const getDayOccupancySummary = (day: number): { hasPartial: boolean; hasFull: boolean } => {
@@ -265,7 +290,7 @@ export function InteractiveCalendar({
     if (!selectedDay || calendarDisabled) return;
     const date = formatDateKey(currentYear, currentMonth, selectedDay);
     const result = getDisplayAvailability(selectedDay, time);
-    if ((!allowPastDates && isPastTime(selectedDay, time)) || result.disabled) return;
+    if ((!allowPastDates && isClosedTime(selectedDay, time)) || result.disabled) return;
     if (selectedSlot?.date === date && selectedSlot.time === time) {
       onClearSlot();
       return;
@@ -405,7 +430,8 @@ export function InteractiveCalendar({
 
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
               {timeSlots.map((time) => {
-                const past = isPastTime(selectedDay, time);
+                const restriction = allowPastDates ? undefined : getSlotRestriction(selectedDay, time);
+                const past = isPastTime(selectedDay, time) || Boolean(restriction);
                 const availability = getDisplayAvailability(selectedDay, time);
                 const date = formatDateKey(currentYear, currentMonth, selectedDay);
                 const selected = selectedSlot?.date === date && selectedSlot.time === time;
@@ -434,6 +460,8 @@ export function InteractiveCalendar({
                     disabled={unavailable}
                     onClick={() => handleSlotClick(time)}
                     aria-label={`${time}, ${availabilityLabel}`}
+                    title={restriction ? customerBookingRestrictionMessage(restriction, noticeHours) : undefined}
+                    data-restriction={restriction}
                     aria-pressed={selected}
                     className={cn(
                       'relative min-h-16 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-val)]',

@@ -3,7 +3,12 @@ import { getCanonicalSlotBlocks, slotOccupancyKey, doesSessionFitWithinSchedule,
 import { generateRecurringOccurrenceDates, type RecurringEndDateOption } from '@/lib/recurring-appointments';
 import { classifyMadridCivilSlot } from '@/lib/madrid-date';
 import { normalizeSiteConfig } from '@/lib/site-config';
-import { isInsideBookingNotice } from '@/lib/booking-notice';
+import {
+    BOOKING_NOTICE_TOO_SHORT,
+    customerBookingRestriction,
+    SAME_DAY_BOOKING_DISABLED,
+    type CustomerBookingRestriction,
+} from '@/lib/booking-notice';
 
 export type RecurringHastaAvailability =
     | 'available'
@@ -11,7 +16,9 @@ export type RecurringHastaAvailability =
     | 'full'
     | 'conflict'
     | 'outside_schedule'
-    | 'past';
+    | 'past'
+    // Future occurrences closed by site_config (never reported as 'past').
+    | CustomerBookingRestriction;
 
 export type RecurringHastaAvailabilityPhase = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -44,6 +51,7 @@ function evaluateOccurrence(input: {
     siteConfig: SiteConfig;
     now: Date;
     minBookingNoticeHours: number;
+    blockSameDayBooking: boolean;
 }): Omit<RecurringHastaOptionStatus, 'option'> | null {
     const config = normalizeSiteConfig(input.siteConfig);
     const maxCapacity = config.maxCapacity;
@@ -59,9 +67,21 @@ function evaluateOccurrence(input: {
         };
     }
 
-    if (isInsideBookingNotice({ date: input.date, time: input.startTime }, input.now, input.minBookingNoticeHours)) {
+    const restriction = customerBookingRestriction({ date: input.date, time: input.startTime }, input.now, {
+        minBookingNoticeHours: input.minBookingNoticeHours,
+        blockSameDayBooking: input.blockSameDayBooking,
+    });
+    if (restriction === SAME_DAY_BOOKING_DISABLED) {
         return {
-            availability: 'past',
+            availability: SAME_DAY_BOOKING_DISABLED,
+            problemDate: input.date,
+            problemTime: input.startTime,
+            message: `La serie incluye una cita para hoy (${dateShort} a las ${input.startTime}) y no se permiten reservas para el mismo día.`,
+        };
+    }
+    if (restriction === BOOKING_NOTICE_TOO_SHORT) {
+        return {
+            availability: BOOKING_NOTICE_TOO_SHORT,
             problemDate: input.date,
             problemTime: input.startTime,
             message: `La franja del ${dateShort} a las ${input.startTime} no respeta la antelación mínima para reservar.`,
@@ -130,6 +150,8 @@ export function evaluateRecurringHastaOptions(input: {
     now: Date;
     /** Customer booking notice in hours. Admin callers omit it. */
     minBookingNoticeHours?: number;
+    /** site_config.blockSameDayBooking. Admin callers omit it. */
+    blockSameDayBooking?: boolean;
 }): RecurringHastaOptionStatus[] {
     let firstProblem: Omit<RecurringHastaOptionStatus, 'option'> | null = null;
     const checkedDates = new Set<string>();
@@ -151,6 +173,7 @@ export function evaluateRecurringHastaOptions(input: {
                     siteConfig: input.siteConfig,
                     now: input.now,
                     minBookingNoticeHours: input.minBookingNoticeHours ?? 0,
+                    blockSameDayBooking: input.blockSameDayBooking === true,
                 });
                 if (firstProblem) break;
             }

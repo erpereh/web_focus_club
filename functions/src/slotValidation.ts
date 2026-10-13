@@ -4,6 +4,8 @@ import {
   getAppointmentEffectiveSlot,
   getCanonicalSlotBlocks,
   isInsideBookingNotice,
+  isSameDayBookingBlocked,
+  SAME_DAY_BOOKING_MESSAGE,
   isRescheduleCapacityAvailable,
   madridCivilSlotToInstant,
 } from "./appointmentLifecycle.js";
@@ -47,7 +49,8 @@ export type SlotRejectionReason =
   | "trainer_unavailable"
   | "trainer_not_nutrition"
   | "professional_conflict"
-  | "booking_notice_too_short";
+  | "booking_notice_too_short"
+  | "same_day_booking_disabled";
 
 export const SLOT_REJECTION_MESSAGES: Record<SlotRejectionReason, string> = {
   slot_not_future: "La franja seleccionada ya no está disponible.",
@@ -59,6 +62,7 @@ export const SLOT_REJECTION_MESSAGES: Record<SlotRejectionReason, string> = {
   trainer_not_nutrition: "El profesional seleccionado no atiende consultas de nutrición.",
   professional_conflict: "El profesional ya tiene otra cita en esta franja.",
   booking_notice_too_short: "La franja seleccionada no respeta la antelación mínima para reservar.",
+  same_day_booking_disabled: SAME_DAY_BOOKING_MESSAGE,
 };
 
 export interface SlotAppointmentLike {
@@ -113,6 +117,8 @@ export interface SlotCheckInput {
   trainerAppointments?: IdentifiedAppointment[];
   /** Customer booking notice in hours. Admin flows never pass it. */
   minNoticeHours?: number;
+  /** site_config.blockSameDayBooking for customer bookings. Admin flows never pass it. */
+  blockSameDayBooking?: boolean;
 }
 
 export function appointmentDurationOf(appointment: SlotAppointmentLike): number {
@@ -147,6 +153,7 @@ const ACTIVE_STATUSES = new Set(["pending", "approved"]);
 export function evaluateSlot(day: SlotDayContext, input: SlotCheckInput): SlotRejectionReason | undefined {
   const start = madridCivilSlotToInstant(input.slot);
   if (!start || start.getTime() <= input.now.getTime()) return "slot_not_future";
+  if (isSameDayBookingBlocked(input.slot, input.now, input.blockSameDayBooking)) return "same_day_booking_disabled";
   if (isInsideBookingNotice(input.slot, input.now, input.minNoticeHours ?? 0)) return "booking_notice_too_short";
 
   const { config } = day;

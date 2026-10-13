@@ -15,6 +15,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
     maxCapacity: DEFAULT_MAX_CAPACITY,
     bonoSizesMinutes: [...DEFAULT_BONO_SIZES_MINUTES],
     minBookingNoticeHours: 0,
+    blockSameDayBooking: false,
 };
 
 export const ALLOWED_SLOT_INTERVALS = [15, 30, 45, 60] as const satisfies readonly SlotInterval[];
@@ -64,6 +65,8 @@ export function normalizeSiteConfig(config: Partial<SiteConfig> = {}): SiteConfi
         maxCapacity: normalizeMaxCapacity(config.maxCapacity),
         bonoSizesMinutes: normalizeBonoSizesMinutes(config.bonoSizesMinutes),
         minBookingNoticeHours: normalizeMinBookingNoticeHours(config.minBookingNoticeHours),
+        // Only an explicit `true` enables it: legacy configs keep same-day booking.
+        blockSameDayBooking: config.blockSameDayBooking === true,
     };
 }
 
@@ -103,6 +106,10 @@ export function sanitizeSiteConfigUpdate(data: Partial<SiteConfig>): Partial<Sit
 
     if ('minBookingNoticeHours' in data) {
         sanitized.minBookingNoticeHours = normalizeMinBookingNoticeHours(data.minBookingNoticeHours);
+    }
+
+    if ('blockSameDayBooking' in data) {
+        sanitized.blockSameDayBooking = data.blockSameDayBooking === true;
     }
 
     return sanitized;

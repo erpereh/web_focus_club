@@ -334,6 +334,17 @@ export function isInsideBookingNotice(slot: AppointmentSlotLike, now: Date, hour
   return !start || start.getTime() < now.getTime() + hours * 60 * 60 * 1000;
 }
 
+export const SAME_DAY_BOOKING_DISABLED = "same_day_booking_disabled" as const;
+export const SAME_DAY_BOOKING_MESSAGE = "No se pueden reservar citas para el mismo día.";
+
+/**
+ * True when site_config.blockSameDayBooking is on and `slot` is dated today
+ * in Europe/Madrid, whatever its time. Independent of the booking notice.
+ */
+export function isSameDayBookingBlocked(slot: AppointmentSlotLike, now: Date, enabled: boolean | undefined): boolean {
+  return enabled === true && isSameDayInMadrid(slot.date ?? "", now);
+}
+
 export type CustomerModificationSlotBlock = "current_locked" | "target_locked" | typeof BOOKING_NOTICE_TOO_SHORT;
 
 /**

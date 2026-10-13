@@ -44,7 +44,7 @@ import { PremiumButton } from '@/components/ui/premium-button';
 import { InteractiveCalendar } from '@/components/ui/interactive-calendar';
 import { useBrandingConfig } from '@/hooks/useBrandingConfig';
 import { useAuth } from '@/contexts/AuthContext';
-import type { TimeSlot, Appointment, Bono, Trainer } from '@/types';
+import type { TimeSlot, Appointment, Bono, Trainer, SiteConfig } from '@/types';
 import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos, getOpenCustomerConfirmation } from '@/types';
 import {
   formatRecurringSeriesPreview,
@@ -79,6 +79,7 @@ import {
   subscribeBonosByUser,
   getAvailabilityForDates,
   getSiteConfig,
+  subscribeSiteConfig,
 } from '@/lib/firestore';
 import { updatePassword } from 'firebase/auth';
 import { cn } from '@/lib/utils';
@@ -211,6 +212,8 @@ export default function PortalPage() {
   });
   const [hastaAvailabilityPhase, setHastaAvailabilityPhase] = useState<RecurringHastaAvailabilityPhase>('idle');
   const [hastaOptionStatuses, setHastaOptionStatuses] = useState<RecurringHastaOptionStatus[]>([]);
+  // Live site_config so the recurring preview reacts to admin changes (same-day block, notice) without reloading.
+  const [liveSiteConfig, setLiveSiteConfig] = useState<SiteConfig | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
@@ -412,7 +415,7 @@ export default function PortalPage() {
     const durationMinutes = parseInt(formData.duration, 10);
     const bookedKeys = userBookedSlotKeys;
 
-    Promise.all([getAvailabilityForDates(dates), getSiteConfig()])
+    Promise.all([getAvailabilityForDates(dates), liveSiteConfig ?? getSiteConfig()])
       .then(([availability, config]) => {
         if (cancelled) return;
         const blockedKeys = new Set(
@@ -430,6 +433,7 @@ export default function PortalPage() {
           siteConfig: config,
           now: new Date(),
           minBookingNoticeHours: config.minBookingNoticeHours,
+          blockSameDayBooking: config.blockSameDayBooking,
         }));
         setHastaAvailabilityPhase('ready');
       })
@@ -450,7 +454,12 @@ export default function PortalPage() {
     formData.intervalDays,
     recurringHasta.options,
     userBookedSlotKeys,
+    liveSiteConfig,
   ]);
+
+  useEffect(() => subscribeSiteConfig(setLiveSiteConfig, (error) => {
+    console.error('Error escuchando la configuración del sitio:', error);
+  }), []);
 
   const rescheduleAppointment = useMemo(
     () => userAppointments.find((appointment) => appointment.id === selectedAppointment),

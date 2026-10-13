@@ -1,9 +1,11 @@
-import { MADRID_TIME_ZONE, type AppointmentSlotLike } from '@/lib/madrid-date';
+import { isSameDayInMadrid, MADRID_TIME_ZONE, type AppointmentSlotLike } from '@/lib/madrid-date';
 
 /** Fixed lock the customer already has when modifying an appointment. */
 export const CUSTOMER_MODIFICATION_LOCK_HOURS = 24;
 export const MAX_MIN_BOOKING_NOTICE_HOURS = 720;
 export const BOOKING_NOTICE_TOO_SHORT = 'booking_notice_too_short';
+export const SAME_DAY_BOOKING_DISABLED = 'same_day_booking_disabled';
+export const SAME_DAY_BOOKING_MESSAGE = 'No se pueden reservar citas para el mismo día.';
 
 /** Integer hours >= 0. Missing or invalid values mean "no notice" (legacy behaviour). */
 export function normalizeMinBookingNoticeHours(value: unknown): number {
@@ -104,4 +106,33 @@ export function effectiveBookingNoticeHours(configured: number, mode: BookingNot
 
 export function bookingNoticeMessage(hours: number): string {
     return `Las reservas deben hacerse con al menos ${hours} ${hours === 1 ? 'hora' : 'horas'} de antelación.`;
+}
+
+/**
+ * True when site_config.blockSameDayBooking is on and `slot` is dated today
+ * in Europe/Madrid, whatever its time. Same rule as the Cloud Functions.
+ */
+export function isSameDayBookingBlocked(slot: AppointmentSlotLike, now: Date, enabled: boolean | undefined): boolean {
+    return enabled === true && isSameDayInMadrid(slot.date ?? '', now);
+}
+
+/** Why a future slot is closed to a customer by configuration (never "past"). */
+export type CustomerBookingRestriction = typeof SAME_DAY_BOOKING_DISABLED | typeof BOOKING_NOTICE_TOO_SHORT;
+
+/**
+ * Single entry point for the customer booking restrictions. Both apply
+ * independently; same-day wins because its message is more specific.
+ */
+export function customerBookingRestriction(
+    slot: AppointmentSlotLike,
+    now: Date,
+    rules: { minBookingNoticeHours?: number; blockSameDayBooking?: boolean },
+): CustomerBookingRestriction | undefined {
+    if (isSameDayBookingBlocked(slot, now, rules.blockSameDayBooking)) return SAME_DAY_BOOKING_DISABLED;
+    if (isInsideBookingNotice(slot, now, rules.minBookingNoticeHours ?? 0)) return BOOKING_NOTICE_TOO_SHORT;
+    return undefined;
+}
+
+export function customerBookingRestrictionMessage(restriction: CustomerBookingRestriction, noticeHours: number): string {
+    return restriction === SAME_DAY_BOOKING_DISABLED ? SAME_DAY_BOOKING_MESSAGE : bookingNoticeMessage(noticeHours);
 }

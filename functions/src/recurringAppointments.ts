@@ -5,6 +5,7 @@ import {
   getCanonicalSlotBlocks,
   isBonoExpiredAt,
   isInsideBookingNotice,
+  isSameDayBookingBlocked,
   isSlotAtCapacity,
   madridCivilSlotToInstant,
   selectExactlyOneActiveBono,
@@ -62,7 +63,15 @@ export interface RecurringSeriesWritePlan {
 
 export type RecurringSeriesPlanResult =
   | { ok: true; writes: RecurringSeriesWritePlan }
-  | { ok: false; message: string; writes: []; reason?: "booking_notice_too_short" };
+  | {
+    ok: false;
+    message: string;
+    writes: [];
+    reason?: "booking_notice_too_short" | "same_day_booking_disabled";
+    /** Occurrence that made the whole series fail, when the reason is a customer restriction. */
+    problemDate?: string;
+    problemTime?: string;
+  };
 
 export interface PlanRecurringAppointmentsInput {
   startDate: string;
@@ -79,6 +88,8 @@ export interface PlanRecurringAppointmentsInput {
   requireBono?: boolean;
   /** Customer booking notice in hours. Admin series never pass it. */
   minBookingNoticeHours?: number;
+  /** site_config.blockSameDayBooking for customer series. Admin series never pass it. */
+  blockSameDayBooking?: boolean;
 }
 
 export interface RecurringEndDateOption {
@@ -323,12 +334,25 @@ export function planRecurringAppointments(input: PlanRecurringAppointmentsInput)
     if (Number.isNaN(slotTime.getTime()) || slotTime <= input.now) {
       return emptyFail(`La franja del ${formatDateEs(date)} a las ${input.startTime} ya no esta disponible.`);
     }
+    // Any occurrence dated today rejects the whole series (no partial writes).
+    if (isSameDayBookingBlocked({ date, time: input.startTime }, input.now, input.blockSameDayBooking)) {
+      return {
+        ok: false,
+        writes: [],
+        reason: "same_day_booking_disabled",
+        problemDate: date,
+        problemTime: input.startTime,
+        message: `La serie incluye una cita para hoy (${formatDateEs(date)} a las ${input.startTime}) y no se permiten reservas para el mismo dia.`,
+      };
+    }
     const noticeHours = input.minBookingNoticeHours ?? 0;
     if (isInsideBookingNotice({ date, time: input.startTime }, input.now, noticeHours)) {
       return {
         ok: false,
         writes: [],
         reason: "booking_notice_too_short",
+        problemDate: date,
+        problemTime: input.startTime,
         message: `La franja del ${formatDateEs(date)} a las ${input.startTime} no respeta la antelacion minima de ${noticeHours} ${noticeHours === 1 ? "hora" : "horas"} para reservar.`,
       };
     }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import type { TimeSlot } from '@/types';
@@ -258,6 +258,93 @@ describe('InteractiveCalendar', () => {
       expect(screen.getByRole('button', { name: /18:00, No disponible/i })).toBeDisabled();
       fireEvent.click(screen.getByRole('button', { name: /18 de Septiembre/i }));
       expect(screen.getByRole('button', { name: /08:00, No disponible/i })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /18:00, Libre/i })).toBeEnabled();
+    });
+  });
+
+  describe('same-day booking block', () => {
+    const baseConfig: typeof DEFAULT_SITE_CONFIG = { ...DEFAULT_SITE_CONFIG, startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 4 };
+    let emitConfig: (config: typeof DEFAULT_SITE_CONFIG) => void = () => undefined;
+
+    const withConfig = (overrides: Partial<typeof DEFAULT_SITE_CONFIG>) => {
+      subscribeSiteConfig.mockImplementation((callback: (config: typeof DEFAULT_SITE_CONFIG) => void) => {
+        emitConfig = callback;
+        callback({ ...baseConfig, ...overrides });
+        return vi.fn();
+      });
+    };
+
+    function CustomerCalendar({ bookingNotice }: { bookingNotice?: 'booking' | 'modification' }) {
+      const [slot, setSlot] = useState<TimeSlot | null>(null);
+      return (
+        <>
+          <InteractiveCalendar
+            selectedSlot={slot}
+            onSelectSlot={setSlot}
+            onClearSlot={() => setSlot(null)}
+            selectedDuration={60}
+            bookingNotice={bookingNotice}
+          />
+          <output data-testid="slot">{slot ? `${slot.date}_${slot.time}` : 'none'}</output>
+        </>
+      );
+    }
+
+    const ready = () => waitFor(() => expect(screen.queryByText('Cargando disponibilidad...')).not.toBeInTheDocument());
+
+    it('greys out every future slot today with its own reason and keeps tomorrow bookable', async () => {
+      withConfig({ blockSameDayBooking: true }); // now = 16 Sep 10:00 Madrid
+      render(<CustomerCalendar bookingNotice="booking" />);
+      await ready();
+
+      fireEvent.click(screen.getByRole('button', { name: /16 de Septiembre/i }));
+      const tonight = screen.getByRole('button', { name: /18:00, No disponible/i });
+      expect(tonight).toBeDisabled();
+      expect(tonight).toHaveAttribute('data-restriction', 'same_day_booking_disabled');
+      expect(tonight).toHaveAttribute('title', 'No se pueden reservar citas para el mismo día.');
+      // A genuinely past slot is not tagged as a configuration restriction.
+      expect(screen.getByRole('button', { name: /08:00, No disponible/i })).not.toHaveAttribute('data-restriction');
+
+      fireEvent.click(screen.getByRole('button', { name: /17 de Septiembre/i }));
+      expect(screen.getByRole('button', { name: /08:00, Libre/i })).toBeEnabled();
+    });
+
+    it('does not limit admin calendars, modifications or configs without the flag', async () => {
+      withConfig({ blockSameDayBooking: true });
+      const { unmount } = render(<CustomerCalendar />);
+      await ready();
+      fireEvent.click(screen.getByRole('button', { name: /16 de Septiembre/i }));
+      expect(screen.getByRole('button', { name: /18:00, Libre/i })).toBeEnabled();
+      unmount();
+
+      withConfig({ blockSameDayBooking: true });
+      const modification = render(<CustomerCalendar bookingNotice="modification" />);
+      await ready();
+      fireEvent.click(screen.getByRole('button', { name: /16 de Septiembre/i }));
+      expect(screen.getByRole('button', { name: /18:00, Libre/i })).not.toHaveAttribute('data-restriction');
+      modification.unmount();
+
+      withConfig({});
+      render(<CustomerCalendar bookingNotice="booking" />);
+      await ready();
+      fireEvent.click(screen.getByRole('button', { name: /16 de Septiembre/i }));
+      expect(screen.getByRole('button', { name: /18:00, Libre/i })).toBeEnabled();
+    });
+
+    it('reacts live to the admin toggling the flag and drops a selection that became blocked', async () => {
+      withConfig({ blockSameDayBooking: false });
+      render(<CustomerCalendar bookingNotice="booking" />);
+      await ready();
+
+      fireEvent.click(screen.getByRole('button', { name: /16 de Septiembre/i }));
+      fireEvent.click(screen.getByRole('button', { name: /18:00, Libre/i }));
+      expect(screen.getByTestId('slot')).toHaveTextContent('2026-09-16_18:00');
+
+      act(() => emitConfig({ ...baseConfig, blockSameDayBooking: true }));
+      expect(screen.getByRole('button', { name: /18:00, No disponible/i })).toBeDisabled();
+      expect(screen.getByTestId('slot')).toHaveTextContent('none');
+
+      act(() => emitConfig({ ...baseConfig, blockSameDayBooking: false }));
       expect(screen.getByRole('button', { name: /18:00, Libre/i })).toBeEnabled();
     });
   });
