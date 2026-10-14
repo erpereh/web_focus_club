@@ -93,10 +93,32 @@ export function resolveRefundTarget(appointment: FinanceAppointment, context: Fi
   return { kind: "bono", snap: candidates[0].snap, bono: candidates[0].bono, redirectedFrom: original.id };
 }
 
+export type RefundOutcome =
+  | { kind: "not_applicable" }
+  | { kind: "unavailable"; amount: number; reason: string }
+  | { kind: "refunded"; amount: number; cappedMinutes: number; targetBonoId: string; redirectedFrom?: string };
+
+export interface RefundResult {
+  refunded: boolean;
+  appointmentPatch: Record<string, unknown>;
+  outcome: RefundOutcome;
+}
+
+const NOT_APPLICABLE: RefundResult = { refunded: false, appointmentPatch: {}, outcome: { kind: "not_applicable" } };
+
+/** Minutes the customer is owed but did not get back: kept for manual review, never credited automatically. */
+export function pendingRefundMinutes(outcome: RefundOutcome): number {
+  if (outcome.kind === "unavailable") return outcome.amount;
+  if (outcome.kind === "refunded") return outcome.cappedMinutes;
+  return 0;
+}
+
 /**
  * Returns the reserved minutes at most once. Writes the bono and returns the
  * appointment patch (also merged into the appointment unless it is about to be
- * deleted). Never exceeds the bono maximum; trimmed minutes are recorded.
+ * deleted). Never exceeds the bono maximum. Minutes that cannot be returned
+ * (no valid bono) or do not fit (capped) are flagged for manual review
+ * (`minutesRefundPendingReview`) and never moved to another bono on their own.
  */
 export function refundAppointmentMinutesInTransaction(
   transaction: Transaction,
@@ -105,19 +127,25 @@ export function refundAppointmentMinutesInTransaction(
   context: FinanceContext,
   now: string,
   options: { persistAppointment?: boolean; reason?: string | null } = {},
-): { refunded: boolean; appointmentPatch: Record<string, unknown> } {
+): RefundResult {
   const persist = options.persistAppointment !== false;
-  if (appointment.appointmentType === "nutrition") return { refunded: false, appointmentPatch: {} };
+  if (appointment.appointmentType === "nutrition") return NOT_APPLICABLE;
   const alreadyRefunded = Boolean(appointment.minutesRefundedAt);
   const reserved = appointment.minutesDeducted === true && Boolean(appointment.minutesDeductedAt);
-  if (alreadyRefunded || !reserved) return { refunded: false, appointmentPatch: {} };
+  if (alreadyRefunded || !reserved) return NOT_APPLICABLE;
+  const amount = Number(appointment.minutesDeductedAmount ?? 0);
+  if (!Number.isFinite(amount) || amount <= 0) return NOT_APPLICABLE;
 
   const target = resolveRefundTarget(appointment, context, new Date(now));
-  if (target.kind === "none") return { refunded: false, appointmentPatch: {} };
+  if (target.kind === "none") return NOT_APPLICABLE;
   if (target.kind === "unavailable") {
-    const patch = { minutesRefundReason: target.reason };
+    const patch = {
+      minutesRefundReason: target.reason,
+      minutesRefundPendingReview: true,
+      minutesRefundPendingAmount: amount,
+    };
     if (persist) transaction.set(appointmentRef, patch, { merge: true });
-    return { refunded: false, appointmentPatch: patch };
+    return { refunded: false, appointmentPatch: patch, outcome: { kind: "unavailable", amount, reason: target.reason } };
   }
 
   let bonoPatch: { minutosRestantes: number; estado: LifecycleBono["estado"] } | undefined;
@@ -132,7 +160,7 @@ export function refundAppointmentMinutesInTransaction(
       setAppointment: (patch) => { appointmentPatch = patch; },
     },
   });
-  if (!result.ok || !bonoPatch || !appointmentPatch) return { refunded: false, appointmentPatch: {} };
+  if (!result.ok || !bonoPatch || !appointmentPatch) return NOT_APPLICABLE;
 
   transaction.set(target.snap.ref, {
     ...bonoPatch,
@@ -146,13 +174,25 @@ export function refundAppointmentMinutesInTransaction(
     }),
   }, { merge: true });
 
+  const cappedMinutes = Number((appointmentPatch as Record<string, unknown>).minutesRefundCappedAmount ?? 0);
   const patch: Record<string, unknown> = {
     ...appointmentPatch,
     ...(options.reason !== undefined ? { minutesRefundReason: options.reason } : {}),
     ...(target.redirectedFrom ? { minutesRefundedToBonoId: target.snap.id } : {}),
+    ...(cappedMinutes > 0 ? { minutesRefundPendingReview: true, minutesRefundPendingAmount: cappedMinutes } : {}),
   };
   if (persist) transaction.set(appointmentRef, patch, { merge: true });
-  return { refunded: true, appointmentPatch: patch };
+  return {
+    refunded: true,
+    appointmentPatch: patch,
+    outcome: {
+      kind: "refunded",
+      amount,
+      cappedMinutes,
+      targetBonoId: target.snap.id,
+      ...(target.redirectedFrom ? { redirectedFrom: target.redirectedFrom } : {}),
+    },
+  };
 }
 
 /** Debits `bonoSnap` once; returns the appointment audit fields (undefined when refused). */

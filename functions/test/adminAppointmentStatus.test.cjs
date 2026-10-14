@@ -378,10 +378,12 @@ test("blocking with deletion is atomic: an already blocked slot aborts everythin
 
 test("blocking refuses to delete appointments outside the selection", async () => {
   const { db, handlers } = setup({ "appointments/a1": appointment({ slot: { date: DAY, time: "15:00" } }) });
-  await rejectsWithReason(handlers.blockSlotsFromAdmin(callable("admin", {
+  const error = await rejectsWithReason(handlers.blockSlotsFromAdmin(callable("admin", {
     date: DAY, startTimes: ["10:00"], groupDurationMinutes: 30, deleteAppointmentIds: ["a1"],
-  })), "appointment_not_in_selection");
+  })), "appointments_changed");
+  assert.deepEqual(error.details.missingIds, ["a1"]);
   assert.ok(db.doc("appointments/a1"));
+  assert.equal(db.doc(`blocked_slots/${DAY}_10:00`), undefined);
 });
 
 test("assigning a bono replaces the active one atomically and idempotently", async () => {
@@ -568,4 +570,206 @@ test("reconciliation dry run reports per-slot differences without writing", asyn
     /confirmApply/,
   );
   assert.equal(applied, false);
+});
+
+// ------------------------------------------------- deletion audit records
+
+function deletionRecord(db, id) {
+  return db.doc(`appointment_deletions/${id}`);
+}
+
+const PERSONAL_FIELDS = ["name", "email", "phone", "reason", "trainerNotes"];
+
+function assertNoPersonalData(record) {
+  const flat = JSON.stringify(record);
+  for (const field of PERSONAL_FIELDS) assert.ok(!flat.includes(`"${field}"`), `record must not store ${field}`);
+  assert.ok(!flat.includes("lucia@example.com"));
+  assert.ok(!flat.includes("Lucía"));
+}
+
+test("deleting with an impossible refund keeps the minutes pending for manual review", async () => {
+  const { db, handlers } = setup({
+    "bonos/bono-1": {
+      userId: "user-1", tamano: 480, minutosTotales: 480, minutosRestantes: 0, estado: "agotado",
+      replacedByBonoId: "bono-2", fechaExpiracion: "2026-12-31T22:59:59.000Z", historial: [],
+    },
+    "appointments/a1": appointment({ status: "approved", approvedSlot: { date: DAY, time: "10:00" }, trainerNotes: "nota" }),
+    ...occupancy("10:00", 1), ...occupancy("10:15", 1), ...occupancy("10:30", 1), ...occupancy("10:45", 1),
+  });
+  const result = await handlers.deleteAppointmentsFromAdmin(callable("admin", { appointmentIds: ["a1"] }));
+  assert.equal(db.doc("appointments/a1"), undefined);
+  assert.deepEqual(result.refundedIds, []);
+  assert.equal(result.pendingRefunds.length, 1);
+  assert.equal(result.pendingRefunds[0].appointmentId, "a1");
+  assert.equal(result.pendingRefunds[0].minutes, 60);
+  assert.match(result.pendingRefunds[0].reason, /sustituido/);
+  // No bono receives the minutes automatically.
+  assert.equal(db.doc("bonos/bono-1").minutosRestantes, 0);
+  assert.equal(db.doc("bonos/bono-1").estado, "agotado");
+
+  const record = deletionRecord(db, "a1");
+  assert.equal(record.userId, "user-1");
+  assert.equal(record.context, "admin_delete");
+  assert.deepEqual(record.appointment.slot, { date: DAY, time: "10:00" });
+  assert.equal(record.finance.refundStatus, "pending_manual");
+  assert.equal(record.finance.pendingRefundMinutes, 60);
+  assert.equal(record.finance.bonoId, "bono-1");
+  assert.equal(record.manualReview.status, "pending");
+  assert.equal(record.expiresAt, undefined, "pending records never expire before review");
+  assertNoPersonalData(record);
+  const [[, log]] = logs(db, "appointment_deleted");
+  assert.equal(log.refundStatus, "pending_manual");
+  assert.equal(log.pendingRefundMinutes, 60);
+});
+
+test("deleting with a capped refund records the trimmed minutes as pending", async () => {
+  const { db, handlers } = setup({
+    "bonos/bono-1": {
+      userId: "user-1", tamano: 480, minutosTotales: 480, minutosRestantes: 450, estado: "activo",
+      fechaExpiracion: "2026-12-31T22:59:59.000Z", historial: [],
+    },
+    "appointments/a1": appointment(),
+  });
+  const result = await handlers.deleteAppointmentsFromAdmin(callable("admin", { appointmentIds: ["a1"] }));
+  assert.equal(db.doc("bonos/bono-1").minutosRestantes, 480);
+  const record = deletionRecord(db, "a1");
+  assert.equal(record.finance.refundStatus, "refunded_capped");
+  assert.equal(record.finance.refundedAmount, 30);
+  assert.equal(record.finance.cappedMinutes, 30);
+  assert.equal(record.finance.pendingRefundMinutes, 30);
+  assert.equal(record.expiresAt, undefined);
+  assert.deepEqual(result.pendingRefunds.map((item) => [item.appointmentId, item.minutes]), [["a1", 30]]);
+});
+
+test("full and not-applicable refunds also leave a retained, minimal record", async () => {
+  const nutrition = appointment({ appointmentType: "nutrition", duration: "30", minutesDeducted: false, bonoId: undefined, slot: { date: DAY, time: "12:00" } });
+  const { db, handlers } = setup({ "appointments/a1": appointment(), "appointments/n1": nutrition });
+  const result = await handlers.deleteAppointmentsFromAdmin(callable("admin", { appointmentIds: ["a1", "n1"] }));
+  assert.deepEqual(result.pendingRefunds, []);
+  const full = deletionRecord(db, "a1");
+  assert.equal(full.finance.refundStatus, "refunded");
+  assert.equal(full.finance.refundedAmount, 60);
+  assert.equal(full.finance.refundedToBonoId, "bono-1");
+  assert.equal(full.manualReview, null);
+  const expires = full.expiresAt;
+  assert.ok(expires, "resolved records carry a TTL timestamp");
+  const expiresMs = (expires._seconds ?? expires.seconds) * 1000;
+  assert.equal(new Date(expiresMs).toISOString(), "2028-10-14T08:00:00.000Z");
+  assert.equal(deletionRecord(db, "n1").finance.refundStatus, "not_refundable");
+  assertNoPersonalData(full);
+  // Repeating the deletion creates no second refund and keeps the same record.
+  await handlers.deleteAppointmentsFromAdmin(callable("admin", { appointmentIds: ["a1"] }));
+  assert.equal(db.doc("bonos/bono-1").historial.filter((entry) => entry.accion === "devolucion_cita").length, 1);
+  assert.equal(deletionRecord(db, "a1").finance.refundStatus, "refunded");
+});
+
+test("cancel with an impossible refund flags the appointment for manual review", async () => {
+  const { db, handlers } = setup({
+    "bonos/bono-1": {
+      userId: "user-1", tamano: 480, minutosTotales: 480, minutosRestantes: 0, estado: "agotado",
+      replacedByBonoId: "bono-2", fechaExpiracion: "2026-12-31T22:59:59.000Z", historial: [],
+    },
+    "appointments/a1": appointment({ status: "approved", approvedSlot: { date: DAY, time: "10:00" } }),
+  });
+  await handlers.updateAppointmentStatusFromAdmin(callable("admin", { appointmentId: "a1", status: "cancelled", expectedStatus: "approved" }));
+  const stored = db.doc("appointments/a1");
+  assert.equal(stored.minutesRefundPendingReview, true);
+  assert.equal(stored.minutesRefundPendingAmount, 60);
+  assert.equal(stored.minutesRefundedAt, null);
+});
+
+// ------------------------------------------------- block verification
+
+const blockRequest = (extra = {}) => ({
+  date: DAY, startTimes: ["10:00", "10:30"], groupDurationMinutes: 30, deleteAppointmentIds: [], ...extra,
+});
+
+test("blocking with deletion checks every overlapping appointment, not only the ids sent", async () => {
+  // A customer request (preferredSlots only, no top-level date) the admin screen did not include.
+  const customerRequest = appointment({ userId: "user-2", slot: { date: DAY, time: "10:45" }, duration: "30" });
+  delete customerRequest.date;
+  delete customerRequest.time;
+  const { db, handlers } = setup({ "appointments/c1": customerRequest });
+  const error = await rejectsWithReason(handlers.blockSlotsFromAdmin(callable("admin", blockRequest())), "appointments_changed");
+  assert.deepEqual(error.details.unexpectedIds, ["c1"]);
+  assert.equal(db.doc(`blocked_slots/${DAY}_10:00`), undefined);
+  assert.ok(db.doc("appointments/c1"));
+});
+
+test("older approvals found only through approvedSlot and legacy date/time are detected", async () => {
+  const oldApproval = appointment({ status: "approved", slot: { date: "2026-10-19", time: "09:00" }, approvedSlot: { time: "10:15", date: DAY } });
+  const legacy = appointment({ userId: "user-2", status: "approved", slot: { date: DAY, time: "09:30" }, duration: "60" });
+  delete legacy.preferredSlots;
+  const { handlers } = setup({ "appointments/o1": oldApproval, "appointments/l1": legacy });
+  const error = await rejectsWithReason(handlers.blockSlotsFromAdmin(callable("admin", blockRequest())), "appointments_changed");
+  assert.deepEqual(error.details.unexpectedIds, ["l1", "o1"]);
+});
+
+test("blocking with deletion requested succeeds when nothing overlaps", async () => {
+  const { db, handlers } = setup({
+    "appointments/far": appointment({ slot: { date: DAY, time: "15:00" } }),
+    "appointments/before": appointment({ userId: "user-2", slot: { date: DAY, time: "09:00" } }),
+    "appointments/cancelled": appointment({ userId: "user-3", status: "cancelled", slot: { date: DAY, time: "10:00" } }),
+  });
+  const result = await handlers.blockSlotsFromAdmin(callable("admin", blockRequest()));
+  assert.equal(result.blockedSlotIds.length, 4);
+  assert.deepEqual(result.deletedIds, []);
+  assert.ok(db.doc(`blocked_slots/${DAY}_10:45`));
+});
+
+test("a booking created while the block is confirming makes it fail with nothing written", async () => {
+  const { db, handlers } = setup({
+    "appointments/a1": appointment({ status: "approved", approvedSlot: { date: DAY, time: "10:00" } }),
+    ...occupancy("10:00", 1), ...occupancy("10:15", 1), ...occupancy("10:30", 1), ...occupancy("10:45", 1),
+  });
+  let injected = false;
+  db.beforeCommit = async () => {
+    if (injected) return;
+    injected = true;
+    // Concurrent customer booking (customer flows write only preferredSlots).
+    const booking = appointment({ userId: "user-2", slot: { date: DAY, time: "10:30" }, duration: "30" });
+    delete booking.date;
+    delete booking.time;
+    await db.collection("appointments").doc("late").set(booking);
+  };
+  const error = await rejectsWithReason(handlers.blockSlotsFromAdmin(callable("admin", blockRequest({ deleteAppointmentIds: ["a1"] }))), "appointments_changed");
+  assert.deepEqual(error.details.unexpectedIds, ["late"]);
+  assert.ok(db.conflicts >= 1, "the transaction was retried on fresh data");
+  assert.ok(db.doc("appointments/a1"), "nothing deleted");
+  assert.ok(db.doc("appointments/late"));
+  assert.equal(db.doc(`blocked_slots/${DAY}_10:00`), undefined, "nothing blocked");
+  assert.equal(count(db, "10:00"), 1);
+  assert.equal(deletionRecord(db, "a1"), undefined);
+});
+
+test("a cancellation during the block confirmation also aborts it", async () => {
+  const { db, handlers } = setup({
+    "appointments/a1": appointment({ status: "approved", approvedSlot: { date: DAY, time: "10:00" } }),
+  });
+  let injected = false;
+  db.beforeCommit = async () => {
+    if (injected) return;
+    injected = true;
+    await db.collection("appointments").doc("a1").set({ status: "cancelled" }, { merge: true });
+  };
+  const error = await rejectsWithReason(handlers.blockSlotsFromAdmin(callable("admin", blockRequest({ deleteAppointmentIds: ["a1"] }))), "appointments_changed");
+  assert.deepEqual(error.details.missingIds, ["a1"]);
+  assert.equal(db.doc(`blocked_slots/${DAY}_10:00`), undefined);
+  assert.equal(db.doc("appointments/a1").status, "cancelled");
+});
+
+test("blocking refuses safely when the day is too large to verify", async () => {
+  const many = {};
+  for (let index = 0; index < 301; index += 1) {
+    many[`appointments/x${index}`] = appointment({ userId: `user-${index}`, status: "cancelled", slot: { date: DAY, time: "10:00" } });
+  }
+  const { db, handlers } = setup(many);
+  await rejectsWithReason(handlers.blockSlotsFromAdmin(callable("admin", blockRequest())), "operation_too_large");
+  assert.equal(db.doc(`blocked_slots/${DAY}_10:00`), undefined);
+});
+
+test("candidate start slots cover every session that can reach the blocks", () => {
+  const { candidateStartSlots } = require("../lib/adminAppointmentStatus.js");
+  const slots = candidateStartSlots(DAY, new Set([`${DAY}_10:00`, `${DAY}_00:15`]));
+  assert.deepEqual(slots.map((slot) => slot.time), ["00:00", "00:15", "09:15", "09:30", "09:45", "10:00"]);
 });

@@ -188,6 +188,7 @@ import {
   doesSessionFitWithinSchedule,
   rescheduleAppointmentFromAdmin as rescheduleAppointmentFromAdminFS,
   subscribeSlotOccupancyForDate,
+  type PendingRefund,
   replaceRecurringSeriesScheduleFromAdmin as replaceRecurringSeriesScheduleFromAdminFS,
   returnRecurringSeriesToPendingFromAdmin as returnRecurringSeriesToPendingFromAdminFS,
   getAllActiveBonos,
@@ -441,6 +442,15 @@ function formatBonoDate(value: string): string {
   const date = parseDateInputLocal(dateValueToInputLocal(value));
   if (!date) return 'Fecha no valida';
   return date.toLocaleDateString('es-ES');
+}
+
+/** Notice for minutes that could not be returned automatically (manual review). */
+function pendingRefundsNotice(pending: PendingRefund[] | undefined): string | null {
+  if (!pending?.length) return null;
+  const total = pending.reduce((sum, item) => sum + item.minutes, 0);
+  return `Atención: ${total} min de ${pending.length} cita(s) no se han podido devolver automáticamente `
+    + 'y quedan pendientes de revisión manual (registro de auditoría de borrados).\n\n'
+    + pending.map((item) => `- ${item.appointmentId}: ${item.minutes} min. ${item.reason}`).join('\n');
 }
 
 /** `details` of a callable error (reason, overridable flags...). */
@@ -2003,7 +2013,9 @@ export default function AdminPage() {
     if (!confirm('¿Estás seguro de eliminar esta cita?')) return;
     setStatusActionBusyId(appointment.id);
     try {
-      await deleteAppointmentsFromAdminFS([appointment.id]);
+      const result = await deleteAppointmentsFromAdminFS([appointment.id]);
+      const notice = pendingRefundsNotice(result.pendingRefunds);
+      if (notice) alert(notice);
       await refreshData();
     } catch (error) {
       console.error('Error deleting appointment:', error);
@@ -6468,15 +6480,19 @@ export default function AdminPage() {
                                             // Bloqueo y borrado de citas afectadas en una sola transacción:
                                             // o se aplican los dos, o ninguno.
                                             const toDelete = deleteOnBlock ? affectedAppointments : [];
-                                            if (toDelete.length > 0) {
-                                              await blockSlotsFromAdminFS({
+                                            if (deleteOnBlock) {
+                                              // The server re-checks every overlapping appointment (even when the
+                                              // list is empty) and refuses if the screen is out of date.
+                                              const blockResult = await blockSlotsFromAdminFS({
                                                 date: dateKey,
                                                 startTimes: slotsArray,
                                                 groupDurationMinutes: siteConfig.slotInterval,
                                                 ...(blockReasonInput ? { reason: blockReasonInput } : {}),
                                                 deleteAppointmentIds: toDelete.map((appt) => appt.id),
                                               });
-                                              await addActivityLog({
+                                              const notice = pendingRefundsNotice(blockResult.pendingRefunds);
+                                              if (notice) alert(notice);
+                                              if (toDelete.length > 0) await addActivityLog({
                                                 action: 'appointments_deleted_on_block',
                                                 adminEmail: user?.email || 'unknown',
                                                 details: `${dateKey}: ${toDelete.length} cita(s) eliminadas (${toDelete.map(a => a.name).join(', ')})`,
@@ -6502,6 +6518,7 @@ export default function AdminPage() {
                                           } catch (err) {
                                             console.error('Error blocking slots:', err);
                                             alert(getAdminCallableErrorMessage(err, 'Error al bloquear franjas. Inténtalo de nuevo.'));
+                                            if (getCallableErrorDetails(err)?.reason === 'appointments_changed') await refreshData();
                                           } finally {
                                             setSavingBlocks(false);
                                           }

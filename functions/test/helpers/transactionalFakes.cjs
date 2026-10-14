@@ -19,11 +19,22 @@ function getPath(data, fieldPath) {
   return fieldPath.split(".").reduce((value, key) => (value == null ? undefined : value[key]), data);
 }
 
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function matches(data, { field, operator, value }) {
   const actual = getPath(data, field);
-  if (operator === "==") return actual === value;
-  if (operator === "in") return value.includes(actual);
-  if (operator === "array-contains") return Array.isArray(actual) && actual.includes(value);
+  // Firestore compares maps by value (key order does not matter).
+  const same = (left, right) => stableJson(left) === stableJson(right);
+  if (operator === "==") return typeof value === "object" && value !== null ? same(actual, value) : actual === value;
+  if (operator === "in") return value.some((item) => same(actual, item));
+  if (operator === "array-contains") return Array.isArray(actual) && actual.some((item) => same(item, value));
+  if (operator === "array-contains-any") return Array.isArray(actual) && actual.some((item) => value.some((candidate) => same(item, candidate)));
   if (operator === ">=") return actual >= value;
   if (operator === "<=") return actual <= value;
   throw new Error(`unsupported operator ${operator}`);

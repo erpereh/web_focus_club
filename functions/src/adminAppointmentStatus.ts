@@ -1,4 +1,4 @@
-import { FieldValue, type DocumentReference, type Firestore, type Transaction } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, type DocumentReference, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import {
   getAppointmentEffectiveSlot,
@@ -11,9 +11,14 @@ import {
   type FinanceAppointment,
   type FinanceContext,
   type FinanceSnapshot,
+  pendingRefundMinutes,
   readFinanceContext,
   refundAppointmentMinutesInTransaction,
+  type RefundOutcome,
 } from "./appointmentFinance.js";
+
+/** Backend-only audit trail of deleted appointments (no client rule = denied). */
+export const APPOINTMENT_DELETIONS_COLLECTION = "appointment_deletions";
 import { openCustomerConfirmation, withdrawOpenProposalPatch, type CustomerConfirmation, type AppointmentProposal, type ProposalHistoryEntry } from "./appointmentProposals.js";
 import { readSeriesForOccurrence, type SeriesReadResult, seriesMetadataPatch } from "./seriesMetadata.js";
 import {
@@ -89,6 +94,7 @@ interface AdminAppointmentData extends FinanceAppointment {
   time?: string;
   assignedTrainer?: string | null;
   recurrenceSeriesId?: string;
+  createdAt?: unknown;
   customerConfirmation?: CustomerConfirmation | null;
   proposal?: AppointmentProposal | null;
   proposalHistory?: ProposalHistoryEntry[];
@@ -277,6 +283,83 @@ async function readDeletions(transaction: Transaction, db: Firestore, ids: strin
   };
 }
 
+/** Months a resolved deletion record is kept (Firestore TTL on `expiresAt`). */
+export const DELETION_RECORD_RETENTION_MONTHS = 24;
+
+type RefundStatus = "refunded" | "refunded_capped" | "not_refundable" | "pending_manual";
+
+function refundStatusOf(outcome: RefundOutcome): RefundStatus {
+  if (outcome.kind === "unavailable") return "pending_manual";
+  if (outcome.kind === "refunded") return outcome.cappedMinutes > 0 ? "refunded_capped" : "refunded";
+  return "not_refundable";
+}
+
+function addMonths(date: Date, months: number): Date {
+  const next = new Date(date.getTime());
+  next.setUTCMonth(next.getUTCMonth() + months);
+  return next;
+}
+
+/**
+ * Financial audit trail of a deleted appointment. Keeps only what is needed to
+ * audit the bono movement and recover it (pseudonymous `userId`, slot, minutes),
+ * never name, email, phone, comments or trainer notes. Records with minutes
+ * pending manual review have no `expiresAt` until someone resolves them.
+ */
+export function buildDeletionRecord(input: {
+  appointmentId: string;
+  appointment: AdminAppointmentData;
+  outcome: RefundOutcome;
+  context: "admin_delete" | "block";
+  actorUid: string;
+  now: Date;
+}): Record<string, unknown> {
+  const { appointment, outcome } = input;
+  const pending = pendingRefundMinutes(outcome);
+  const slot = getAppointmentEffectiveSlot(appointment) ?? null;
+  return {
+    appointmentId: input.appointmentId,
+    userId: appointment.userId,
+    context: input.context,
+    deletedAt: input.now.toISOString(),
+    deletedByUid: input.actorUid,
+    appointment: {
+      status: appointment.status,
+      slot,
+      duration: appointment.duration ?? null,
+      appointmentType: getAppointmentType(appointment),
+      serviceType: appointment.serviceType ?? null,
+      recurrenceSeriesId: appointment.recurrenceSeriesId ?? null,
+      createdAt: typeof appointment.createdAt === "string" ? appointment.createdAt : null,
+    },
+    finance: {
+      bonoId: appointment.bonoId ?? null,
+      minutesDeducted: appointment.minutesDeducted === true,
+      minutesDeductedAmount: appointment.minutesDeductedAmount ?? null,
+      minutesDeductedAt: appointment.minutesDeductedAt ?? null,
+      previousRefundAt: appointment.minutesRefundedAt ?? null,
+      refundStatus: refundStatusOf(outcome),
+      refundedAmount: outcome.kind === "refunded" ? outcome.amount - outcome.cappedMinutes : 0,
+      refundedToBonoId: outcome.kind === "refunded" ? outcome.targetBonoId : null,
+      cappedMinutes: outcome.kind === "refunded" ? outcome.cappedMinutes : 0,
+      pendingRefundMinutes: pending,
+      refundReason: outcome.kind === "unavailable"
+        ? outcome.reason
+        : pending > 0 ? "La devolución superaba el máximo del bono." : null,
+    },
+    manualReview: pending > 0 ? { status: "pending", since: input.now.toISOString() } : null,
+    ...(pending > 0
+      ? {}
+      : { expiresAt: Timestamp.fromDate(addMonths(input.now, DELETION_RECORD_RETENTION_MONTHS)) }),
+  };
+}
+
+interface PendingRefund {
+  appointmentId: string;
+  minutes: number;
+  reason: string;
+}
+
 function commitDeletions(
   transaction: Transaction,
   db: Firestore,
@@ -284,17 +367,19 @@ function commitDeletions(
   actor: { uid: string; email: string },
   now: Date,
   logAction: string,
-): { deletedIds: string[]; refundedIds: string[] } {
+): { deletedIds: string[]; refundedIds: string[]; pendingRefunds: PendingRefund[] } {
   const nowIso = now.toISOString();
   const ledger = new BonoLedger();
   const tx = ledger.transaction(transaction);
   const refundedIds: string[] = [];
+  const outcomes = new Map<string, RefundOutcome>();
 
   writeOccupancy(transaction, db, read.occupancyDelta, read.occupancyRaw);
   for (const item of read.prepared) {
     const refund = refundAppointmentMinutesInTransaction(tx, item.ref, item.data, ledger.context(item.finance), nowIso, {
       persistAppointment: false,
     });
+    outcomes.set(item.id, refund.outcome);
     if (refund.refunded) refundedIds.push(item.id);
   }
   for (const [seriesId, series] of read.series) {
@@ -305,8 +390,18 @@ function commitDeletions(
     const patch = seriesMetadataPatch(series.occurrences, changes, now, () => FieldValue.delete());
     if (patch) transaction.set(series.seriesRef, patch, { merge: true });
   }
+  const pendingRefunds: PendingRefund[] = [];
+  const context = logAction === "appointment_deleted_on_block" ? "block" : "admin_delete";
   for (const item of read.prepared) {
+    const outcome = outcomes.get(item.id) ?? { kind: "not_applicable" as const };
+    const record = buildDeletionRecord({ appointmentId: item.id, appointment: item.data, outcome, context, actorUid: actor.uid, now });
+    const finance = record.finance as { refundStatus: RefundStatus; pendingRefundMinutes: number; refundReason: string | null };
+    if (finance.pendingRefundMinutes > 0) {
+      pendingRefunds.push({ appointmentId: item.id, minutes: finance.pendingRefundMinutes, reason: finance.refundReason ?? "" });
+    }
     transaction.delete(item.ref);
+    // Same id as the appointment: a deleted appointment keeps exactly one record.
+    transaction.set(db.collection(APPOINTMENT_DELETIONS_COLLECTION).doc(item.id), record);
     transaction.create(db.collection("activity_logs").doc(), {
       action: logAction,
       adminUid: actor.uid,
@@ -315,15 +410,17 @@ function commitDeletions(
       details: `Cita de ${item.data.name ?? ""} (ID: ${item.id})`,
       previousStatus: item.data.status,
       minutesRefunded: refundedIds.includes(item.id),
+      refundStatus: finance.refundStatus,
+      pendingRefundMinutes: finance.pendingRefundMinutes,
       timestamp: nowIso,
       createdAt: nowIso,
     });
   }
-  return { deletedIds: read.prepared.map((item) => item.id), refundedIds };
+  return { deletedIds: read.prepared.map((item) => item.id), refundedIds, pendingRefunds };
 }
 
-function parseIdList(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_DELETE_BATCH) {
+function parseIdList(value: unknown, options: { allowEmpty?: boolean } = {}): string[] {
+  if (!Array.isArray(value) || (value.length === 0 && !options.allowEmpty) || value.length > MAX_DELETE_BATCH) {
     fail("invalid-argument", `Indica entre 1 y ${MAX_DELETE_BATCH} citas.`, "invalid_request");
   }
   return [...new Set(value.map((id) => parseId(id, "La cita")))];
@@ -376,6 +473,81 @@ export function buildBlockedSlotDocuments(input: {
     }
   }
   return [...documents.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+// --------------------------------------------------------------- overlap scan
+
+/** Upper bound of documents read to verify a block (the day's bookings). */
+export const MAX_BLOCK_SCAN_DOCUMENTS = 300;
+/** Firestore allows 500 writes per transaction; keep a safety margin. */
+export const MAX_TRANSACTION_WRITES = 450;
+const IN_QUERY_LIMIT = 30;
+const LONGEST_SESSION_MINUTES = 60;
+
+/** Start slots whose session (up to 60 min) could cover any selected block. */
+export function candidateStartSlots(date: string, selection: Set<string>): SlotLike[] {
+  const starts = new Set<string>();
+  for (const key of selection) {
+    const time = key.slice(date.length + 1);
+    const [hours, minutes] = time.split(":").map(Number);
+    const total = hours * 60 + minutes;
+    for (let offset = 0; offset < LONGEST_SESSION_MINUTES; offset += 15) {
+      const start = total - offset;
+      if (start < 0) continue;
+      starts.add(`${String(Math.floor(start / 60)).padStart(2, "0")}:${String(start % 60).padStart(2, "0")}`);
+    }
+  }
+  return [...starts].sort().map((time) => ({ date, time }));
+}
+
+function chunks<T>(values: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
+  return result;
+}
+
+/**
+ * Every active appointment overlapping `selection`, read inside the
+ * transaction with day-bounded queries (customer requests carry only
+ * `preferredSlots`, older approvals only `approvedSlot`, others `date`).
+ * Refuses, before any write, when the day is too large to verify safely.
+ */
+async function readOverlappingAppointmentIds(
+  transaction: Transaction,
+  db: Firestore,
+  date: string,
+  selection: Set<string>,
+): Promise<Set<string>> {
+  const appointments = db.collection("appointments");
+  const candidates = candidateStartSlots(date, selection);
+  const queries = [
+    appointments.where("date", "==", date),
+    ...chunks(candidates, IN_QUERY_LIMIT).flatMap((chunk) => [
+      appointments.where("preferredSlots", "array-contains-any", chunk),
+      appointments.where("approvedSlot", "in", chunk),
+    ]),
+  ];
+  const snaps = await Promise.all(queries.map((query) => transaction.get(query)));
+  const byId = new Map<string, AdminAppointmentData>();
+  snaps.forEach((snap) => snap.docs.forEach((doc) => byId.set(doc.id, doc.data() as AdminAppointmentData)));
+  if (byId.size > MAX_BLOCK_SCAN_DOCUMENTS) {
+    fail("failed-precondition", "Hay demasiadas citas en ese día para verificar el bloqueo de forma segura.", "operation_too_large");
+  }
+  const overlapping = new Set<string>();
+  for (const [id, appointment] of byId) {
+    if (appointment.status !== "pending" && appointment.status !== "approved") continue;
+    if (appointmentOccupancyKeys(appointment).some((key) => selection.has(key))) overlapping.add(id);
+  }
+  return overlapping;
+}
+
+function estimatedDeletionWrites(read: DeletionReadResult): number {
+  const bonos = new Set(read.prepared.flatMap((item) => [
+    item.finance.originalBono?.id,
+    ...item.finance.activeBonos.map((snap) => snap.id),
+  ]).filter(Boolean));
+  // delete + audit record + activity log per appointment, plus counters, bonos and series.
+  return read.prepared.length * 3 + read.occupancyDelta.size + bonos.size + read.series.size;
 }
 
 // --------------------------------------------------------------- handlers
@@ -606,9 +778,10 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
       fail("invalid-argument", "La selección de franjas no es válida.", "invalid_request");
     }
     const reason = typeof data.reason === "string" && data.reason.trim() ? data.reason.trim().slice(0, 300) : undefined;
-    const deleteIds = data.deleteAppointmentIds === undefined || (Array.isArray(data.deleteAppointmentIds) && data.deleteAppointmentIds.length === 0)
-      ? []
-      : parseIdList(data.deleteAppointmentIds);
+    // Present (even empty) = "delete exactly the overlapping appointments I saw".
+    const deleteIds = data.deleteAppointmentIds === undefined
+      ? undefined
+      : parseIdList(data.deleteAppointmentIds, { allowEmpty: true });
 
     return db.runTransaction(async (transaction) => {
       const nowDate = deps.getNowDate();
@@ -621,26 +794,39 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
         createdBy: actor.uid,
         createdAt: now,
       });
+      const selection = new Set(documents.map((document) => document.id));
       const blockedRefs = documents.map((document) => db.collection("blocked_slots").doc(document.id));
-      const [blockedSnaps, read] = await Promise.all([
+      const [blockedSnaps, overlapping, read] = await Promise.all([
         Promise.all(blockedRefs.map((ref) => transaction.get(ref))),
-        deleteIds.length ? readDeletions(transaction, db, deleteIds) : Promise.resolve(undefined),
+        deleteIds ? readOverlappingAppointmentIds(transaction, db, date, selection) : Promise.resolve(undefined),
+        deleteIds?.length ? readDeletions(transaction, db, deleteIds) : Promise.resolve(undefined),
       ]);
       if (blockedSnaps.some((snap) => snap.exists)) {
         fail("failed-precondition", "Una de las franjas seleccionadas ya está bloqueada.", "slot_already_blocked");
       }
-      const selection = new Set(documents.map((document) => document.id));
-      for (const item of read?.prepared ?? []) {
-        const keys = appointmentOccupancyKeys(item.data);
-        if (!keys.some((key) => selection.has(key))) {
-          fail("failed-precondition", "Una de las citas indicadas no está en las franjas a bloquear.", "appointment_not_in_selection");
+      if (deleteIds && overlapping) {
+        // The admin confirmed a specific list. Anything else overlapping now (a new
+        // booking, a cancellation, a move) means the screen is stale: write nothing.
+        const requested = new Set(deleteIds);
+        const unexpectedIds = [...overlapping].filter((id) => !requested.has(id)).sort();
+        const missingIds = deleteIds.filter((id) => !overlapping.has(id)).sort();
+        if (unexpectedIds.length || missingIds.length) {
+          fail(
+            "failed-precondition",
+            "Las citas de esas franjas han cambiado. Actualiza la vista y vuelve a intentarlo.",
+            "appointments_changed",
+            { unexpectedIds, missingIds },
+          );
         }
+      }
+      if (read && estimatedDeletionWrites(read) + documents.length > MAX_TRANSACTION_WRITES) {
+        fail("failed-precondition", "La operación es demasiado grande. Bloquea menos franjas a la vez.", "operation_too_large");
       }
 
       documents.forEach(({ id: _id, ...blockedSlot }, index) => transaction.create(blockedRefs[index], blockedSlot));
       const result = read
         ? commitDeletions(transaction, db, read, actor, nowDate, "appointment_deleted_on_block")
-        : { deletedIds: [], refundedIds: [] };
+        : { deletedIds: [], refundedIds: [], pendingRefunds: [] };
       return {
         success: true,
         blockedSlotIds: documents.map((document) => document.id),

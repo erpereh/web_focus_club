@@ -1094,11 +1094,19 @@ export async function updateAppointmentStatusFromAdmin(
     return result.data;
 }
 
+export interface PendingRefund {
+    appointmentId: string;
+    minutes: number;
+    reason: string;
+}
+
 export interface DeleteAppointmentsFromAdminResult {
     success: boolean;
     deletedIds: string[];
     refundedIds: string[];
     alreadyDeletedIds: string[];
+    /** Minutes that could not be returned (or did not fit): pending manual review. */
+    pendingRefunds?: PendingRefund[];
 }
 
 /** Deletes appointments releasing their seats and returning unrefunded minutes, atomically. */
@@ -1116,6 +1124,10 @@ export interface BlockSlotsFromAdminInput {
     startTimes: string[];
     groupDurationMinutes: number;
     reason?: string;
+    /**
+     * Present (even empty) = delete exactly these overlapping appointments. The
+     * server re-reads every overlapping appointment and refuses if they changed.
+     */
     deleteAppointmentIds?: string[];
 }
 

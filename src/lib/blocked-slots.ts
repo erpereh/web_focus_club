@@ -1,5 +1,6 @@
 import type { Appointment, BlockedSlot, SlotInterval } from '@/types';
 import { getCanonicalSlotBlocks, slotOccupancyKey } from './appointment-slots';
+import { appointmentEffectiveSlot } from './admin-slot-status';
 
 export interface BuildBlockedSlotGroupsInput {
     date: string;
@@ -95,11 +96,17 @@ export function getBlockedSelectionKeys(
     )));
 }
 
+/**
+ * Same rule as the server (`appointmentOccupancyKeys`): effective slot
+ * (approvedSlot → preferredSlots[0] → legacy date/time) and 30/45/60 minutes.
+ * The block callable refuses when both sides disagree.
+ */
 export function overlapsBlockedSelection(appointment: Appointment, blockedKeys: Set<string>): boolean {
     if (appointment.status !== 'pending' && appointment.status !== 'approved') return false;
-    const slot = appointment.approvedSlot ?? appointment.preferredSlots?.[0];
-    if (!slot) return false;
-    return getCanonicalSlotBlocks(slot.time, Number(appointment.duration)).some((time) => (
+    const slot = appointmentEffectiveSlot(appointment);
+    const duration = Number.parseInt(String(appointment.duration), 10);
+    if (!slot || ![30, 45, 60].includes(duration)) return false;
+    return getCanonicalSlotBlocks(slot.time, duration).some((time) => (
         blockedKeys.has(slotOccupancyKey(slot.date, time))
     ));
 }

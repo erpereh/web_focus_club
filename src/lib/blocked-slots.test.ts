@@ -93,4 +93,18 @@ describe('delete-on-block overlap detection', () => {
         };
         expect(overlapsBlockedSelection(approved, selectedKeys)).toBe(false);
     });
+
+    it('detects legacy appointments that only have top-level date/time (same rule as the server)', () => {
+        const legacy = { ...appointment('16:00'), preferredSlots: [], date: '2026-10-01', time: '16:00', status: 'approved' as const };
+        expect(overlapsBlockedSelection(legacy, selectedKeys)).toBe(true);
+    });
+
+    it('ignores unsupported durations like the server does', () => {
+        const invalid = { ...appointment('16:00'), duration: '90' as Appointment['duration'] };
+        expect(overlapsBlockedSelection(invalid, selectedKeys)).toBe(false);
+    });
+
+    it('ignores inactive appointments', () => {
+        expect(overlapsBlockedSelection({ ...appointment('16:00'), status: 'cancelled' }, selectedKeys)).toBe(false);
+    });
 });

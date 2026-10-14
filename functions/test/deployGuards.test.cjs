@@ -65,7 +65,7 @@ test("customers may delete only their own notification history", () => {
   assert.match(body, /allow create: if false;/);
   assert.doesNotMatch(body, /allow (write|delete)[^;]*isAdmin/);
   // Backend records stay closed to clients (no rule = denied).
-  for (const collection of ["notification_deliveries", "email_dispatches", "push_dispatches", "notification_outbox"]) {
+  for (const collection of ["notification_deliveries", "email_dispatches", "push_dispatches", "notification_outbox", "appointment_deletions"]) {
     assert.doesNotMatch(rules, new RegExp(`match /${collection}/`), `${collection} must not be client-accessible`);
   }
   assert.doesNotMatch(rules, /match \/\{document=\*\*\}/);

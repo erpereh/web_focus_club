@@ -39,6 +39,7 @@ const {
   getCanonicalSlotBlocks,
   getMadridDateKey,
   getAppointmentEffectiveSlot,
+  madridCivilSlotToInstant,
 } = require(path.join(libDir, "appointmentLifecycle.js"));
 
 function argValue(flag) {
@@ -192,14 +193,51 @@ async function main() {
     const expectedMinutes = active.length * duration;
     if (["pending", "approved"].includes(series.status)
       && (series.occurrenceCount !== active.length || series.totalMinutes !== expectedMinutes)) {
+      const nowMs = Date.now();
+      const startsAt = (item) => {
+        const slot = getAppointmentEffectiveSlot(item.data);
+        const instant = slot ? madridCivilSlotToInstant(slot) : undefined;
+        return instant ? instant.getTime() : undefined;
+      };
+      const futureActive = active.filter((item) => (startsAt(item) ?? 0) > nowMs);
+      const cancelled = occurrences.filter((item) => item.data.status === "cancelled");
+      const rejected = occurrences.filter((item) => item.data.status === "rejected");
+      const missingDocs = Math.max(0, Number(series.occurrenceCount ?? 0) - occurrences.length);
+      const category = futureActive.length > 0
+        ? "active_future"
+        : active.length > 0 ? "active_past_only" : "historical_no_active";
+      const causes = [
+        ...(cancelled.length ? ["individual_cancellation"] : []),
+        ...(rejected.length ? ["individual_rejection"] : []),
+        ...(missingDocs > 0 ? ["deleted_occurrences"] : []),
+      ];
+      // Operations that require occurrenceCount/totalMinutes to match the active occurrences.
+      const blockedOperations = category === "active_future"
+        ? series.status === "approved"
+          ? ["return_series_to_pending"]
+          : ["approve_series", "replace_pending_series_schedule"]
+        : [];
       seriesIssues.push({
         id: doc.id,
         status: series.status,
+        origin: series.origin ?? null,
+        category,
+        causes: causes.length ? causes : ["unknown"],
+        blockedOperations,
         occurrenceCount: series.occurrenceCount,
+        totalDocs: occurrences.length,
         activeOccurrences: active.length,
+        futureActiveOccurrences: futureActive.length,
+        nextActiveSlot: futureActive
+          .map((item) => getAppointmentEffectiveSlot(item.data))
+          .filter(Boolean)
+          .map((slot) => `${slot.date} ${slot.time}`)
+          .sort()[0] ?? null,
         totalMinutes: series.totalMinutes,
         expectedMinutes,
-        cancelledOccurrences: occurrences.filter((item) => item.data.status === "cancelled").map((item) => item.id),
+        cancelledOccurrences: cancelled.map((item) => item.id),
+        rejectedOccurrences: rejected.map((item) => item.id),
+        missingDocs,
       });
     }
   }
@@ -243,6 +281,7 @@ async function main() {
     multipleActiveBonos: multipleActiveBonos.length,
     bonoIssueCounts: bonoIssues.flatMap((item) => item.issues).reduce((acc, issue) => ({ ...acc, [issue]: (acc[issue] ?? 0) + 1 }), {}),
     seriesIssues: seriesIssues.length,
+    seriesByCategory: seriesIssues.reduce((acc, item) => ({ ...acc, [item.category]: (acc[item.category] ?? 0) + 1 }), {}),
   }, null, 2));
 }
 
