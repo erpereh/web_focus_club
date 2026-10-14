@@ -70,6 +70,7 @@ skills-lock.json
 # Internal docs and non-deployed local services
 /docs/*
 !/docs/google_calendar_sync.md
+!/docs/production-release-checklist.md
 /mini-services/
 
 # Database files

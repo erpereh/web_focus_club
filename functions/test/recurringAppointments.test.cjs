@@ -430,7 +430,8 @@ assert.match(indexSource, /export const createRecurringAppointments\s*=\s*onCall
 assert.match(indexSource, /export const approveRecurringAppointmentSeriesFromAdmin\s*=\s*onCall/);
 assert.match(indexSource, /export const rejectRecurringAppointmentSeriesFromAdmin\s*=\s*onCall/);
 assert.match(indexSource, /export const cancelOwnRecurringAppointmentSeries\s*=\s*onCall/);
-assert.match(indexSource, /selectExactlyOneActiveBono/);
+// Customer bookings require exactly one active bono (handler extracted to customerBooking.ts).
+assert.match(fs.readFileSync(path.join(__dirname, "../src/customerBooking.ts"), "utf8"), /selectExactlyOneActiveBono/);
 assert.match(indexSource, /config\.maxCapacity/);
 assert.doesNotMatch(indexSource, /const MAX_CAPACITY\s*=\s*2/);
 

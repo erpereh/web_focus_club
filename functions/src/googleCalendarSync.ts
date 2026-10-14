@@ -165,9 +165,10 @@ export function resolveAppointmentSlot(appointment: CalendarAppointmentLike): Ti
       : firstPreferredSlot(appointment) ?? legacyDateTimeSlot(appointment);
   }
 
+  // Same order as getAppointmentEffectiveSlot / the app for non-approved appointments.
   return firstPreferredSlot(appointment)
-    ?? (isTimeSlot(appointment.approvedSlot) ? appointment.approvedSlot : undefined)
-    ?? legacyDateTimeSlot(appointment);
+    ?? legacyDateTimeSlot(appointment)
+    ?? (isTimeSlot(appointment.approvedSlot) ? appointment.approvedSlot : undefined);
 }
 
 function isNutrition(appointment: CalendarAppointmentLike): boolean {

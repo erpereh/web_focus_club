@@ -1,0 +1,61 @@
+{
+  "description": "Effective slot of an appointment. Server (getAppointmentEffectiveSlot), web (madrid-date, admin grid, calendar) and the published app (portal_models.dart schedulingSlot) must agree. `flutter` is the app's value when it differs only in a case the app cannot represent.",
+  "cases": [
+    {
+      "name": "pending with a leftover approvedSlot uses its preferred slot",
+      "appointment": { "status": "pending", "approvedSlot": { "date": "2030-01-15", "time": "12:00" }, "preferredSlots": [{ "date": "2030-01-15", "time": "10:00" }], "date": "2030-01-15", "time": "12:00", "duration": "60" },
+      "expected": { "date": "2030-01-15", "time": "10:00" }
+    },
+    {
+      "name": "approved after an accepted proposal keeps approvedSlot",
+      "appointment": { "status": "approved", "approvedSlot": { "date": "2030-01-15", "time": "17:15" }, "preferredSlots": [{ "date": "2030-01-15", "time": "16:30" }], "duration": "45" },
+      "expected": { "date": "2030-01-15", "time": "17:15" }
+    },
+    {
+      "name": "approved without approvedSlot falls back to preferred",
+      "appointment": { "status": "approved", "preferredSlots": [{ "date": "2030-01-15", "time": "09:00" }], "duration": "30" },
+      "expected": { "date": "2030-01-15", "time": "09:00" }
+    },
+    {
+      "name": "legacy approved with only date/time",
+      "appointment": { "status": "approved", "date": "2030-01-15", "time": "18:00", "duration": "30" },
+      "expected": { "date": "2030-01-15", "time": "18:00" }
+    },
+    {
+      "name": "legacy pending with only date/time",
+      "appointment": { "status": "pending", "date": "2030-01-15", "time": "08:30", "duration": "60" },
+      "expected": { "date": "2030-01-15", "time": "08:30" }
+    },
+    {
+      "name": "pending without preferred slots prefers legacy date/time over a leftover approvedSlot",
+      "appointment": { "status": "pending", "approvedSlot": { "date": "2030-01-15", "time": "12:00" }, "preferredSlots": [], "date": "2030-01-15", "time": "11:00", "duration": "60" },
+      "expected": { "date": "2030-01-15", "time": "11:00" }
+    },
+    {
+      "name": "pending with only a leftover approvedSlot (last resort)",
+      "appointment": { "status": "pending", "approvedSlot": { "date": "2030-01-15", "time": "12:00" }, "duration": "60" },
+      "expected": { "date": "2030-01-15", "time": "12:00" },
+      "flutter": null
+    },
+    {
+      "name": "rejected keeps approvedSlot first, like the app",
+      "appointment": { "status": "rejected", "approvedSlot": { "date": "2030-01-15", "time": "12:00" }, "preferredSlots": [{ "date": "2030-01-15", "time": "10:00" }], "duration": "60" },
+      "expected": { "date": "2030-01-15", "time": "12:00" }
+    },
+    {
+      "name": "cancelled keeps approvedSlot first, like the app",
+      "appointment": { "status": "cancelled", "approvedSlot": { "date": "2030-01-15", "time": "12:00" }, "preferredSlots": [{ "date": "2030-01-15", "time": "10:00" }], "duration": "60" },
+      "expected": { "date": "2030-01-15", "time": "12:00" }
+    },
+    {
+      "name": "no status keeps the previous order (approvedSlot first)",
+      "appointment": { "approvedSlot": { "date": "2030-01-15", "time": "12:00" }, "preferredSlots": [{ "date": "2030-01-15", "time": "10:00" }] },
+      "expected": { "date": "2030-01-15", "time": "12:00" }
+    },
+    {
+      "name": "malformed approvedSlot is skipped",
+      "appointment": { "status": "approved", "approvedSlot": { "date": "2030-01-15" }, "preferredSlots": [{ "date": "2030-01-15", "time": "10:00" }], "duration": "60" },
+      "expected": { "date": "2030-01-15", "time": "10:00" }
+    }
+  ]
+}

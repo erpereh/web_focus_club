@@ -98,7 +98,7 @@ import {
   overlapsBlockedSelection,
 } from '@/lib/blocked-slots';
 import { countUpcomingBlockedSlots, splitBlockedDaysByToday } from '@/lib/blocked-slots-summary';
-import { getMadridDateKey } from '@/lib/madrid-date';
+import { getAppointmentEffectiveSlot, getMadridDateKey } from '@/lib/madrid-date';
 import {
   filterAppointments,
   getTrainerIdFromFilter,
@@ -460,7 +460,7 @@ function getCallableErrorDetails(error: unknown): Record<string, unknown> | unde
 }
 
 function getAppointmentPrimarySlot(appointment: Appointment): TimeSlot | undefined {
-  return appointment.approvedSlot ?? appointment.preferredSlots?.[0];
+  return getAppointmentEffectiveSlot(appointment);
 }
 
 function getAppointmentSlotKeys(appointment: Appointment): Set<string> {
@@ -8479,7 +8479,7 @@ export default function AdminPage() {
                         ) : (
                           <div className="space-y-3">
                             {clientAppointmentsHistory.map((appt) => {
-                              const slot = appt.approvedSlot || appt.preferredSlots?.[0];
+                              const slot = getAppointmentEffectiveSlot(appt);
                               const apptStatus = statusConfig[appt.status];
                               return (
                                 <div key={appt.id} className="p-3 rounded-xl bg-muted/10 border border-white/5">

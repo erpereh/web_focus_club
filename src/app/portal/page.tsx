@@ -86,6 +86,7 @@ import { cn } from '@/lib/utils';
 import { validatePassword, validateSpanishPhone } from '@/lib/validation';
 import {
   classifyMadridCivilSlot,
+  getAppointmentEffectiveSlot,
   getMadridDateKey,
   isSameDayAppointment,
   pendingSeriesHasSameDayOccurrence,
@@ -361,7 +362,7 @@ export default function PortalPage() {
     userAppointments
       .filter(a => a.status === 'pending' || a.status === 'approved')
       .forEach(a => {
-        const slot = a.approvedSlot || a.preferredSlots?.[0];
+        const slot = getAppointmentEffectiveSlot(a);
         if (!slot) return;
         const dur = parseInt(a.duration || '60', 10);
         getCanonicalSlotBlocks(slot.time, dur).forEach((blockTime) => {
@@ -734,7 +735,7 @@ export default function PortalPage() {
     setRescheduleScope(null);
     setRescheduleSlot(appointment.recurrenceSeriesId
       ? null
-      : appointment.approvedSlot || appointment.preferredSlots[0] || null);
+      : getAppointmentEffectiveSlot(appointment) ?? null);
     setShowRescheduleDrawer(true);
   };
 
@@ -1662,7 +1663,7 @@ export default function PortalPage() {
 
                 const status = statusConfig[appointment.status];
                 const StatusIcon = status.icon;
-                const appointmentSlot = appointment.approvedSlot || appointment.preferredSlots[0];
+                const appointmentSlot = getAppointmentEffectiveSlot(appointment);
                 const now = new Date();
                 const isPendingSeries = Boolean(appointment.recurrenceSeriesId && appointment.status === 'pending');
                 const isSameDay = isSameDayAppointment(appointment, now);

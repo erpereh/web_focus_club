@@ -40,6 +40,7 @@ export interface AppointmentSlotLike {
 }
 
 export interface AppointmentScheduleSource {
+  status?: string;
   approvedSlot?: AppointmentSlotLike | null;
   preferredSlots?: ReadonlyArray<AppointmentSlotLike> | null;
   date?: unknown;
@@ -192,11 +193,11 @@ export function getAppointmentEndTime(startTime: string, durationMinutes: number
 export function resolveAppointmentSchedule(
   source: AppointmentScheduleSource,
 ): ResolvedAppointmentSchedule | null {
-  const candidates: Array<AppointmentSlotLike | null | undefined> = [
-    source.approvedSlot,
-    source.preferredSlots?.[0],
-    { date: source.date, time: source.time },
-  ];
+  const legacy = { date: source.date, time: source.time };
+  // Same rule as the server and the app: pending requests use their preferred slot.
+  const candidates: Array<AppointmentSlotLike | null | undefined> = source.status === 'pending'
+    ? [source.preferredSlots?.[0], legacy, source.approvedSlot]
+    : [source.approvedSlot, source.preferredSlots?.[0], legacy];
 
   for (const candidate of candidates) {
     const slot = resolveCandidateSlot(candidate);

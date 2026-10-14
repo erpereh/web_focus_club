@@ -382,3 +382,73 @@ git switch main
 - `firebase functions:delete deleteOwnAccount` o `adminRestoreSuggestion`: la primera la usa la app para "Eliminar cuenta" (requisito de las tiendas); la segunda se conserva por precaución.
 - `firebase functions:secrets:access ...`: imprime el valor del secreto. Para comprobar un secreto basta con `firebase functions:secrets:get`.
 - `--only a,b` sin comillas en PowerShell: la coma convierte el valor en un array.
+
+## 5. Release de la auditoría de reservas (octubre 2026)
+
+Cambios: aforo transaccional, callables admin nuevas, registro de borrados y verificación de bloqueos. No requiere publicar una versión nueva de la app móvil: Android e iOS siguen funcionando con los mismos nombres, payloads, respuestas y `details.reason`.
+
+### 5.1 Verificaciones locales antes de desplegar
+
+```bash
+npm --prefix functions test
+```
+
+```bash
+npm --prefix functions run test:emulator
+```
+
+```bash
+npx vitest run
+```
+
+```bash
+npm run build
+```
+
+`test:emulator` usa el emulador de Firestore con el proyecto `demo-focus-club`, que nunca se conecta a producción. Necesita Java 11 o posterior.
+
+### 5.2 Orden de despliegue
+
+1. **Functions, completas y con filtro.** La web nueva llama a `updateAppointmentStatusFromAdmin`, `deleteAppointmentsFromAdmin`, `blockSlotsFromAdmin` y `assignBonoFromAdmin`, así que tienen que existir antes de desplegar el hosting.
+   ```powershell
+   $only = node functions/scripts/deploy-filter.cjs
+   firebase deploy --only "$only"
+   ```
+2. **Hosting**, con el paso 2.4.
+3. **Reglas de Firestore**, al final. `slot_occupancy` pasa a `allow write: if false`, de modo que una pestaña antigua del panel ya no puede tocar contadores. Después hay que recargar el panel admin.
+   ```bash
+   firebase deploy --only firestore:rules
+   ```
+
+### 5.3 TTL de `appointment_deletions` (configuración posterior, una sola vez)
+
+`appointment_deletions/{appointmentId}` es el registro financiero de citas borradas. Es solo de backend y no tiene regla de cliente. Guarda el `userId` seudónimo, la franja y los datos de bono y minutos, pero no nombre, email, teléfono ni comentarios.
+
+Cada registro resuelto lleva `expiresAt` (Timestamp, borrado + 24 meses). Los registros con minutos pendientes de revisión manual (`manualReview.status == "pending"`) **no** llevan `expiresAt`, así que nunca caducan sin revisarse.
+
+La política TTL no se activa con el despliegue. Hay que configurarla aparte:
+
+```bash
+gcloud firestore fields ttls update expiresAt --collection-group=appointment_deletions --enable-ttl --project=focus-club-f73b8
+```
+
+Comprobación (el estado debe pasar a `ACTIVE`; puede tardar unos minutos):
+
+```bash
+gcloud firestore fields ttls list --project=focus-club-f73b8
+```
+
+Hasta que se active, los registros simplemente no se borran; no hay ningún otro efecto. Cuando se revise manualmente un registro pendiente, hay que poner `manualReview.status = "resolved"` y un `expiresAt` para que entre en la retención.
+
+### 5.4 Verificaciones en producción tras desplegar
+
+- Aprobar una solicitud de prueba con doble clic: el contador de aforo sube una sola vez.
+- Crear una cita manual en una franja libre: no da `slot_full`.
+- Bloquear una franja de prueba con "eliminar citas" marcado y comprobar que se crea el registro en `appointment_deletions`.
+- Lanzar `reconcileSlotOccupancyFromApprovedAppointments` en modo `dryRun` (solo lectura) y revisar `differences`. **No** ejecutar `apply` sin autorización.
+
+### 5.5 Rollback
+
+- **Functions:** redesplegar el commit anterior con el mismo filtro. Las callables nuevas quedan sin uso.
+- **Hosting:** desde la consola, restaurar la versión anterior.
+- **Reglas:** volver a `allow write: if isAdmin();` en `slot_occupancy` **solo** si se vuelve también a la web anterior, que escribía contadores desde el navegador.

@@ -346,7 +346,9 @@ assert.deepEqual(blockedRescheduleCalls, { released: 0, patches: 0 });
 // Transaction wiring: these assertions protect the Firestore lifecycle paths
 // that cannot be exercised without an emulator in this dependency-free suite.
 const indexSource = fs.readFileSync(path.join(__dirname, "../src/index.ts"), "utf8");
-assert.match(indexSource, /transaction\.create\(appointmentRef, \{ \.\.\.appointment, \.\.\.deduction \}\)/);
+const customerBookingSource = fs.readFileSync(path.join(__dirname, "../src/customerBooking.ts"), "utf8");
+assert.match(customerBookingSource, /transaction\.create\(appointmentRef, \{ \.\.\.appointment, \.\.\.deduction \}\)/);
+assert.match(customerBookingSource, /evaluateSlot\(day, \{/);
 assert.match(indexSource, /minutesRefundedAt:\s*null/);
 assert.match(indexSource, /minutesRefundReason:\s*null/);
 assert.match(indexSource, /export const cancelOwnAppointment\s*=\s*onCall/);

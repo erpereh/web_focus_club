@@ -1,5 +1,6 @@
 import type { Appointment, SiteConfig } from '@/types';
 import { doesSessionFitWithinSchedule, getCanonicalSlotBlocks, slotOccupancyKey } from '@/lib/appointment-slots';
+import { getAppointmentEffectiveSlot } from '@/lib/madrid-date';
 
 /**
  * Availability shown in the admin "Nueva cita" grid. It reads the same
@@ -37,11 +38,9 @@ function parseCount(raw: unknown): number | undefined {
     return typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : undefined;
 }
 
-/** approvedSlot → preferredSlots[0] → legacy date/time, as the server resolves it. */
+/** Effective slot with the server/app rule (status-aware, see getAppointmentEffectiveSlot). */
 export function appointmentEffectiveSlot(appointment: Appointment): { date: string; time: string } | undefined {
-    const legacy = appointment.date && appointment.time ? { date: appointment.date, time: appointment.time } : undefined;
-    const slot = appointment.approvedSlot ?? appointment.preferredSlots?.[0] ?? legacy;
-    return slot?.date && slot.time ? { date: slot.date, time: slot.time } : undefined;
+    return getAppointmentEffectiveSlot(appointment);
 }
 
 function appointmentKeys(appointment: Appointment): string[] {

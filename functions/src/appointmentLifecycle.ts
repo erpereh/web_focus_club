@@ -413,15 +413,26 @@ function isEffectiveSlot(value: AppointmentSlotLike | null | undefined): value i
   );
 }
 
-/** Canonical appointment date/time: approvedSlot, else first preferred slot, else legacy date/time. */
+/**
+ * Canonical appointment date/time, the same rule as the published app
+ * (`schedulingSlot`):
+ * - `pending`: first preferred slot, else legacy date/time. A leftover
+ *   `approvedSlot` (old "back to pending" writes) is only a last resort.
+ * - any other status (or none): approvedSlot, else first preferred slot,
+ *   else legacy date/time.
+ */
 export function getAppointmentEffectiveSlot(
   appointment: AppointmentEffectiveDateSource,
 ): EffectiveAppointmentSlot | undefined {
   const legacy = appointment.date && appointment.time
     ? { date: appointment.date, time: appointment.time }
     : undefined;
-  const slot = appointment.approvedSlot ?? appointment.preferredSlots?.[0] ?? legacy;
-  return isEffectiveSlot(slot) ? { date: slot.date, time: slot.time } : undefined;
+  const preferred = appointment.preferredSlots?.[0];
+  const candidates = appointment.status === "pending"
+    ? [preferred, legacy, appointment.approvedSlot]
+    : [appointment.approvedSlot, preferred, legacy];
+  const slot = candidates.find((candidate) => isEffectiveSlot(candidate));
+  return slot && isEffectiveSlot(slot) ? { date: slot.date, time: slot.time } : undefined;
 }
 
 export function isClientSameDayChange(appointment: AppointmentEffectiveDateSource, now: Date): boolean {

@@ -510,6 +510,8 @@ function chunks<T>(values: T[], size: number): T[][] {
  * Every active appointment overlapping `selection`, read inside the
  * transaction with day-bounded queries (customer requests carry only
  * `preferredSlots`, older approvals only `approvedSlot`, others `date`).
+ * `preferredSlots` cannot be filtered by a subfield inside the array, so it is
+ * matched against every start slot that can reach the blocks.
  * Refuses, before any write, when the day is too large to verify safely.
  */
 async function readOverlappingAppointmentIds(
@@ -520,12 +522,12 @@ async function readOverlappingAppointmentIds(
 ): Promise<Set<string>> {
   const appointments = db.collection("appointments");
   const candidates = candidateStartSlots(date, selection);
+  // All three use automatic single-field indexes (no composite index needed):
+  // `date`, the `approvedSlot.date` map subfield and `preferredSlots` array-contains.
   const queries = [
     appointments.where("date", "==", date),
-    ...chunks(candidates, IN_QUERY_LIMIT).flatMap((chunk) => [
-      appointments.where("preferredSlots", "array-contains-any", chunk),
-      appointments.where("approvedSlot", "in", chunk),
-    ]),
+    appointments.where("approvedSlot.date", "==", date),
+    ...chunks(candidates, IN_QUERY_LIMIT).map((chunk) => appointments.where("preferredSlots", "array-contains-any", chunk)),
   ];
   const snaps = await Promise.all(queries.map((query) => transaction.get(query)));
   const byId = new Map<string, AdminAppointmentData>();

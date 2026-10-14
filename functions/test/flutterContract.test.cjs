@@ -50,7 +50,7 @@ test("slot rejection reasons mapped by the app keep their codes", () => {
 });
 
 test("reasons read from details.reason by the app are still produced", () => {
-  const sources = ["index.ts", "appointmentProposals.ts", "recurringReschedule.ts", "recurringSeries.ts", "appointmentLifecycle.ts"]
+  const sources = ["index.ts", "customerBooking.ts", "appointmentProposals.ts", "recurringReschedule.ts", "recurringSeries.ts", "appointmentLifecycle.ts"]
     .map(src).join("\n");
   for (const reason of [
     "same_day_change_not_allowed", "one_day_change_not_allowed", "invalid_occupancy",
@@ -63,7 +63,10 @@ test("reasons read from details.reason by the app are still produced", () => {
 });
 
 test("createAppointment keeps the app payload: duration as string, preferredSlot, reason, appointmentType", () => {
-  const body = indexSource.slice(indexSource.indexOf("export const createAppointment ="), indexSource.indexOf("export const cancelOwnAppointment"));
+  // index.ts exports it unchanged; the handler lives in customerBooking.ts.
+  const exported = indexSource.slice(indexSource.indexOf("export const createAppointment ="), indexSource.indexOf("export const cancelOwnAppointment"));
+  assert.match(exported, /customerBooking\.createAppointment/);
+  const body = src("customerBooking.ts");
   assert.match(body, /String\(data\.duration\)/);
   assert.match(body, /\["30", "45", "60"\]/);
   assert.match(body, /isTimeSlot\(data\.preferredSlot\)/);
