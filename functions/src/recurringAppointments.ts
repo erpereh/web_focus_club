@@ -522,6 +522,7 @@ export function planSeriesMinutesRefund(input: {
       minutesRefundedAmount: refund.minutesRefundedAmount,
       minutesRefundedAt: refund.minutesRefundedAt,
       minutesRefundReason: null,
+      ...(refund.cappedMinutes > 0 ? { minutesRefundCappedAmount: refund.cappedMinutes } : {}),
     });
   }
   return {

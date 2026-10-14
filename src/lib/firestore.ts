@@ -11,11 +11,9 @@ import {
     where,
     orderBy,
     Timestamp,
-    increment,
     runTransaction,
     writeBatch,
     arrayUnion,
-    arrayRemove,
     onSnapshot,
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -64,7 +62,6 @@ import {
     normalizeSiteConfig,
     sanitizeSiteConfigUpdate,
 } from './site-config';
-import { getCanonicalSlotBlocks } from './appointment-slots';
 import {
     buildCanonicalBlockedSlotDocuments,
     type BuildBlockedSlotGroupsInput,
@@ -710,17 +707,6 @@ export function subscribeAppointmentsByUser(
     );
 }
 
-export async function addAppointment(
-    data: Omit<Appointment, 'id' | 'status' | 'createdAt' | 'updatedAt'>
-): Promise<string> {
-    const docRef = await addDoc(collection(db, 'appointments'), {
-        ...data,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-    });
-    return docRef.id;
-}
-
 export async function createAppointmentSecure(input: {
     duration: '30' | '45' | '60';
     preferredSlot: TimeSlot;
@@ -1073,45 +1059,74 @@ export async function sendContactMessage(input: {
     await callable(input);
 }
 
-export async function updateAppointmentStatus(
-    id: string,
-    status: Appointment['status'],
-    extraFields?: { assignedTrainer?: string; sessionType?: string; approvedSlot?: TimeSlot }
-): Promise<void> {
-    const update: Record<string, unknown> = {
-        status,
-        updatedAt: new Date().toISOString(),
-    };
-    if (extraFields?.assignedTrainer) update.assignedTrainer = extraFields.assignedTrainer;
-    if (extraFields?.sessionType) update.sessionType = extraFields.sessionType;
-    if (extraFields?.approvedSlot) update.approvedSlot = extraFields.approvedSlot;
-    await updateDoc(doc(db, 'appointments', id), update);
+export type AdminAppointmentStatus = Appointment['status'];
+
+export interface UpdateAppointmentStatusFromAdminInput {
+    appointmentId: string;
+    status: AdminAppointmentStatus;
+    /** Status the admin saw; the server refuses the change if it no longer matches. */
+    expectedStatus: AdminAppointmentStatus;
+    assignedTrainer?: string;
+    /** Explicit admin confirmation to exceed maxCapacity (never bypasses other rules). */
+    allowOverCapacity?: boolean;
 }
 
-export async function deleteAppointment(id: string): Promise<void> {
-    await deleteDoc(doc(db, 'appointments', id));
+export interface UpdateAppointmentStatusFromAdminResult {
+    success: boolean;
+    appointmentId: string;
+    status: AdminAppointmentStatus;
+    changed: boolean;
+    overCapacity?: boolean;
 }
 
 /**
- * Modifica directamente la franja de una cita.
- * - Si pending: reemplaza preferredSlots con la nueva franja.
- * - Si approved: reemplaza approvedSlot con la nueva franja.
+ * Atomic status change (aforo, bono y serie en la misma transacción). Idempotent:
+ * repeating it (double click) leaves the appointment and the counters unchanged.
  */
-export async function updateAppointmentSlot(
-    id: string,
-    status: Appointment['status'],
-    newSlot: TimeSlot
-): Promise<void> {
-    const update: Record<string, unknown> = {
-        updatedAt: new Date().toISOString(),
-    };
-    if (status === 'approved') {
-        update.approvedSlot = newSlot;
-    } else {
-        // pending or rejected: rewrite preferredSlots
-        update.preferredSlots = [newSlot];
-    }
-    await updateDoc(doc(db, 'appointments', id), update);
+export async function updateAppointmentStatusFromAdmin(
+    input: UpdateAppointmentStatusFromAdminInput,
+): Promise<UpdateAppointmentStatusFromAdminResult> {
+    const callable = httpsCallable<UpdateAppointmentStatusFromAdminInput, UpdateAppointmentStatusFromAdminResult>(
+        firebaseFunctions,
+        'updateAppointmentStatusFromAdmin',
+    );
+    const result = await callable(input);
+    return result.data;
+}
+
+export interface DeleteAppointmentsFromAdminResult {
+    success: boolean;
+    deletedIds: string[];
+    refundedIds: string[];
+    alreadyDeletedIds: string[];
+}
+
+/** Deletes appointments releasing their seats and returning unrefunded minutes, atomically. */
+export async function deleteAppointmentsFromAdmin(appointmentIds: string[]): Promise<DeleteAppointmentsFromAdminResult> {
+    const callable = httpsCallable<{ appointmentIds: string[] }, DeleteAppointmentsFromAdminResult>(
+        firebaseFunctions,
+        'deleteAppointmentsFromAdmin',
+    );
+    const result = await callable({ appointmentIds });
+    return result.data;
+}
+
+export interface BlockSlotsFromAdminInput {
+    date: string;
+    startTimes: string[];
+    groupDurationMinutes: number;
+    reason?: string;
+    deleteAppointmentIds?: string[];
+}
+
+/** Creates the blocks and deletes the affected appointments in one transaction. */
+export async function blockSlotsFromAdmin(input: BlockSlotsFromAdminInput): Promise<DeleteAppointmentsFromAdminResult & { blockedSlotIds: string[] }> {
+    const callable = httpsCallable<BlockSlotsFromAdminInput, DeleteAppointmentsFromAdminResult & { blockedSlotIds: string[] }>(
+        firebaseFunctions,
+        'blockSlotsFromAdmin',
+    );
+    const result = await callable(input);
+    return result.data;
 }
 
 // ============================================
@@ -1457,54 +1472,8 @@ export async function deleteBlockedSlotDocuments(ids: string[]): Promise<void> {
 // AFORO — Colección slot_occupancy (pública para lectura)
 // ============================================
 
-/**
- * Genera el ID del documento de slot_occupancy: "YYYY-MM-DD_HH:MM"
- */
-function slotOccupancyId(date: string, time: string): string {
-    return `${date}_${time}`;
-}
-
-async function incrementSingleSlot(date: string, time: string): Promise<void> {
-    const ref = doc(db, 'slot_occupancy', slotOccupancyId(date, time));
-    const snap = await getDoc(ref);
-    if (snap.exists()) {
-        await updateDoc(ref, { count: increment(1) });
-    } else {
-        await setDoc(ref, { date, time, count: 1 });
-    }
-}
-
-async function decrementSingleSlot(date: string, time: string): Promise<void> {
-    const ref = doc(db, 'slot_occupancy', slotOccupancyId(date, time));
-    const snap = await getDoc(ref);
-    if (snap.exists()) {
-        const current = (snap.data() as SlotOccupancy).count;
-        if (current <= 1) {
-            await deleteDoc(ref);
-        } else {
-            await updateDoc(ref, { count: increment(-1) });
-        }
-    }
-}
-
-/**
- * Incrementa el contador de ocupación de todos los bloques de 30 min cubiertos por la sesión.
- * Una sesión de 60 min a las 09:00 incrementa 09:00 Y 09:30.
- * Llamar cuando se aprueba una cita.
- */
-export async function incrementSlotOccupancy(date: string, startTime: string, durationMinutes: number): Promise<void> {
-    const blocks = getCanonicalSlotBlocks(startTime, durationMinutes);
-    await Promise.all(blocks.map((time) => incrementSingleSlot(date, time)));
-}
-
-/**
- * Decrementa el contador de ocupación de todos los bloques de 30 min cubiertos por la sesión.
- * Llamar cuando se revierte una cita aprobada.
- */
-export async function decrementSlotOccupancy(date: string, startTime: string, durationMinutes: number): Promise<void> {
-    const blocks = getCanonicalSlotBlocks(startTime, durationMinutes);
-    await Promise.all(blocks.map((time) => decrementSingleSlot(date, time)));
-}
+// Los contadores de aforo solo los escriben las Cloud Functions, dentro de la
+// misma transacción que cambia la cita. El cliente únicamente los lee.
 
 /**
  * Devuelve un mapa con la cantidad de personas aprobadas por franja horaria
@@ -1560,6 +1529,29 @@ export function subscribeSlotOccupancyForMonth(
             snap.docs.forEach((d) => {
                 const data = d.data() as SlotOccupancy;
                 occupancy[`${data.date}_${data.time}`] = data.count;
+            });
+            callback(occupancy);
+        },
+        onError
+    );
+}
+
+/**
+ * Contadores de `slot_occupancy` de un día, sin normalizar (`count` tal cual),
+ * para que la UI pueda detectar contadores corruptos en vez de leerlos como 0.
+ */
+export function subscribeSlotOccupancyForDate(
+    date: string,
+    callback: (occupancy: Record<string, unknown>) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        query(collection(db, 'slot_occupancy'), where('date', '==', date)),
+        (snap) => {
+            const occupancy: Record<string, unknown> = {};
+            snap.docs.forEach((d) => {
+                const data = d.data() as { date?: unknown; time?: unknown; count?: unknown };
+                if (typeof data.time === 'string') occupancy[`${date}_${data.time}`] = data.count;
             });
             callback(occupancy);
         },
@@ -1941,43 +1933,58 @@ export function subscribeAllActiveBonos(
     );
 }
 
-/** Corrige bonos activos con totales/restantes incoherentes. */
+function bonoLimitsPatch(data: BonoData): { minutosTotales: number; minutosRestantes: number } | null {
+    const maxMinutes = getBonoMaxMinutes(data);
+    const normalizedRemaining = getBonoRemainingMinutes(data);
+    return data.minutosTotales !== maxMinutes || data.minutosRestantes !== normalizedRemaining
+        ? { minutosTotales: maxMinutes, minutosRestantes: normalizedRemaining }
+        : null;
+}
+
+/**
+ * Corrige bonos activos con totales/restantes incoherentes. Cada corrección se
+ * recalcula dentro de su propia transacción para no pisar un descuento o una
+ * devolución que las Functions hayan hecho entre la lectura y la escritura.
+ */
 export async function normalizeActiveBonoLimits(): Promise<void> {
     const snap = await getDocs(
         query(collection(db, 'bonos'), where('estado', '==', 'activo'))
     );
-    const batch = writeBatch(db);
-    let updates = 0;
-
-    snap.docs.forEach((bonoDoc) => {
-        const data = bonoDoc.data() as BonoData;
-        const maxMinutes = getBonoMaxMinutes(data);
-        const normalizedRemaining = getBonoRemainingMinutes(data);
-        const needsUpdate =
-            data.minutosTotales !== maxMinutes ||
-            data.minutosRestantes !== normalizedRemaining;
-
-        if (needsUpdate) {
-            batch.update(bonoDoc.ref, {
-                minutosTotales: maxMinutes,
-                minutosRestantes: normalizedRemaining,
-            });
-            updates += 1;
-        }
-    });
-
-    if (updates > 0) {
-        await batch.commit();
+    const candidates = snap.docs.filter((bonoDoc) => bonoLimitsPatch(bonoDoc.data() as BonoData));
+    for (const bonoDoc of candidates) {
+        await runTransaction(db, async (transaction) => {
+            const fresh = await transaction.get(bonoDoc.ref);
+            if (!fresh.exists()) return;
+            const data = fresh.data() as BonoData;
+            if (data.estado !== 'activo') return;
+            const patch = bonoLimitsPatch(data);
+            if (patch) transaction.update(bonoDoc.ref, patch);
+        });
     }
 }
 
-/** Asignar un nuevo bono */
-export async function assignBono(data: Omit<Bono, 'id' | 'createdAt'>): Promise<string> {
-    const docRef = await addDoc(collection(db, 'bonos'), {
-        ...data,
-        createdAt: new Date().toISOString(),
-    });
-    return docRef.id;
+export interface AssignBonoFromAdminInput {
+    userId: string;
+    tamano: number;
+    fechaAsignacion: string;
+    fechaExpiracion: string;
+    /** Stable per assignment attempt: retries and double clicks reuse it. */
+    requestId: string;
+}
+
+/**
+ * Assigns a new bono and marks every other active bono of the client as
+ * replaced, in one idempotent transaction (always a single active bono).
+ */
+export async function assignBonoFromAdmin(
+    input: AssignBonoFromAdminInput,
+): Promise<{ success: boolean; bonoId: string; alreadyCreated: boolean; replacedBonoIds: string[] }> {
+    const callable = httpsCallable<
+        AssignBonoFromAdminInput,
+        { success: boolean; bonoId: string; alreadyCreated: boolean; replacedBonoIds: string[] }
+    >(firebaseFunctions, 'assignBonoFromAdmin');
+    const result = await callable(input);
+    return result.data;
 }
 
 /** Actualizar solo las fechas de validez de un bono existente */
@@ -1989,11 +1996,6 @@ export async function updateBonoDates(
         fechaAsignacion: dates.fechaAsignacion,
         fechaExpiracion: dates.fechaExpiracion,
     });
-}
-
-/** Marcar un bono como agotado (cuando se reemplaza por uno nuevo) */
-export async function deactivateBono(bonoId: string): Promise<void> {
-    await updateDoc(doc(db, 'bonos', bonoId), { estado: 'agotado' });
 }
 
 /** Marcar un bono como eliminado (preserva historial) */
@@ -2013,59 +2015,6 @@ export async function addBonoMinutes(bonoId: string, minutes: number): Promise<v
             minutosRestantes: result.minutosRestantes,
             minutosTotales: result.minutosTotales,
             estado: result.estado,
-        });
-    });
-}
-
-/** Descontar minutos del bono (transacción atómica) */
-export async function deductBonoMinutes(bonoId: string, minutesToDeduct: number, entry: BonoHistorialEntry): Promise<void> {
-    await runTransaction(db, async (transaction) => {
-        const bonoRef = doc(db, 'bonos', bonoId);
-        const bonoSnap = await transaction.get(bonoRef);
-        if (!bonoSnap.exists()) throw new Error('Bono no encontrado');
-
-        const bono = bonoSnap.data() as BonoData;
-        const currentRemaining = getBonoRemainingMinutes(bono);
-        if (currentRemaining < minutesToDeduct) {
-            throw new Error('Minutos insuficientes en el bono');
-        }
-        const newRemaining = Math.max(0, currentRemaining - minutesToDeduct);
-
-        transaction.update(bonoRef, {
-            minutosRestantes: newRemaining,
-            minutosTotales: getBonoMaxMinutes(bono),
-            estado: newRemaining <= 0 ? 'agotado' : 'activo',
-            historial: arrayUnion(entry),
-        });
-    });
-}
-
-/** Devolver minutos al bono cuando se cancela/revierte una cita */
-export async function returnBonoMinutes(bonoId: string, appointmentId: string): Promise<void> {
-    await runTransaction(db, async (transaction) => {
-        const bonoRef = doc(db, 'bonos', bonoId);
-        const bonoSnap = await transaction.get(bonoRef);
-        if (!bonoSnap.exists()) throw new Error('Bono no encontrado');
-
-        const bono = bonoSnap.data() as BonoData;
-
-        // No devolver minutos si el bono está expirado
-        if (bono.estado === 'expirado') return;
-
-        const entryToRemove = bono.historial.find((h) => h.appointmentId === appointmentId);
-        if (!entryToRemove) return;
-
-        const minutesReturned = parseInt(entryToRemove.duracion, 10);
-        if (isNaN(minutesReturned)) return; // entrada legacy sin duración válida
-
-        const maxMinutes = getBonoMaxMinutes(bono);
-        const newRemaining = Math.min(getBonoRemainingMinutes(bono) + minutesReturned, maxMinutes);
-
-        transaction.update(bonoRef, {
-            minutosRestantes: newRemaining,
-            minutosTotales: maxMinutes,
-            estado: newRemaining > 0 ? 'activo' : bono.estado,
-            historial: arrayRemove(entryToRemove),
         });
     });
 }
@@ -2114,19 +2063,26 @@ export async function recalculateAllBonoExpirations(newMonths: number): Promise<
     return updates.length;
 }
 
-/** Expirar bonos cuya fecha de expiración ya pasó */
+/**
+ * Expirar bonos cuya fecha de expiración ya pasó. Cada bono se revalida en su
+ * transacción para no pisar cambios concurrentes (devoluciones, sustituciones).
+ * La Function programada `expireOverdueBonosScheduled` hace lo mismo cada hora.
+ */
 export async function expireOverdueBonos(): Promise<void> {
     const activeBonos = await getAllActiveBonos();
     const now = new Date();
     const overdue = activeBonos.filter((b) => isBonoOverdue(b, now));
 
-    if (overdue.length === 0) return;
-
-    const batch = writeBatch(db);
     for (const bono of overdue) {
-        batch.update(doc(db, 'bonos', bono.id), { estado: 'expirado' });
+        await runTransaction(db, async (transaction) => {
+            const ref = doc(db, 'bonos', bono.id);
+            const fresh = await transaction.get(ref);
+            if (!fresh.exists()) return;
+            const data = { id: fresh.id, ...fresh.data() } as Bono;
+            if (data.estado !== 'activo' || !isBonoOverdue(data, now)) return;
+            transaction.update(ref, { estado: 'expirado' });
+        });
     }
-    await batch.commit();
 }
 
 // ============================================

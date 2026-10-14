@@ -10,6 +10,8 @@ export interface LifecycleBono {
   sesionesRestantes?: number;
   modalidad?: string;
   fechaExpiracion?: string;
+  /** Set when an admin assigned a newer bono; a replaced bono is never reactivated. */
+  replacedByBonoId?: string | null;
 }
 
 export interface LifecycleAppointment {
@@ -88,15 +90,25 @@ export function calculateAppointmentRefund(bono: LifecycleBono, appointment: Lif
     return { ok: false as const, reason: "not-refundable" };
   }
 
-  const remainingMinutes = Math.min(getBonoTotalMinutes(bono), getBonoRemainingMinutes(bono) + amount);
+  const currentMinutes = getBonoRemainingMinutes(bono);
+  const remainingMinutes = Math.min(getBonoTotalMinutes(bono), currentMinutes + amount);
   return {
     ok: true as const,
     remainingMinutes,
-    bonoStatus: bono.estado === "agotado" && !isBonoExpiredAt(bono, new Date(now)) ? "activo" as const : bono.estado,
+    bonoStatus: bono.estado === "agotado" && !isBonoReplaced(bono) && !isBonoExpiredAt(bono, new Date(now))
+      ? "activo" as const
+      : bono.estado,
     minutesRefunded: true as const,
     minutesRefundedAmount: amount,
     minutesRefundedAt: now,
+    /** Minutes that did not fit under the bono maximum (never silently invented). */
+    cappedMinutes: Math.max(0, currentMinutes + amount - remainingMinutes),
   };
+}
+
+/** A bono an admin replaced by a newer one. It must never become active again. */
+export function isBonoReplaced(bono: Pick<LifecycleBono, "replacedByBonoId">): boolean {
+  return typeof bono.replacedByBonoId === "string" && bono.replacedByBonoId.length > 0;
 }
 
 /**
@@ -139,11 +151,12 @@ export function reconcileAppointmentMinutes(input: ReconcileAppointmentMinutesIn
 
   const refund = calculateAppointmentRefund(input.bono, input.appointment, input.now);
   if (!refund.ok) return refund;
-  const appointmentPatch = {
+  const appointmentPatch: Record<string, unknown> = {
     minutesRefunded: refund.minutesRefunded,
     minutesRefundedAmount: refund.minutesRefundedAmount,
     minutesRefundedAt: refund.minutesRefundedAt,
     minutesRefundReason: null,
+    ...(refund.cappedMinutes > 0 ? { minutesRefundCappedAmount: refund.cappedMinutes } : {}),
   };
   input.transaction.setBono(input.bono.id, {
     minutosRestantes: refund.remainingMinutes,

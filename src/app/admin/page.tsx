@@ -135,11 +135,13 @@ import {
     getAdminCreateClientSuccessKind,
     REPAIRED_EXISTING_AUTH_NOTICE,
 } from '@/lib/admin-create-client';
+import { getAdminCreateSlotStatus } from '@/lib/admin-slot-status';
 import {
   getAppointments,
   getAppointmentsByUser,
-  updateAppointmentStatus as updateAppointmentStatusFS,
-  deleteAppointment as deleteAppointmentFS,
+  updateAppointmentStatusFromAdmin as updateAppointmentStatusFromAdminFS,
+  deleteAppointmentsFromAdmin as deleteAppointmentsFromAdminFS,
+  blockSlotsFromAdmin as blockSlotsFromAdminFS,
   getServices,
   addService as addServiceFS,
   updateService as updateServiceFS,
@@ -169,8 +171,6 @@ import {
   getBlockedSlots,
   addBlockedSlotGroups as addBlockedSlotGroupsFS,
   deleteBlockedSlotDocuments as deleteBlockedSlotDocumentsFS,
-  incrementSlotOccupancy,
-  decrementSlotOccupancy,
   getTrainers,
   getActiveTrainers,
   addTrainer as addTrainerFS,
@@ -187,6 +187,7 @@ import {
   normalizeSiteConfig,
   doesSessionFitWithinSchedule,
   rescheduleAppointmentFromAdmin as rescheduleAppointmentFromAdminFS,
+  subscribeSlotOccupancyForDate,
   replaceRecurringSeriesScheduleFromAdmin as replaceRecurringSeriesScheduleFromAdminFS,
   returnRecurringSeriesToPendingFromAdmin as returnRecurringSeriesToPendingFromAdminFS,
   getAllActiveBonos,
@@ -440,6 +441,12 @@ function formatBonoDate(value: string): string {
   const date = parseDateInputLocal(dateValueToInputLocal(value));
   if (!date) return 'Fecha no valida';
   return date.toLocaleDateString('es-ES');
+}
+
+/** `details` of a callable error (reason, overridable flags...). */
+function getCallableErrorDetails(error: unknown): Record<string, unknown> | undefined {
+  const details = (error as { details?: unknown } | null)?.details;
+  return details && typeof details === 'object' ? details as Record<string, unknown> : undefined;
 }
 
 function getAppointmentPrimarySlot(appointment: Appointment): TimeSlot | undefined {
@@ -1104,6 +1111,8 @@ export default function AdminPage() {
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
   const [seriesApprovalTrainer, setSeriesApprovalTrainer] = useState('');
   const [seriesActionBusy, setSeriesActionBusy] = useState(false);
+  const [statusActionBusyId, setStatusActionBusyId] = useState<string | null>(null);
+  const [createDayOccupancy, setCreateDayOccupancy] = useState<Record<string, unknown> | null>(null);
   const [showSeriesReturnPendingModal, setShowSeriesReturnPendingModal] = useState(false);
   const [seriesReturnPendingId, setSeriesReturnPendingId] = useState<string | null>(null);
   const [seriesReturnPendingError, setSeriesReturnPendingError] = useState('');
@@ -1534,64 +1543,39 @@ export default function AdminPage() {
       .slice(0, 20);
   }, [clients, createAppointmentClientSearch]);
 
-  const getAdminAppointmentSlotStatus = (time: string) => {
+  // Same source the server validates against: never count seats in memory.
+  useEffect(() => {
     const date = createAppointmentForm.date;
-    const userId = createAppointmentForm.userId;
-    const durationMinutes = createAppointmentForm.durationMinutes;
-
-    if (!date) {
-      return { disabled: true, label: 'Elige fecha', tone: 'muted' as const, occupancy: 0 };
+    if (!showCreateAppointmentModal || !date) {
+      setCreateDayOccupancy(null);
+      return;
     }
+    setCreateDayOccupancy(null);
+    return subscribeSlotOccupancyForDate(
+      date,
+      (occupancy) => setCreateDayOccupancy(occupancy),
+      (error) => {
+        console.error('Error cargando el aforo del día:', error);
+        setCreateDayOccupancy(null);
+      },
+    );
+  }, [showCreateAppointmentModal, createAppointmentForm.date]);
 
-    if (!doesSessionFitWithinSchedule(siteConfig, time, durationMinutes)) {
-      return { disabled: true, label: 'Fuera de horario', tone: 'muted' as const, occupancy: 0 };
-    }
+  const createBlockedSlotKeys = useMemo(
+    () => new Set(blockedSlots.map((slot) => `${slot.date}_${slot.time}`)),
+    [blockedSlots],
+  );
 
-    const blocks = getCanonicalSlotBlocks(time, durationMinutes);
-    const blockedTimes = new Set(blockedSlots.filter((slot) => slot.date === date).map((slot) => slot.time));
-    const blocked = blocks.some((blockTime) => blockedTimes.has(blockTime));
-    if (blocked) {
-      return { disabled: true, label: 'Bloqueado', tone: 'blocked' as const, occupancy: 0 };
-    }
-
-    const occupancyByTime = new Map<string, number>();
-    appointments
-      .filter((appointment) => appointment.status === 'approved')
-      .forEach((appointment) => {
-        const slot = getAppointmentPrimarySlot(appointment);
-        if (!slot || slot.date !== date) return;
-        getCanonicalSlotBlocks(slot.time, parseInt(appointment.duration, 10)).forEach((blockTime) => {
-          occupancyByTime.set(blockTime, (occupancyByTime.get(blockTime) ?? 0) + 1);
-        });
-      });
-    const occupancy = Math.max(...blocks.map((blockTime) => occupancyByTime.get(blockTime) ?? 0), 0);
-    const maxCapacity = siteConfig.maxCapacity;
-    if (occupancy >= maxCapacity) {
-      return { disabled: true, label: 'Lleno', tone: 'full' as const, occupancy };
-    }
-
-    if (userId) {
-      const targetKeys = new Set(blocks.map((blockTime) => `${date}_${blockTime}`));
-      const duplicated = appointments
-        .filter((appointment) => appointment.userId === userId && ['pending', 'approved'].includes(appointment.status))
-        .some((appointment) => {
-          const keys = getAppointmentSlotKeys(appointment);
-          for (const key of keys) {
-            if (targetKeys.has(key)) return true;
-          }
-          return false;
-        });
-      if (duplicated) {
-        return { disabled: true, label: 'Duplicado', tone: 'duplicate' as const, occupancy };
-      }
-    }
-
-    if (occupancy > 0) {
-      return { disabled: false, label: `${occupancy}/${maxCapacity}`, tone: 'partial' as const, occupancy };
-    }
-
-    return { disabled: false, label: 'Libre', tone: 'free' as const, occupancy };
-  };
+  const getAdminAppointmentSlotStatus = (time: string) => getAdminCreateSlotStatus({
+    date: createAppointmentForm.date,
+    time,
+    durationMinutes: createAppointmentForm.durationMinutes,
+    siteConfig,
+    occupancy: createDayOccupancy,
+    blockedSlotKeys: createBlockedSlotKeys,
+    appointments,
+    userId: createAppointmentForm.userId || undefined,
+  });
 
   // Manejar inicio de sesión admin con Firebase Auth
   const handleLogin = async (e: React.FormEvent) => {
@@ -1965,37 +1949,68 @@ export default function AdminPage() {
   const handleStatusUpdate = async (
     id: string,
     status: Appointment['status'],
-    extraFields?: { assignedTrainer?: string; sessionType?: string; approvedSlot?: TimeSlot }
+    extraFields?: { assignedTrainer?: string }
   ) => {
-    // Encontrar la cita actual para saber su estado previo
+    // One status operation at a time: a double click must never apply it twice.
+    if (statusActionBusyId) return;
     const currentAppt = appointments.find(a => a.id === id);
-    const prevStatus = currentAppt?.status;
+    if (!currentAppt) return;
 
-    await updateAppointmentStatusFS(id, status, extraFields);
+    setStatusActionBusyId(id);
+    try {
+      let allowOverCapacity = false;
+      for (;;) {
+        try {
+          await updateAppointmentStatusFromAdminFS({
+            appointmentId: id,
+            status,
+            expectedStatus: currentAppt.status,
+            ...(extraFields?.assignedTrainer ? { assignedTrainer: extraFields.assignedTrainer } : {}),
+            ...(allowOverCapacity ? { allowOverCapacity: true } : {}),
+          });
+          break;
+        } catch (error) {
+          const details = getCallableErrorDetails(error);
+          if (!allowOverCapacity && details?.reason === 'slot_full' && details.overridable === true) {
+            const confirmed = confirm(
+              `La franja está completa (${String(details.occupancy ?? '?')}/${String(details.maxCapacity ?? '?')} personas).
 
-    // Mantener slot_occupancy sincronizado
-    // Si pasa a 'approved', incrementar el aforo de todos los bloques de 30min cubiertos
-    if (status === 'approved') {
-      const slot = extraFields?.approvedSlot || currentAppt?.preferredSlots?.[0];
-      if (slot && currentAppt) {
-        const durationMinutes = parseInt(currentAppt.duration, 10);
-        await incrementSlotOccupancy(slot.date, slot.time, durationMinutes);
+`
+              + '¿Aprobar igualmente superando el aforo? Quedará registrado en el historial de actividad.',
+            );
+            if (!confirmed) return;
+            allowOverCapacity = true;
+            continue;
+          }
+          throw error;
+        }
       }
+      await refreshData();
+      setShowApprovalModal(false);
+      setApprovalData({ assignedTrainer: '', sessionType: '' });
+      setSelectedAppointmentId(null);
+    } catch (error) {
+      console.error('Error updating appointment status:', error);
+      alert(getAdminCallableErrorMessage(error, 'No se pudo actualizar la cita.'));
+      await refreshData();
+    } finally {
+      setStatusActionBusyId(null);
     }
-    // Si ESTABA aprobada y ahora cambia a otro estado, decrementar
-    if (prevStatus === 'approved' && status !== 'approved') {
-      const slot = currentAppt?.approvedSlot || currentAppt?.preferredSlots?.[0];
-      if (slot && currentAppt) {
-        const durationMinutes = parseInt(currentAppt.duration, 10);
-        await decrementSlotOccupancy(slot.date, slot.time, durationMinutes);
-      }
-    }
+  };
 
-    await addActivityLog({ action: `appointment_${status}`, adminEmail: user?.email || 'unknown', details: `Cita ID: ${id}` });
-    await refreshData();
-    setShowApprovalModal(false);
-    setApprovalData({ assignedTrainer: '', sessionType: '' });
-    setSelectedAppointmentId(null);
+  const handleDeleteAppointment = async (appointment: Appointment) => {
+    if (statusActionBusyId) return;
+    if (!confirm('¿Estás seguro de eliminar esta cita?')) return;
+    setStatusActionBusyId(appointment.id);
+    try {
+      await deleteAppointmentsFromAdminFS([appointment.id]);
+      await refreshData();
+    } catch (error) {
+      console.error('Error deleting appointment:', error);
+      alert(getAdminCallableErrorMessage(error, 'No se pudo eliminar la cita.'));
+    } finally {
+      setStatusActionBusyId(null);
+    }
   };
 
   const handleApproveRecurringSeries = async () => {
@@ -3730,6 +3745,7 @@ export default function AdminPage() {
                                       variant="ghost"
                                       size="sm"
                                       icon={<XCircle className="w-4 h-4" />}
+                                      disabled={statusActionBusyId !== null}
                                       onClick={() => handleStatusUpdate(appointment.id, 'rejected')}
                                       className="flex-1 lg:flex-none text-destructive hover:bg-destructive/10"
                                     >
@@ -3769,6 +3785,7 @@ export default function AdminPage() {
                                       variant="ghost"
                                       size="sm"
                                       icon={<XCircle className="w-4 h-4" />}
+                                      disabled={statusActionBusyId !== null}
                                       onClick={() => handleStatusUpdate(appointment.id, 'cancelled')}
                                       className="w-full text-destructive hover:bg-destructive/10"
                                     >
@@ -3782,6 +3799,7 @@ export default function AdminPage() {
                                       variant="outline"
                                       size="sm"
                                       icon={<RefreshCw className="w-4 h-4" />}
+                                      disabled={statusActionBusyId !== null}
                                       onClick={() => handleStatusUpdate(appointment.id, 'pending')}
                                       className="w-full"
                                     >
@@ -3806,7 +3824,8 @@ export default function AdminPage() {
                                     variant="outline"
                                     size="sm"
                                     icon={<RefreshCw className="w-4 h-4" />}
-                                    onClick={() => handleStatusUpdate(appointment.id, 'pending')}
+                                    disabled={statusActionBusyId !== null}
+                                      onClick={() => handleStatusUpdate(appointment.id, 'pending')}
                                     className="w-full"
                                   >
                                     Reactivar
@@ -3816,22 +3835,8 @@ export default function AdminPage() {
                                   variant="ghost"
                                   size="sm"
                                   icon={<Trash2 className="w-4 h-4" />}
-                                  onClick={async () => {
-                                    if (confirm('¿Estás seguro de eliminar esta cita?')) {
-                                      // Decrement slot_occupancy if appointment was approved
-                                      if (appointment.status === 'approved') {
-                                        const slot = appointment.approvedSlot || appointment.preferredSlots?.[0];
-                                        if (slot) await decrementSlotOccupancy(slot.date, slot.time, parseInt(appointment.duration, 10));
-                                      }
-                                      await deleteAppointmentFS(appointment.id);
-                                      await addActivityLog({
-                                        action: 'appointment_deleted',
-                                        adminEmail: user?.email || 'unknown',
-                                        details: `Cita de ${appointment.name} (ID: ${appointment.id})`,
-                                      });
-                                      await refreshData();
-                                    }
-                                  }}
+                                  disabled={statusActionBusyId !== null}
+                                  onClick={() => handleDeleteAppointment(appointment)}
                                   className="w-full text-destructive hover:bg-destructive/10"
                                 >
                                   Eliminar
@@ -6460,33 +6465,31 @@ export default function AdminPage() {
 
                                           setSavingBlocks(true);
                                           try {
-                                            // 1. Eliminar citas si deleteOnBlock
-                                            if (deleteOnBlock) {
-                                              const toDelete = affectedAppointments;
-                                              for (const appt of toDelete) {
-                                                // Decrement slot_occupancy for approved appointments before deleting
-                                                if (appt.status === 'approved' && appt.approvedSlot) {
-                                                  await decrementSlotOccupancy(appt.approvedSlot.date, appt.approvedSlot.time, parseInt(appt.duration, 10));
-                                                }
-                                                await deleteAppointmentFS(appt.id);
-                                              }
-                                              if (toDelete.length > 0) {
-                                                await addActivityLog({
-                                                  action: 'appointments_deleted_on_block',
-                                                  adminEmail: user?.email || 'unknown',
-                                                  details: `${dateKey}: ${toDelete.length} cita(s) eliminadas (${toDelete.map(a => a.name).join(', ')})`,
-                                                });
-                                              }
+                                            // Bloqueo y borrado de citas afectadas en una sola transacción:
+                                            // o se aplican los dos, o ninguno.
+                                            const toDelete = deleteOnBlock ? affectedAppointments : [];
+                                            if (toDelete.length > 0) {
+                                              await blockSlotsFromAdminFS({
+                                                date: dateKey,
+                                                startTimes: slotsArray,
+                                                groupDurationMinutes: siteConfig.slotInterval,
+                                                ...(blockReasonInput ? { reason: blockReasonInput } : {}),
+                                                deleteAppointmentIds: toDelete.map((appt) => appt.id),
+                                              });
+                                              await addActivityLog({
+                                                action: 'appointments_deleted_on_block',
+                                                adminEmail: user?.email || 'unknown',
+                                                details: `${dateKey}: ${toDelete.length} cita(s) eliminadas (${toDelete.map(a => a.name).join(', ')})`,
+                                              });
+                                            } else {
+                                              await addBlockedSlotGroupsFS({
+                                                date: dateKey,
+                                                startTimes: slotsArray,
+                                                groupDurationMinutes: siteConfig.slotInterval,
+                                                ...(blockReasonInput ? { reason: blockReasonInput } : {}),
+                                                createdBy: user?.uid || 'unknown',
+                                              });
                                             }
-
-                                            // 2. Crear blocked_slots canónicos agrupados
-                                            await addBlockedSlotGroupsFS({
-                                              date: dateKey,
-                                              startTimes: slotsArray,
-                                              groupDurationMinutes: siteConfig.slotInterval,
-                                              ...(blockReasonInput ? { reason: blockReasonInput } : {}),
-                                              createdBy: user?.uid || 'unknown',
-                                            });
                                             await addActivityLog({
                                               action: 'blocked_slot_added',
                                               adminEmail: user?.email || 'unknown',
@@ -6498,7 +6501,7 @@ export default function AdminPage() {
                                             await refreshData();
                                           } catch (err) {
                                             console.error('Error blocking slots:', err);
-                                            alert('Error al bloquear franjas. Inténtalo de nuevo.');
+                                            alert(getAdminCallableErrorMessage(err, 'Error al bloquear franjas. Inténtalo de nuevo.'));
                                           } finally {
                                             setSavingBlocks(false);
                                           }
@@ -7779,7 +7782,8 @@ export default function AdminPage() {
                                     selected && 'bg-[var(--color-accent-val)] text-[var(--color-bg-base)] border-[var(--color-accent-val)]',
                                     !selected && slotStatus.tone === 'free' && 'bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)] hover:shadow-emerald-glow',
                                     !selected && slotStatus.tone === 'partial' && 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20',
-                                    !selected && ['blocked', 'full', 'duplicate'].includes(slotStatus.tone) && 'bg-red-500/10 border-red-500/20 text-red-300/70',
+                                    !selected && ['blocked', 'full', 'duplicate', 'invalid'].includes(slotStatus.tone) && 'bg-red-500/10 border-red-500/20 text-red-300/70',
+                                    !selected && slotStatus.mismatch && 'ring-1 ring-amber-400/60',
                                     !selected && slotStatus.tone === 'muted' && 'bg-muted/10 border-border text-[var(--color-text-secondary)]'
                                   )}
                                 >
@@ -7789,6 +7793,24 @@ export default function AdminPage() {
                               );
                             })}
                           </div>
+                          {(() => {
+                            const drift = timeSlots
+                              .map((time) => ({ time, status: getAdminAppointmentSlotStatus(time) }))
+                              .filter(({ status }) => status.mismatch || status.tone === 'invalid');
+                            if (drift.length === 0) return null;
+                            return (
+                              <div className="mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex gap-2">
+                                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                                <span>
+                                  Contador de aforo desincronizado en {drift.slice(0, 4).map(({ time, status }) => (
+                                    status.mismatch
+                                      ? `${time} (registrado ${status.mismatch.registered}, citas aprobadas ${status.mismatch.approved})`
+                                      : `${time} (contador inválido)`
+                                  )).join(', ')}{drift.length > 4 ? '…' : ''}. La disponibilidad mostrada es la que aplicará el servidor; revisa la conciliación de aforo.
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </div>
 
                         <div>
@@ -8763,23 +8785,20 @@ export default function AdminPage() {
                         <PremiumButton
                           variant="cta"
                           icon={<Check className="w-4 h-4" />}
+                          disabled={statusActionBusyId !== null}
                           onClick={async () => {
-                            const extra: { assignedTrainer?: string; sessionType?: string; approvedSlot?: TimeSlot } = {};
+                            const extra: { assignedTrainer?: string } = {};
                             if (approvalData.assignedTrainer) extra.assignedTrainer = approvalData.assignedTrainer;
-                            // sessionType comes from the appointment's serviceType (client chose it at booking)
                             const appt = appointments.find(a => a.id === selectedAppointmentId);
-                            if (appt?.serviceType) extra.sessionType = appt.serviceType;
-                            if (appt && appt.preferredSlots.length > 0) {
-                              extra.approvedSlot = appt.preferredSlots[0];
-                            }
                             if (appt && getAppointmentType(appt) === 'nutrition') {
                               if (!extra.assignedTrainer) {
                                 alert('Selecciona el profesional de nutrición que atenderá la consulta.');
                                 return;
                               }
-                              if (extra.approvedSlot && hasProfessionalConflict(appointments, {
+                              const slot = appt.preferredSlots?.[0];
+                              if (slot && hasProfessionalConflict(appointments, {
                                 trainerId: extra.assignedTrainer,
-                                slot: extra.approvedSlot,
+                                slot,
                                 durationMinutes: Number(appt.duration),
                                 excludeAppointmentId: appt.id,
                               })) {
@@ -8787,10 +8806,11 @@ export default function AdminPage() {
                                 return;
                               }
                             }
+                            // Session type, slot, capacity and minutes are resolved atomically by the server.
                             await handleStatusUpdate(selectedAppointmentId, 'approved', extra);
                           }}
                         >
-                          Confirmar Aprobación
+                          {statusActionBusyId ? 'Aprobando...' : 'Confirmar Aprobación'}
                         </PremiumButton>
                       </div>
                     </GlassCard>

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AlertCircle, ArrowLeft, CalendarCheck, RefreshCw, Repeat2, Ticket } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -8,10 +9,9 @@ import { AdminSlotPickerModal, type AdminSlotPickerResult } from '@/components/a
 import { formatRenewalSlot, RenewalPreviewPanel } from '@/components/admin/RenewalPreviewPanel';
 import {
     addActivityLog,
-    assignBono,
+    assignBonoFromAdmin,
     commitBonoAppointmentRenewalFromAdmin,
     countApprovedSeriesForBono,
-    deactivateBono,
     getBonosByUser,
     previewBonoAppointmentRenewalFromAdmin,
 } from '@/lib/firestore';
@@ -78,6 +78,8 @@ export function AssignBonoModal({
     onAssigned,
 }: AssignBonoModalProps) {
     const [size, setSize] = useState<number>(sizes[0] ?? 240);
+    // One id per modal: retries and double clicks reuse it, so the server creates a single bono.
+    const assignRequestId = useRef(uuidv4());
     const [startDate, setStartDate] = useState(defaultStartDate);
     const [endDate, setEndDate] = useState(defaultEndDate);
     const [error, setError] = useState('');
@@ -195,17 +197,13 @@ export function AssignBonoModal({
             setError(dates.error || 'Revisa las fechas del bono.');
             return null;
         }
-        if (activeBono) await deactivateBono(activeBono.id);
-        const bonoId = await assignBono({
+        // The server replaces every other active bono in the same transaction.
+        const { bonoId } = await assignBonoFromAdmin({
             userId: client.uid,
             tamano: size,
-            minutosTotales: size,
-            minutosRestantes: size,
             fechaAsignacion: dates.fechaAsignacion,
             fechaExpiracion: dates.fechaExpiracion,
-            estado: 'activo',
-            historial: [],
-            asignadoPor: adminEmail || 'admin',
+            requestId: assignRequestId.current,
         });
         await addActivityLog({
             action: 'bono_assigned',

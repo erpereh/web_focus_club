@@ -16,8 +16,10 @@ const fs = vi.hoisted(() => ({
 vi.mock('@/lib/firestore', () => ({
     getBonosByUser: vi.fn(async () => fs.bonos),
     countApprovedSeriesForBono: vi.fn(async () => fs.seriesCount),
-    deactivateBono: vi.fn(async (id: string) => { fs.calls.push(['deactivateBono', id]); }),
-    assignBono: vi.fn(async (data: unknown) => { fs.calls.push(['assignBono', data]); return 'bono-new'; }),
+    assignBonoFromAdmin: vi.fn(async (data: unknown) => {
+        fs.calls.push(['assignBonoFromAdmin', data]);
+        return { success: true, bonoId: 'bono-new', alreadyCreated: false, replacedBonoIds: ['bono-old'] };
+    }),
     addActivityLog: vi.fn(async () => undefined),
     previewBonoAppointmentRenewalFromAdmin: vi.fn(async (input: unknown) => {
         fs.calls.push(['preview', input]);
@@ -105,8 +107,12 @@ describe('AssignBonoModal', () => {
         fireEvent.click(screen.getByRole('button', { name: '12h / mes' }));
         fireEvent.click(screen.getByRole('button', { name: /Asignar Bono/ }));
         await waitFor(() => expect(onClose).toHaveBeenCalled());
-        expect(fs.calls.map(([name]) => name)).toEqual(['deactivateBono', 'assignBono']);
-        expect(fs.calls[1][1]).toMatchObject({ tamano: 720, minutosTotales: 720, minutosRestantes: 720, estado: 'activo' });
+        expect(fs.calls.map(([name]) => name)).toEqual(['assignBonoFromAdmin']);
+        // One atomic server call replaces the old bono; the request id makes retries idempotent.
+        const [, payload] = fs.calls[0] as [string, { requestId: string; userId: string; tamano: number }];
+        expect(payload.requestId).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+        expect(payload).not.toHaveProperty('estado');
+        expect(payload).toMatchObject({ userId: expect.any(String), tamano: 720 });
         expect(onAssigned).toHaveBeenCalled();
     });
 
@@ -214,7 +220,7 @@ describe('AssignBonoModal', () => {
         await waitFor(() => expect(screen.getByRole('button', { name: /Reintentar las citas pendientes/ })).not.toBeDisabled());
         fireEvent.click(screen.getByRole('button', { name: /Reintentar las citas pendientes/ }));
         await screen.findByTestId('renewal-summary');
-        expect(fs.calls.filter(([name]) => name === 'assignBono')).toHaveLength(1);
+        expect(fs.calls.filter(([name]) => name === 'assignBonoFromAdmin')).toHaveLength(1);
         const commits = fs.calls.filter(([name]) => name === 'commit').map(([, input]) => input as { renewalId: string });
         expect(commits).toHaveLength(2);
         expect(commits[0].renewalId).toBe(commits[1].renewalId);

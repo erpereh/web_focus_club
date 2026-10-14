@@ -166,6 +166,9 @@ export interface Appointment {
     modifiedBy?: string;
     modifiedAt?: string;
     previousPreferredSlot?: TimeSlot | null;
+    /** Legacy top-level slot (older documents); mirrors the effective slot on new ones. */
+    date?: string;
+    time?: string;
     recurrenceSeriesId?: string;
     recurrenceIndex?: number;
     /** Ausente en citas antiguas (= entrenamiento). */

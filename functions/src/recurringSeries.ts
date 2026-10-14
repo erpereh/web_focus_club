@@ -25,6 +25,7 @@ import {
   type SiteConfig,
 } from "./siteConfig.js";
 import { newNotificationOperation, sessionsOf, writeNotificationOutbox } from "./notifications/outbox.js";
+import { parseOccupancyCount } from "./slotOccupancy.js";
 import {
   calculateActiveSeriesMetadata,
   isActiveOccurrenceStatus,
@@ -312,7 +313,12 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         const occupancyByKey = new Map<string, number>();
         occupancySnaps.forEach((snap, index) => {
           const occupancy = snap.exists ? snap.data() as SlotOccupancy : undefined;
-          occupancyByKey.set(occupancyKeys[index], occupancy?.count ?? 0);
+          const count = occupancy ? parseOccupancyCount(occupancy.count) : 0;
+          if (count === undefined) {
+            // A corrupt counter must be detected, never read as free capacity.
+            throwHttps("failed-precondition", "La ocupación registrada no es válida.", { reason: "invalid_occupancy" });
+          }
+          occupancyByKey.set(occupancyKeys[index], count);
         });
         const userSlotKeys = new Set<string>();
         userAppointmentsSnap.docs.forEach((docSnap) => {
@@ -422,7 +428,11 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         plan.writes.occupancyWrites.forEach((write) => {
           transaction.set(
             db.collection("slot_occupancy").doc(slotOccupancyDocId(write.date, write.time)),
-            { date: write.date, time: write.time, count: FieldValue.increment(1) },
+            {
+              date: write.date,
+              time: write.time,
+              count: (occupancyByKey.get(slotOccupancyDocId(write.date, write.time)) ?? 0) + 1,
+            },
             { merge: true },
           );
         });
@@ -543,7 +553,12 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         const occupancyByKey = new Map<string, number>();
         occupancySnaps.forEach((snap, index) => {
           const occupancy = snap.exists ? snap.data() as SlotOccupancy : undefined;
-          occupancyByKey.set(occupancyKeys[index], occupancy?.count ?? 0);
+          const count = occupancy ? parseOccupancyCount(occupancy.count) : 0;
+          if (count === undefined) {
+            // A corrupt counter must be detected, never read as free capacity.
+            throwHttps("failed-precondition", "La ocupación registrada no es válida.", { reason: "invalid_occupancy" });
+          }
+          occupancyByKey.set(occupancyKeys[index], count);
         });
         const userSlotKeys = new Set<string>();
         userAppointmentsSnap.docs.forEach((docSnap) => {

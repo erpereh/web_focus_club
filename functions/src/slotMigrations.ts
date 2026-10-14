@@ -227,6 +227,39 @@ export function planSlotOccupancyReconciliation(input: {
   return { report: { ...base, appointmentsProcessed, invalidAppointments }, operations };
 }
 
+export const MAX_REPORTED_DIFFERENCES = 200;
+
+export interface OccupancyDifference {
+  id: string;
+  date: string;
+  time: string;
+  operation: 'create' | 'update' | 'delete';
+  actualCount: unknown;
+  expectedCount: number;
+}
+
+/** Per-slot view of a reconciliation plan (dry runs only; bounded). */
+export function describeOccupancyDifferences(
+  operations: MigrationOperation[],
+  occupancyDocuments: StoredMigrationDocument[],
+): OccupancyDifference[] {
+  const actual = new Map(occupancyDocuments.map((document) => [document.id, document.data]));
+  return operations
+    .filter((operation) => operation.collection === 'slot_occupancy')
+    .slice(0, MAX_REPORTED_DIFFERENCES)
+    .map((operation) => {
+      const current = actual.get(operation.id);
+      return {
+        id: operation.id,
+        date: operation.date,
+        time: operation.time,
+        operation: operation.type === 'delete' ? 'delete' : current ? 'update' : 'create',
+        actualCount: current ? current.count ?? null : null,
+        expectedCount: operation.type === 'delete' ? 0 : Number(operation.data?.count ?? 0),
+      };
+    });
+}
+
 interface LegacySource {
   id: string;
   reason?: string;
@@ -431,7 +464,12 @@ export function createSlotMigrationHandlers(deps: SlotMigrationDeps) {
         throw new HttpsError('failed-precondition', 'Hay citas aprobadas inválidas; no se ha escrito ningún documento.');
       }
       if (parsed.mode === 'apply') await deps.applyOperations(plan.operations);
-      return { mode: parsed.mode, applied: parsed.mode === 'apply', ...plan.report };
+      return {
+        mode: parsed.mode,
+        applied: parsed.mode === 'apply',
+        ...plan.report,
+        ...(parsed.mode === 'dryRun' ? { differences: describeOccupancyDifferences(plan.operations, occupancyDocuments) } : {}),
+      };
     },
 
     migrateLegacyBlockedSlots: async (request: MigrationCallableRequest) => {
