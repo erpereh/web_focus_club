@@ -10,6 +10,7 @@ import {
   madridCivilSlotToInstant,
 } from "./appointmentLifecycle.js";
 import { doesSessionFitWithinSchedule, generateTimeSlots, normalizeSiteConfig, type SiteConfig } from "./siteConfig.js";
+import { parseOccupancyCount, sessionMinutesOf } from "./slotOccupancy.js";
 
 /**
  * Appointment kinds. Documents written before nutrition existed have no
@@ -50,7 +51,8 @@ export type SlotRejectionReason =
   | "trainer_not_nutrition"
   | "professional_conflict"
   | "booking_notice_too_short"
-  | "same_day_booking_disabled";
+  | "same_day_booking_disabled"
+  | "invalid_occupancy";
 
 export const SLOT_REJECTION_MESSAGES: Record<SlotRejectionReason, string> = {
   slot_not_future: "La franja seleccionada ya no está disponible.",
@@ -63,6 +65,7 @@ export const SLOT_REJECTION_MESSAGES: Record<SlotRejectionReason, string> = {
   professional_conflict: "El profesional ya tiene otra cita en esta franja.",
   booking_notice_too_short: "La franja seleccionada no respeta la antelación mínima para reservar.",
   same_day_booking_disabled: SAME_DAY_BOOKING_MESSAGE,
+  invalid_occupancy: "La ocupación registrada no es válida.",
 };
 
 export interface SlotAppointmentLike {
@@ -93,6 +96,8 @@ export interface SlotDayContext {
   config: SiteConfig;
   blockedTimes: Set<string>;
   occupancyByTime: Map<string, number>;
+  /** Times whose stored count is not a non-negative integer (corrupt counters). */
+  invalidOccupancyTimes?: Set<string>;
 }
 
 export interface SlotCheckInput {
@@ -122,8 +127,7 @@ export interface SlotCheckInput {
 }
 
 export function appointmentDurationOf(appointment: SlotAppointmentLike): number {
-  const minutes = Number.parseInt(String(appointment.duration ?? ""), 10);
-  return [30, 45, 60].includes(minutes) ? minutes : 0;
+  return sessionMinutesOf(appointment);
 }
 
 export function slotRangeKeys(slot: SlotTimeSlot, durationMinutes: number): Set<string> {
@@ -164,6 +168,8 @@ export function evaluateSlot(day: SlotDayContext, input: SlotCheckInput): SlotRe
 
   const blocks = getCanonicalSlotBlocks(input.slot.time, input.durationMinutes);
   if (blocks.some((time) => day.blockedTimes.has(time))) return "slot_blocked";
+  // A corrupt counter must never be read as free capacity.
+  if (blocks.some((time) => day.invalidOccupancyTimes?.has(time))) return "invalid_occupancy";
 
   const ownKeys = input.ownApprovedOccupancyKeys ?? new Set<string>();
   if (blocks.some((time) => !isRescheduleCapacityAvailable(
@@ -240,13 +246,15 @@ export async function loadSlotDay(
     if (typeof time === "string") blockedTimes.add(time);
   });
   const occupancyByTime = new Map<string, number>();
+  const invalidOccupancyTimes = new Set<string>();
   occupancySnap.docs.forEach((docSnap) => {
     const occupancy = docSnap.data() as { time?: unknown; count?: unknown };
-    if (typeof occupancy.time === "string") {
-      occupancyByTime.set(occupancy.time, typeof occupancy.count === "number" ? occupancy.count : 0);
-    }
+    if (typeof occupancy.time !== "string") return;
+    const count = parseOccupancyCount(occupancy.count);
+    if (count === undefined) invalidOccupancyTimes.add(occupancy.time);
+    occupancyByTime.set(occupancy.time, count ?? 0);
   });
-  return { config, blockedTimes, occupancyByTime };
+  return { config, blockedTimes, occupancyByTime, invalidOccupancyTimes };
 }
 
 export async function loadCustomerActiveAppointments(

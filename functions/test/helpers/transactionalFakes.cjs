@@ -3,19 +3,38 @@
 // documents, staged writes only land when the callback resolves, and
 // FieldValue.delete() removes fields on merge.
 
+function isFieldTransform(value) {
+  return /Transform$/.test(value?.constructor?.name ?? "");
+}
+
+/** Deep copy that keeps FieldValue sentinels (structuredClone would strip their class). */
 function clone(value) {
-  return value === undefined ? undefined : structuredClone(value);
+  if (value === undefined || value === null || typeof value !== "object") return value;
+  if (isFieldTransform(value)) return value;
+  if (Array.isArray(value)) return value.map(clone);
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clone(item)]));
 }
 
 function getPath(data, fieldPath) {
   return fieldPath.split(".").reduce((value, key) => (value == null ? undefined : value[key]), data);
 }
 
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function matches(data, { field, operator, value }) {
   const actual = getPath(data, field);
-  if (operator === "==") return actual === value;
-  if (operator === "in") return value.includes(actual);
-  if (operator === "array-contains") return Array.isArray(actual) && actual.includes(value);
+  // Firestore compares maps by value (key order does not matter).
+  const same = (left, right) => stableJson(left) === stableJson(right);
+  if (operator === "==") return typeof value === "object" && value !== null ? same(actual, value) : actual === value;
+  if (operator === "in") return value.some((item) => same(actual, item));
+  if (operator === "array-contains") return Array.isArray(actual) && actual.some((item) => same(item, value));
+  if (operator === "array-contains-any") return Array.isArray(actual) && actual.some((item) => value.some((candidate) => same(item, candidate)));
   if (operator === ">=") return actual >= value;
   if (operator === "<=") return actual <= value;
   throw new Error(`unsupported operator ${operator}`);
@@ -24,6 +43,29 @@ function matches(data, { field, operator, value }) {
 function isDeleteTransform(value) {
   return value?.constructor?.name === "DeleteTransform";
 }
+
+function deepEqual(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** Applies FieldValue sentinels the way Firestore does on write. */
+function resolveFieldValue(current, value) {
+  const kind = value?.constructor?.name;
+  if (kind === "NumericIncrementTransform") return (typeof current === "number" ? current : 0) + value.operand;
+  if (kind === "ArrayUnionTransform") {
+    const base = Array.isArray(current) ? [...current] : [];
+    for (const element of value.elements) {
+      if (!base.some((item) => deepEqual(item, element))) base.push(clone(element));
+    }
+    return base;
+  }
+  if (kind === "ArrayRemoveTransform") {
+    return (Array.isArray(current) ? current : []).filter((item) => !value.elements.some((element) => deepEqual(item, element)));
+  }
+  return value;
+}
+
+class TransactionConflictError extends Error {}
 
 class FakeDocumentReference {
   constructor(db, path) {
@@ -35,6 +77,7 @@ class FakeDocumentReference {
   collection(name) { return new FakeCollection(this.db, `${this.path}/${name}`); }
   async get() { return this.db.snapshot(this.path); }
   async set(value, options) { this.db.apply([{ ref: this, value: clone(value), merge: options?.merge === true }]); }
+  async delete() { this.db.apply([{ ref: this, remove: true }]); }
 }
 
 class FakeQuery {
@@ -63,6 +106,9 @@ class FakeFirestore {
     this.documents = new Map(Object.entries(clone(documents)));
     this.autoId = 0;
     this.writes = [];
+    this.versions = new Map();
+    this.collectionVersions = new Map();
+    this.conflicts = 0;
     /** Optional hook run after the transaction callback, before committing (race simulation). */
     this.beforeCommit = undefined;
   }
@@ -92,38 +138,72 @@ class FakeFirestore {
   }
 
   apply(staged) {
-    staged.forEach(({ ref, value, merge, create }) => {
+    staged.forEach(({ ref, value, merge, create, remove }) => {
+      const collection = ref.path.split("/").slice(0, -1).join("/");
+      this.versions.set(ref.path, (this.versions.get(ref.path) ?? 0) + 1);
+      this.collectionVersions.set(collection, (this.collectionVersions.get(collection) ?? 0) + 1);
+      if (remove) {
+        this.documents.delete(ref.path);
+        this.writes.push({ path: ref.path, deleted: true });
+        return;
+      }
       if (create && this.documents.has(ref.path)) throw new Error(`already exists: ${ref.path}`);
-      const next = merge ? { ...(this.documents.get(ref.path) ?? {}), ...value } : { ...value };
+      const previous = merge ? (this.documents.get(ref.path) ?? {}) : {};
+      const next = { ...previous };
       Object.entries(value).forEach(([field, fieldValue]) => {
         if (isDeleteTransform(fieldValue)) delete next[field];
+        else next[field] = resolveFieldValue(previous[field], fieldValue);
       });
       this.documents.set(ref.path, next);
       this.writes.push({ path: ref.path, value });
     });
   }
 
-  async runTransaction(callback) {
-    const staged = [];
-    let wrote = false;
-    const transaction = {
-      get: async (target) => {
-        if (wrote) throw new Error("read after write");
-        return target.kind === "doc" ? this.snapshot(target.path) : this.runQuery(target);
-      },
-      set: (ref, value, options) => {
-        wrote = true;
-        staged.push({ ref, value: clone(value), merge: options?.merge === true });
-      },
-      create: (ref, value) => {
-        wrote = true;
-        staged.push({ ref, value: clone(value), merge: false, create: true });
-      },
-    };
-    const result = await callback(transaction);
-    if (this.beforeCommit) await this.beforeCommit();
-    this.apply(staged);
-    return result;
+  /**
+   * Optimistic concurrency like Firestore: a transaction whose read documents
+   * (or queried collections) changed before commit is retried from scratch.
+   */
+  async runTransaction(callback, { maxAttempts = 5 } = {}) {
+    for (let attempt = 1; ; attempt += 1) {
+      const staged = [];
+      const readDocs = new Map();
+      const readCollections = new Map();
+      let wrote = false;
+      const transaction = {
+        get: async (target) => {
+          if (wrote) throw new Error("read after write");
+          if (target.kind === "doc") {
+            readDocs.set(target.path, this.versions.get(target.path) ?? 0);
+            return this.snapshot(target.path);
+          }
+          readCollections.set(target.collectionName, this.collectionVersions.get(target.collectionName) ?? 0);
+          return this.runQuery(target);
+        },
+        set: (ref, value, options) => {
+          wrote = true;
+          staged.push({ ref, value: clone(value), merge: options?.merge === true });
+        },
+        create: (ref, value) => {
+          wrote = true;
+          staged.push({ ref, value: clone(value), merge: false, create: true });
+        },
+        delete: (ref) => {
+          wrote = true;
+          staged.push({ ref, remove: true });
+        },
+      };
+      const result = await callback(transaction);
+      if (this.beforeCommit) await this.beforeCommit();
+      const conflict = [...readDocs].some(([path, version]) => (this.versions.get(path) ?? 0) !== version)
+        || [...readCollections].some(([name, version]) => (this.collectionVersions.get(name) ?? 0) !== version);
+      if (conflict) {
+        this.conflicts += 1;
+        if (attempt >= maxAttempts) throw new TransactionConflictError("transaction contention");
+        continue;
+      }
+      this.apply(staged);
+      return result;
+    }
   }
 }
 
@@ -145,4 +225,4 @@ async function rejectsWithReason(promise, reason, code) {
   throw new Error(`expected rejection with reason ${reason}`);
 }
 
-module.exports = { FakeFirestore, callable, rejectsWithReason };
+module.exports = { FakeFirestore, TransactionConflictError, callable, rejectsWithReason };

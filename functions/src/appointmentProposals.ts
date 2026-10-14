@@ -1,12 +1,12 @@
-import type { DocumentReference, Firestore, Transaction } from "firebase-admin/firestore";
+import type { Firestore, Transaction } from "firebase-admin/firestore";
 import { type CallableRequest, HttpsError } from "firebase-functions/v2/https";
 import {
   getAppointmentEffectiveSlot,
   getCanonicalSlotBlocks,
-  reconcileAppointmentMinutes,
   slotOccupancyDocId,
-  type LifecycleBono,
 } from "./appointmentLifecycle.js";
+import { readFinanceContext, refundAppointmentMinutesInTransaction } from "./appointmentFinance.js";
+import { planOccupancyWrites } from "./slotOccupancy.js";
 import {
   appointmentDurationOf,
   type AppointmentType,
@@ -165,49 +165,20 @@ function occupyApprovedSlot(
   durationMinutes: number,
   occupancyByTime: Map<string, number>,
 ): void {
+  const delta = new Map<string, number>();
+  const raw = new Map<string, unknown>();
   getCanonicalSlotBlocks(slot.time, durationMinutes).forEach((time) => {
+    const key = slotOccupancyDocId(slot.date, time);
+    delta.set(key, 1);
+    raw.set(key, occupancyByTime.get(time) ?? 0);
+  });
+  planOccupancyWrites(delta, raw).writes.forEach((write) => {
     transaction.set(
-      db.collection("slot_occupancy").doc(slotOccupancyDocId(slot.date, time)),
-      { date: slot.date, time, count: (occupancyByTime.get(time) ?? 0) + 1 },
+      db.collection("slot_occupancy").doc(write.key),
+      { date: write.date, time: write.time, count: write.count },
       { merge: true },
     );
   });
-}
-
-/** Refunds the minutes reserved by a training appointment exactly once. */
-function refundReservedMinutes(
-  transaction: Transaction,
-  appointmentRef: DocumentReference,
-  appointment: ProposalAppointment,
-  bonoSnap: { exists: boolean; id: string; ref: DocumentReference; data(): unknown } | undefined,
-  now: string,
-): Record<string, unknown> {
-  if (!bonoSnap?.exists) return {};
-  const bonoData = bonoSnap.data() as LifecycleBono & { historial?: unknown[] };
-  let bonoPatch: Record<string, unknown> | undefined;
-  let appointmentPatch: Record<string, unknown> = {};
-  const result = reconcileAppointmentMinutes({
-    action: "refund",
-    appointment,
-    bono: { ...bonoData, id: bonoSnap.id },
-    now,
-    transaction: {
-      setBono: (_id, patch) => { bonoPatch = patch; },
-      setAppointment: (patch) => { appointmentPatch = patch; },
-    },
-  });
-  if (!result.ok || !bonoPatch) return {};
-  transaction.set(bonoSnap.ref, {
-    ...bonoPatch,
-    historial: [...(Array.isArray(bonoData.historial) ? bonoData.historial : []), {
-      fecha: now,
-      tipo: appointment.serviceType ?? "",
-      duracion: appointment.duration,
-      appointmentId: appointmentRef.id,
-      accion: "devolucion_cita",
-    }],
-  }, { merge: true });
-  return appointmentPatch;
 }
 
 export function createAppointmentProposalHandlers(deps: AppointmentProposalDeps) {
@@ -360,10 +331,16 @@ export function createAppointmentProposalHandlers(deps: AppointmentProposalDeps)
 
       if (response === "declined") {
         const isTraining = getAppointmentType(appointment) === "training";
-        const bonoSnap = isTraining && appointment.bonoId
-          ? await transaction.get(db.collection("bonos").doc(appointment.bonoId))
-          : undefined;
-        const refundPatch = refundReservedMinutes(transaction, appointmentRef, appointment, bonoSnap, now);
+        const refundPatch = isTraining
+          ? refundAppointmentMinutesInTransaction(
+            transaction,
+            appointmentRef,
+            appointment,
+            await readFinanceContext(transaction, db, appointment),
+            now,
+            { persistAppointment: false },
+          ).appointmentPatch
+          : {};
         transaction.set(appointmentRef, {
           ...refundPatch,
           status: isProposal ? "rejected" : "cancelled",

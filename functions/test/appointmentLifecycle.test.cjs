@@ -81,6 +81,7 @@ assert.deepEqual(refunded, {
   minutesRefunded: true,
   minutesRefundedAmount: 45,
   minutesRefundedAt: "2026-07-14T10:00:00.000Z",
+  cappedMinutes: 0,
 });
 assert.equal(calculateAppointmentRefund(activeBono, { minutesDeducted: true, minutesDeductedAmount: 30, minutesRefundedAt: "done" }, "now").ok, false);
 
@@ -350,7 +351,7 @@ assert.match(indexSource, /minutesRefundedAt:\s*null/);
 assert.match(indexSource, /minutesRefundReason:\s*null/);
 assert.match(indexSource, /export const cancelOwnAppointment\s*=\s*onCall/);
 assert.match(indexSource, /validateOwnFutureAppointment/);
-assert.match(indexSource, /refundAppointmentMinutesInTransaction\(transaction, appointmentRef, appointment, bonoSnap, now\)/);
+assert.match(indexSource, /refundAppointmentMinutesInTransaction\(transaction, appointmentRef, appointment, financeContext, now\)/);
 assert.match(indexSource, /export const updateOwnAppointmentSlot\s*=\s*onCall/);
 assert.match(indexSource, /reconcileOwnAppointmentReschedule\(\{/);
 assert.match(indexSource, /releaseApprovedAppointmentOccupancyInTransaction/);
@@ -362,8 +363,8 @@ assert.match(slotValidationSource, /isRescheduleCapacityAvailable/);
 assert.match(slotValidationSource, /config\.maxCapacity/);
 assert.match(indexSource, /config\.maxCapacity/);
 assert.doesNotMatch(indexSource, /const MAX_CAPACITY\s*=\s*2/);
-assert.match(indexSource, /shouldReconcileAppointmentTransition\("approved", appointment\.status\)/);
-assert.match(indexSource, /const expectedStatus = changedToRejected \? "rejected" : "cancelled"/);
+assert.match(indexSource, /shouldReconcileAppointmentTransition\(expectedStatus, appointment\.status\)/);
+assert.match(indexSource, /const expectedStatus = changedToApproved \? "approved" : changedToRejected \? "rejected" : "cancelled"/);
 assert.match(indexSource, /if \(status === "rejected" \|\| status === "cancelled"\)/);
 
 const cancelOwnSource = indexSource.slice(

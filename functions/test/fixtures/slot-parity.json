@@ -1,0 +1,21 @@
+{
+  "description": "Shared cases: the admin 'Nueva cita' grid (web) and evaluateSlot (Functions) must reach the same verdict. date is far in the future so time-based rules never apply.",
+  "date": "2030-01-15",
+  "config": { "startHour": 7, "endHour": 22, "slotInterval": 15, "maxCapacity": 2 },
+  "cases": [
+    { "name": "empty slot", "time": "10:00", "duration": 60, "occupancy": {}, "blocked": [], "expected": null },
+    { "name": "one seat left", "time": "10:00", "duration": 60, "occupancy": { "10:15": 1 }, "blocked": [], "expected": null },
+    { "name": "full start block", "time": "10:00", "duration": 30, "occupancy": { "10:00": 2 }, "blocked": [], "expected": "slot_full" },
+    { "name": "full block inside a 60-min session", "time": "10:00", "duration": 60, "occupancy": { "10:45": 2 }, "blocked": [], "expected": "slot_full" },
+    { "name": "45-min session crossing a full block", "time": "10:15", "duration": 45, "occupancy": { "10:45": 2 }, "blocked": [], "expected": "slot_full" },
+    { "name": "adjacent full block does not overlap", "time": "10:00", "duration": 45, "occupancy": { "10:45": 2 }, "blocked": [], "expected": null },
+    { "name": "over-capacity counter", "time": "10:00", "duration": 30, "occupancy": { "10:15": 5 }, "blocked": [], "expected": "slot_full" },
+    { "name": "blocked block wins over capacity", "time": "10:00", "duration": 60, "occupancy": { "10:00": 2 }, "blocked": ["10:30"], "expected": "slot_blocked" },
+    { "name": "negative counter is invalid, not free", "time": "10:00", "duration": 30, "occupancy": { "10:15": -1 }, "blocked": [], "expected": "invalid_occupancy" },
+    { "name": "string counter is invalid", "time": "10:00", "duration": 30, "occupancy": { "10:00": "1" }, "blocked": [], "expected": "invalid_occupancy" },
+    { "name": "fractional counter is invalid", "time": "10:00", "duration": 30, "occupancy": { "10:00": 1.5 }, "blocked": [], "expected": "invalid_occupancy" },
+    { "name": "session past closing time", "time": "21:30", "duration": 60, "occupancy": {}, "blocked": [], "expected": "outside_schedule" },
+    { "name": "customer already booked overlapping", "time": "10:00", "duration": 60, "occupancy": { "10:30": 1 }, "blocked": [], "customerBooked": { "time": "10:30", "duration": 30 }, "expected": "appointment_conflict" },
+    { "name": "customer booked right before", "time": "10:00", "duration": 60, "occupancy": { "09:30": 1 }, "blocked": [], "customerBooked": { "time": "09:30", "duration": 30 }, "expected": null }
+  ]
+}

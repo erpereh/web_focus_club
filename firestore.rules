@@ -69,9 +69,11 @@ service cloud.firestore {
     }
 
     // SLOT OCCUPANCY
+    // Seat counters are written only by Cloud Functions, in the same
+    // transaction that changes the appointment. Clients (web and apps) read.
     match /slot_occupancy/{slotId} {
       allow read: if isVerified() || isAdmin();
-      allow write: if isAdmin();
+      allow write: if false;
     }
 
     // SERVICES

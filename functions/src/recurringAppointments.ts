@@ -522,6 +522,14 @@ export function planSeriesMinutesRefund(input: {
       minutesRefundedAmount: refund.minutesRefundedAmount,
       minutesRefundedAt: refund.minutesRefundedAt,
       minutesRefundReason: null,
+      ...(refund.cappedMinutes > 0
+        ? {
+          minutesRefundCappedAmount: refund.cappedMinutes,
+          // Never credited elsewhere automatically: flagged for manual review.
+          minutesRefundPendingReview: true,
+          minutesRefundPendingAmount: refund.cappedMinutes,
+        }
+        : {}),
     });
   }
   return {

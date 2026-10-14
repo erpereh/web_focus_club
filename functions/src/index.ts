@@ -29,7 +29,6 @@ import {
   madridCivilSlotToInstant,
   ONE_DAY_CHANGE_MESSAGE,
   ONE_DAY_CHANGE_NOT_ALLOWED,
-  reconcileAppointmentMinutes,
   reconcileOwnAppointmentReschedule,
   SAME_DAY_CHANGE_MESSAGE,
   SAME_DAY_CHANGE_NOT_ALLOWED,
@@ -53,6 +52,15 @@ import {
   type ProposalHistoryEntry,
 } from "./appointmentProposals.js";
 import { createBonoRenewalHandlers } from "./bonoRenewal.js";
+import { createAdminAppointmentStatusHandlers } from "./adminAppointmentStatus.js";
+import {
+  applyApprovalDeductionInTransaction,
+  deductAppointmentMinutesInTransaction,
+  readFinanceContext,
+  refundAppointmentMinutesInTransaction,
+} from "./appointmentFinance.js";
+import { addOccupancyDelta, appointmentOccupancyKeys, planOccupancyWrites, sessionMinutesOf } from "./slotOccupancy.js";
+import { readSeriesForOccurrence, seriesMetadataPatch } from "./seriesMetadata.js";
 import { createSupportChatHandlers } from "./supportChat";
 import {
   createCustomerSuggestionHandlers,
@@ -337,132 +345,41 @@ function getOverlappingSlotKeys(slot: TimeSlot, durationMinutes: number): Set<st
 }
 
 function appointmentSlotKeys(appointment: AppointmentDoc): Set<string> {
-  const slot = appointment.approvedSlot ?? appointment.preferredSlots?.[0];
-  if (!slot) return new Set<string>();
-  return getOverlappingSlotKeys(slot, Number.parseInt(appointment.duration, 10));
+  return new Set(appointmentOccupancyKeys(appointment));
 }
 
 function appointmentDurationMinutes(appointment: AppointmentDoc): number {
-  const duration = Number.parseInt(appointment.duration, 10);
-  return [30, 45, 60].includes(duration) ? duration : 0;
+  return sessionMinutesOf(appointment);
 }
 
 function isBonoExpired(bono: BonoDoc, now = getNowDate()): boolean {
   return Boolean(bono.fechaExpiracion && new Date(bono.fechaExpiracion) < now);
 }
 
-interface AppointmentMinutesAudit {
-  bonoId: string;
-  minutesDeducted: true;
-  minutesDeductedAmount: number;
-  minutesDeductedAt: string;
-}
-
-/** Writes the bono debit once and returns the appointment audit fields to persist. */
-async function deductAppointmentMinutesInTransaction(
-  transaction: Transaction,
-  appointmentRef: DocumentReference,
-  appointment: AppointmentDoc,
-  bonoDoc: DocumentSnapshot,
-  now: string,
-  persistAppointmentAudit = true,
-): Promise<Record<string, unknown> | undefined> {
-  if (!bonoDoc.exists) return undefined;
-
-  const minutes = appointmentDurationMinutes(appointment);
-  const bono = { ...bonoDoc.data(), id: bonoDoc.id } as BonoDoc & { id: string };
-  let bonoUpdate: { minutosRestantes: number; estado: BonoDoc["estado"] } | undefined;
-  let audit: Record<string, unknown> | undefined;
-  const reconciliation = reconcileAppointmentMinutes({
-    action: "deduct",
-    appointment,
-    bono,
-    amount: minutes,
-    now,
-    transaction: {
-      setBono: (_bonoId, patch) => { bonoUpdate = patch; },
-      setAppointment: (patch) => { audit = patch; },
-    },
-  });
-  if (!reconciliation.ok || !bonoUpdate || !audit) return undefined;
-
-  transaction.set(bonoDoc.ref, {
-    ...bonoUpdate,
-    historial: FieldValue.arrayUnion({
-      fecha: now,
-      tipo: appointment.serviceType,
-      duracion: appointment.duration,
-      appointmentId: appointmentRef.id,
-      accion: "descuento_cita",
-    }),
-  }, { merge: true });
-
-  if (persistAppointmentAudit) transaction.set(appointmentRef, audit, { merge: true });
-  return audit;
-}
-
-/** Restores a previous debit to its original bono at most once. */
-async function refundAppointmentMinutesInTransaction(
-  transaction: Transaction,
-  appointmentRef: DocumentReference,
-  appointment: AppointmentDoc,
-  bonoSnap: DocumentSnapshot | undefined,
-  now: string,
-): Promise<boolean> {
-  if (!appointment.bonoId) {
-    return false;
-  }
-
-  if (!bonoSnap?.exists) {
-    transaction.set(appointmentRef, {
-      minutesRefundReason: "No se ha encontrado el bono original para devolver los minutos.",
-    }, { merge: true });
-    return false;
-  }
-
-  const bono = { ...bonoSnap.data(), id: bonoSnap.id } as BonoDoc & { id: string };
-  let bonoUpdate: { minutosRestantes: number; estado: BonoDoc["estado"] } | undefined;
-  let appointmentUpdate: Record<string, unknown> | undefined;
-  const reconciliation = reconcileAppointmentMinutes({
-    action: "refund",
-    appointment,
-    bono,
-    now,
-    transaction: {
-      setBono: (_bonoId, patch) => { bonoUpdate = patch; },
-      setAppointment: (patch) => { appointmentUpdate = patch; },
-    },
-  });
-  if (!reconciliation.ok || !bonoUpdate || !appointmentUpdate) return false;
-  const update: Record<string, unknown> = {
-    ...bonoUpdate,
-    historial: FieldValue.arrayUnion({
-      fecha: now,
-      tipo: appointment.serviceType,
-      duracion: appointment.duration,
-      appointmentId: appointmentRef.id,
-      accion: "devolucion_cita",
-    }),
-  };
-
-  transaction.set(bonoSnap.ref, update, { merge: true });
-  transaction.set(appointmentRef, appointmentUpdate, { merge: true });
-  return true;
-}
-
-/** Releases approved-slot occupancy from already-read documents without underflowing counts. */
-async function releaseApprovedAppointmentOccupancyInTransaction(
+/**
+ * Releases approved-slot occupancy from already-read documents. Never blocks a
+ * cancellation: counts clamp at 0 and corrupt counters are logged.
+ */
+function releaseApprovedAppointmentOccupancyInTransaction(
   transaction: Transaction,
   appointment: AppointmentDoc,
   occupancySnaps: DocumentSnapshot[],
-): Promise<void> {
+): void {
   if (appointment.status !== "approved") return;
-  const expectedKeys = appointmentSlotKeys(appointment);
+  const delta = new Map<string, number>();
+  addOccupancyDelta(delta, appointmentSlotKeys(appointment), -1);
+  const raw = new Map<string, unknown>();
   occupancySnaps.forEach((snap) => {
-    if (!snap.exists || !expectedKeys.has(snap.id)) return;
-    const occupancy = snap.data() as SlotOccupancy;
-    const currentCount = typeof occupancy.count === "number" ? occupancy.count : 0;
-    transaction.set(snap.ref, { count: Math.max(0, currentCount - 1) }, { merge: true });
+    if (snap.exists) raw.set(snap.id, (snap.data() as Partial<SlotOccupancy>).count);
+  });
+  const { writes, clamped } = planOccupancyWrites(delta, raw);
+  if (clamped.length) console.warn("[Occupancy] Release clamped at 0", { keys: clamped });
+  writes.forEach((write) => {
+    transaction.set(db.collection("slot_occupancy").doc(write.key), {
+      date: write.date,
+      time: write.time,
+      count: write.count,
+    }, { merge: true });
   });
 }
 
@@ -988,18 +905,31 @@ function slotRejectionError(reason: SlotRejectionReason): HttpsError {
   return toHttpsError("failed-precondition", SLOT_REJECTION_MESSAGES[reason], { reason });
 }
 
+/**
+ * Writes for an appointment created directly as approved: one seat per 15-min
+ * block (absolute counts read in the same transaction) and the bono debit.
+ * The debit needs exactly one active bono, the same rule customers book with.
+ */
 function applyApprovedAppointmentWrites(
   transaction: Transaction,
   input: ParsedAdminAppointmentData,
   appointmentRef: DocumentReference,
-  bonoDoc: QueryDocumentSnapshot | undefined,
+  appointment: AppointmentDoc,
+  occupancyByTime: Map<string, number>,
+  activeBonoDocs: QueryDocumentSnapshot[],
   now: string,
-): { bonoWarning?: string; minutesAudit?: AppointmentMinutesAudit } {
-  const slotBlocks = getCanonicalSlotBlocks(input.slot.time, input.durationMinutes);
-  slotBlocks.forEach((time) => {
+): { bonoWarning?: string; minutesAudit?: Record<string, unknown> } {
+  const delta = new Map<string, number>();
+  addOccupancyDelta(delta, getCanonicalSlotBlocks(input.slot.time, input.durationMinutes)
+    .map((time) => slotOccupancyDocId(input.slot.date, time)), 1);
+  const current = new Map<string, unknown>();
+  getCanonicalSlotBlocks(input.slot.time, input.durationMinutes).forEach((time) => {
+    current.set(slotOccupancyDocId(input.slot.date, time), occupancyByTime.get(time) ?? 0);
+  });
+  planOccupancyWrites(delta, current).writes.forEach((write) => {
     transaction.set(
-      db.collection("slot_occupancy").doc(slotOccupancyDocId(input.slot.date, time)),
-      { date: input.slot.date, time, count: FieldValue.increment(1) },
+      db.collection("slot_occupancy").doc(write.key),
+      { date: write.date, time: write.time, count: write.count },
       { merge: true },
     );
   });
@@ -1007,12 +937,15 @@ function applyApprovedAppointmentWrites(
   // Nutrition shares capacity but never consumes bono minutes.
   if (input.appointmentType === "nutrition") return {};
 
-  if (!bonoDoc) {
+  if (activeBonoDocs.length === 0) {
     return { bonoWarning: "Cita creada aprobada sin descuento: el cliente no tiene bono activo." };
   }
-
+  if (activeBonoDocs.length > 1) {
+    return { bonoWarning: "Cita creada aprobada sin descuento: el cliente tiene más de un bono activo." };
+  }
+  const bonoDoc = activeBonoDocs[0];
   const bono = { id: bonoDoc.id, ...bonoDoc.data() } as BonoDoc;
-  if (bono.fechaExpiracion && new Date(bono.fechaExpiracion) < getNowDate()) {
+  if (isBonoExpired(bono)) {
     return { bonoWarning: "Cita creada aprobada sin descuento: el bono activo esta expirado." };
   }
 
@@ -1023,30 +956,18 @@ function applyApprovedAppointmentWrites(
     };
   }
 
-  const remainingMinutes = Math.max(0, availableMinutes - input.durationMinutes);
-  const update: Record<string, unknown> = {
-    minutosRestantes: remainingMinutes,
-    historial: FieldValue.arrayUnion({
-      fecha: now,
-      tipo: input.serviceType,
-      duracion: input.duration,
-      appointmentId: appointmentRef.id,
-    }),
-  };
-
-  if (remainingMinutes <= 0) {
-    update.estado = "agotado";
-  }
-
-  transaction.set(bonoDoc.ref, update, { merge: true });
-  return {
-    minutesAudit: {
-      bonoId: bonoDoc.id,
-      minutesDeducted: true,
-      minutesDeductedAmount: input.durationMinutes,
-      minutesDeductedAt: now,
-    },
-  };
+  const minutesAudit = deductAppointmentMinutesInTransaction(
+    transaction,
+    appointmentRef,
+    appointment,
+    bonoDoc,
+    input.durationMinutes,
+    now,
+    false,
+  );
+  return minutesAudit
+    ? { minutesAudit }
+    : { bonoWarning: "Cita creada aprobada sin descuento: no se han podido reservar los minutos del bono." };
 }
 
 export const createSupportConversation = onCall(
@@ -1289,8 +1210,7 @@ export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminReque
     const serviceTitleQuery = db.collection("services").where("title", "==", input.serviceType).limit(1);
     const bonosQuery = db.collection("bonos")
       .where("userId", "==", input.userId)
-      .where("estado", "==", "activo")
-      .limit(1);
+      .where("estado", "==", "activo");
 
     const result = await db.runTransaction(async (transaction) => {
       const isNutrition = input.appointmentType === "nutrition";
@@ -1397,7 +1317,9 @@ export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminReque
           transaction,
           input,
           appointmentRef,
-          bonosSnap.docs[0],
+          appointment,
+          day.occupancyByTime,
+          bonosSnap.docs,
           now,
         );
         bonoWarning = writeResult.bonoWarning;
@@ -1465,6 +1387,12 @@ const adminAppointmentReschedule = createAdminAppointmentRescheduleHandlers({
 });
 
 const appointmentProposals = createAppointmentProposalHandlers({
+  db,
+  requireAdmin,
+  getNowDate,
+});
+
+const adminAppointmentStatus = createAdminAppointmentStatusHandlers({
   db,
   requireAdmin,
   getNowDate,
@@ -1559,6 +1487,26 @@ export const previewBonoAppointmentRenewalFromAdmin = onCall(
 export const commitBonoAppointmentRenewalFromAdmin = onCall(
   { region: REGION },
   bonoRenewal.commitBonoAppointmentRenewalFromAdmin,
+);
+
+export const updateAppointmentStatusFromAdmin = onCall(
+  { region: REGION },
+  adminAppointmentStatus.updateAppointmentStatusFromAdmin,
+);
+
+export const deleteAppointmentsFromAdmin = onCall(
+  { region: REGION },
+  adminAppointmentStatus.deleteAppointmentsFromAdmin,
+);
+
+export const blockSlotsFromAdmin = onCall(
+  { region: REGION },
+  adminAppointmentStatus.blockSlotsFromAdmin,
+);
+
+export const assignBonoFromAdmin = onCall(
+  { region: REGION },
+  adminAppointmentStatus.assignBonoFromAdmin,
 );
 
 export const sendContactMessage = onCall<ContactMessageRequest>(
@@ -1851,11 +1799,12 @@ export const createAppointment = onCall<CreateAppointmentRequest>(
         return appointmentRef.id;
       }
 
-      const deduction = await deductAppointmentMinutesInTransaction(
+      const deduction = deductAppointmentMinutesInTransaction(
         transaction,
         appointmentRef,
         appointment,
         bonoDoc,
+        durationMinutes,
         createdAt,
         false,
       );
@@ -1929,14 +1878,26 @@ export const cancelOwnAppointment = onCall<CancelOwnAppointmentRequest>(
       const occupancyRefs = appointment.status === "approved"
         ? Array.from(appointmentSlotKeys(appointment)).map((key) => db.collection("slot_occupancy").doc(key))
         : [];
-      const [bonoSnap, ...occupancySnaps] = await Promise.all([
-        appointment.bonoId ? transaction.get(db.collection("bonos").doc(appointment.bonoId)) : Promise.resolve(undefined),
+      const [financeContext, series, ...occupancySnaps] = await Promise.all([
+        readFinanceContext(transaction, db, appointment),
+        appointment.recurrenceSeriesId
+          ? readSeriesForOccurrence(transaction, db, appointment.recurrenceSeriesId)
+          : Promise.resolve(undefined),
         ...occupancyRefs.map((ref) => transaction.get(ref)),
       ]);
       const now = new Date().toISOString();
 
-      await releaseApprovedAppointmentOccupancyInTransaction(transaction, appointment, occupancySnaps);
-      await refundAppointmentMinutesInTransaction(transaction, appointmentRef, appointment, bonoSnap, now);
+      releaseApprovedAppointmentOccupancyInTransaction(transaction, appointment, occupancySnaps);
+      refundAppointmentMinutesInTransaction(transaction, appointmentRef, appointment, financeContext, now);
+      if (series?.exists) {
+        const seriesPatch = seriesMetadataPatch(
+          series.occurrences,
+          new Map([[appointmentRef.id, "cancelled"]]),
+          nowDate,
+          () => FieldValue.delete(),
+        );
+        if (seriesPatch) transaction.set(series.seriesRef, seriesPatch, { merge: true });
+      }
       transaction.set(appointmentRef, {
         status: "cancelled",
         cancelledBy: "customer",
@@ -2117,7 +2078,7 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
         throw toHttpsError("failed-precondition", "Esta cita ya no se puede modificar.");
       }
       if (shouldReleaseApprovedOccupancy) {
-        await releaseApprovedAppointmentOccupancyInTransaction(transaction, appointment, oldOccupancySnaps);
+        releaseApprovedAppointmentOccupancyInTransaction(transaction, appointment, oldOccupancySnaps);
       }
       const approvalMetadataDeletes = Object.fromEntries(
         approvalFieldsToDelete.map((field) => [field, FieldValue.delete()]),
@@ -2277,64 +2238,21 @@ export const onAppointmentApproved = onDocumentUpdated(
         // Nutrition consultations never consume or return bono minutes.
         if (getAppointmentType(appointment) === "nutrition") return;
         const now = new Date().toISOString();
+        const expectedStatus = changedToApproved ? "approved" : changedToRejected ? "rejected" : "cancelled";
+        if (!shouldReconcileAppointmentTransition(expectedStatus, appointment.status)) return;
+        const financeContext = await readFinanceContext(transaction, db, appointment);
         if (changedToApproved) {
-          if (!shouldReconcileAppointmentTransition("approved", appointment.status)) return;
-          if ((appointment.minutesDeductedAt || appointment.minutesDeducted === true)
-            && !appointment.minutesRefundedAt) return;
-
-          let originalBonoSnap: DocumentSnapshot | undefined;
-          if (appointment.bonoId) {
-            const candidate = await transaction.get(db.collection("bonos").doc(appointment.bonoId));
-            if (candidate.exists) {
-              const originalBono = candidate.data() as BonoDoc;
-              if (originalBono.userId !== appointment.userId) {
-                transaction.set(appointmentRef, {
-                  minutesDeductionSkippedAt: now,
-                  minutesDeductionSkippedReason: "El bono original no pertenece al usuario de esta cita.",
-                }, { merge: true });
-                return;
-              }
-              originalBonoSnap = candidate;
-            }
-          }
-
-          const activeBonosSnap = await transaction.get(
-            db.collection("bonos")
-              .where("userId", "==", appointment.userId)
-              .where("estado", "==", "activo"),
-          );
-          if (!originalBonoSnap && activeBonosSnap.docs.length !== 1) {
-            transaction.set(appointmentRef, {
-              minutesDeductionSkippedAt: now,
-              minutesDeductionSkippedReason: activeBonosSnap.empty
-                ? "No hay un bono activo para descontar los minutos de esta cita antigua."
-                : "Hay más de un bono activo y no se puede elegir uno automáticamente.",
-            }, { merge: true });
-            return;
-          }
-
-          const deduction = await deductAppointmentMinutesInTransaction(
+          applyApprovalDeductionInTransaction(
             transaction,
             appointmentRef,
             appointment,
-            originalBonoSnap ?? activeBonosSnap.docs[0],
+            appointmentDurationMinutes(appointment),
+            financeContext,
             now,
           );
-          if (!deduction) {
-            transaction.set(appointmentRef, {
-              minutesDeductionSkippedAt: now,
-              minutesDeductionSkippedReason: "El bono activo está expirado o no tiene minutos suficientes.",
-            }, { merge: true });
-          }
           return;
         }
-
-        const expectedStatus = changedToRejected ? "rejected" : "cancelled";
-        if (!shouldReconcileAppointmentTransition(expectedStatus, appointment.status)) return;
-        const bonoSnap = appointment.bonoId
-          ? await transaction.get(db.collection("bonos").doc(appointment.bonoId))
-          : undefined;
-        await refundAppointmentMinutesInTransaction(transaction, appointmentRef, appointment, bonoSnap, now);
+        refundAppointmentMinutesInTransaction(transaction, appointmentRef, appointment, financeContext, now);
       });
     }
 
