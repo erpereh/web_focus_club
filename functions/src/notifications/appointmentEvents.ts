@@ -86,6 +86,8 @@ export function classifyAppointmentChange(
   if (isGroupedOperationWrite(before, after)) return null;
 
   if (!before && after) {
+    // An admin registering a session that already happened is bookkeeping.
+    if (!startsAfter(after, now)) return null;
     if (after.status === "pending") return { event: "appointment_requested", appointment: after, status: "pending" };
     if (after.status === "approved") return { event: "appointment_confirmed", appointment: after, status: "approved" };
     return null;

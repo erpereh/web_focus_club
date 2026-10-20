@@ -328,3 +328,53 @@ test("forced interleaving: block starts while the booking transaction is open", 
   }
   console.log("[emulator] block during open booking transaction", outcomes);
 });
+
+// ------------------------------------------------------------ admin overrides
+
+const { createAdminAppointmentCreateHandlers } = require("../../lib/adminAppointmentCreate.js");
+const adminCreate = createAdminAppointmentCreateHandlers({ db, requireAdmin: async () => undefined, getNowDate });
+
+function overrideRequest(extra = {}) {
+  return {
+    userId: "user-1", date: DAY, time: "10:00", durationMinutes: 60, serviceType: "Bono Mensual de Entrenamiento",
+    assignedTrainer: "trainer-1", status: "approved", comment: "", requestId: `emulator-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    ...extra,
+  };
+}
+
+async function seedFullHour() {
+  const occupancy = {};
+  for (const minutes of ["00", "15", "30", "45"]) {
+    occupancy[`slot_occupancy/${DAY}_10:${minutes}`] = { date: DAY, time: `10:${minutes}`, count: 4 };
+  }
+  await seed(baseDocuments({
+    ...occupancy,
+    "trainers/trainer-1": { uid: "t1", name: "Ana", active: true },
+    "services/svc-1": { title: "Bono Mensual de Entrenamiento", active: true },
+  }));
+}
+
+test("admin override: a full slot needs confirmation, then is created over capacity exactly once", async () => {
+  await resetDatabase();
+  await seedFullHour();
+  const data = overrideRequest();
+  const prompt = await adminCreate.createAppointmentFromAdmin(callable("admin", data)).then(
+    () => assert.fail("expected a confirmation request"),
+    (error) => error,
+  );
+  assert.equal(prompt.details.reason, "admin_override_required");
+  assert.equal((await db.collection("appointments").get()).size, 0);
+
+  const fingerprint = prompt.details.fingerprint;
+  // Double click: both confirmations race with the same request id.
+  const results = await Promise.all([
+    adminCreate.createAppointmentFromAdmin(callable("admin", { ...data, acknowledgedRestrictions: fingerprint })),
+    adminCreate.createAppointmentFromAdmin(callable("admin", { ...data, acknowledgedRestrictions: fingerprint })),
+  ]);
+  assert.equal(results[0].appointmentId, results[1].appointmentId);
+  const appointments = await db.collection("appointments").get();
+  assert.equal(appointments.size, 1);
+  assert.equal(appointments.docs[0].data().adminOverride.restrictions[0].reason, "slot_full");
+  assert.equal((await db.doc(`slot_occupancy/${DAY}_10:00`).get()).data().count, 5);
+  assert.equal((await db.doc("bonos/bono-1").get()).data().minutosRestantes, 420);
+});

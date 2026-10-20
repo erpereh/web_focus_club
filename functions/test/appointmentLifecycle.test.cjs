@@ -349,8 +349,9 @@ const indexSource = fs.readFileSync(path.join(__dirname, "../src/index.ts"), "ut
 const customerBookingSource = fs.readFileSync(path.join(__dirname, "../src/customerBooking.ts"), "utf8");
 assert.match(customerBookingSource, /transaction\.create\(appointmentRef, \{ \.\.\.appointment, \.\.\.deduction \}\)/);
 assert.match(customerBookingSource, /evaluateSlot\(day, \{/);
-assert.match(indexSource, /minutesRefundedAt:\s*null/);
-assert.match(indexSource, /minutesRefundReason:\s*null/);
+const adminCreateModuleSource = fs.readFileSync(path.join(__dirname, "../src/adminAppointmentCreate.ts"), "utf8");
+assert.match(adminCreateModuleSource, /minutesRefundedAt:\s*null/);
+assert.match(adminCreateModuleSource, /minutesRefundReason:\s*null/);
 assert.match(indexSource, /export const cancelOwnAppointment\s*=\s*onCall/);
 assert.match(indexSource, /validateOwnFutureAppointment/);
 assert.match(indexSource, /refundAppointmentMinutesInTransaction\(transaction, appointmentRef, appointment, financeContext, now\)/);
@@ -360,7 +361,9 @@ assert.match(indexSource, /releaseApprovedAppointmentOccupancyInTransaction/);
 assert.match(indexSource, /isRescheduleCapacityAvailable/);
 // Booking capacity/blocked/conflict checks live in the shared slot validator.
 const slotValidationSource = fs.readFileSync(path.join(__dirname, "../src/slotValidation.ts"), "utf8");
-assert.match(indexSource, /evaluateSlot\(day, \{/);
+// Admin creation collects overridable restrictions and keeps conflicts as hard errors.
+assert.match(adminCreateModuleSource, /collectAdminSlotRestrictions\(day, \{/);
+assert.match(adminCreateModuleSource, /evaluateSlotConflicts\(\{/);
 assert.match(slotValidationSource, /isRescheduleCapacityAvailable/);
 assert.match(slotValidationSource, /config\.maxCapacity/);
 assert.match(indexSource, /config\.maxCapacity/);
@@ -416,9 +419,10 @@ assert.ok(
   "24-hour lock must reject before occupancy queries",
 );
 
-const adminCreateSource = indexSource.slice(
-  indexSource.indexOf("export const createAppointmentFromAdmin"),
-  indexSource.indexOf("export const createRecurringAppointmentsFromAdmin"),
+// The admin create handler lives in its own module since the override flow.
+const adminCreateSource = fs.readFileSync(
+  path.join(__dirname, "../src/adminAppointmentCreate.ts"),
+  "utf8",
 );
 assert.doesNotMatch(adminCreateSource, /clientOwnAppointmentMutationBlockedReason/);
 assert.doesNotMatch(adminCreateSource, /throwSameDayChangeNotAllowed/);

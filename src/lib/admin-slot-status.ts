@@ -1,6 +1,6 @@
 import type { Appointment, SiteConfig } from '@/types';
 import { doesSessionFitWithinSchedule, getCanonicalSlotBlocks, slotOccupancyKey } from '@/lib/appointment-slots';
-import { getAppointmentEffectiveSlot } from '@/lib/madrid-date';
+import { classifyMadridCivilSlot, getAppointmentEffectiveSlot } from '@/lib/madrid-date';
 
 /**
  * Availability shown in the admin "Nueva cita" grid. It reads the same
@@ -8,12 +8,19 @@ import { getAppointmentEffectiveSlot } from '@/lib/madrid-date';
  * `createAppointmentFromAdmin`, so the grid can never show free seats the
  * server will refuse with `slot_full`. In-memory approved appointments are
  * only used to flag counters that drifted, never to decide availability.
+ *
+ * Restrictions an admin may knowingly override (past, outside schedule,
+ * blocked, full) stay selectable but are flagged `restricted`; the server
+ * then asks for an explicit confirmation. Duplicates and corrupt counters
+ * remain disabled.
  */
 
 export type AdminSlotTone = 'muted' | 'blocked' | 'full' | 'partial' | 'free' | 'duplicate' | 'invalid';
 
 export interface AdminSlotStatus {
     disabled: boolean;
+    /** Selectable only through an explicit admin confirmation. */
+    restricted?: boolean;
     label: string;
     tone: AdminSlotTone;
     occupancy: number;
@@ -31,6 +38,10 @@ export interface AdminSlotStatusInput {
     blockedSlotKeys: Set<string>;
     appointments: Appointment[];
     userId?: string;
+    /** Flags slots that already started. */
+    now?: Date;
+    /** Past slots are selectable (restricted) only after the admin enabled past dates. */
+    pastAllowed?: boolean;
 }
 
 function parseCount(raw: unknown): number | undefined {
@@ -52,15 +63,20 @@ function appointmentKeys(appointment: Appointment): string[] {
 
 export function getAdminCreateSlotStatus(input: AdminSlotStatusInput): AdminSlotStatus {
     if (!input.date) return { disabled: true, label: 'Elige fecha', tone: 'muted', occupancy: 0 };
-    if (!doesSessionFitWithinSchedule(input.siteConfig, input.time, input.durationMinutes)) {
-        return { disabled: true, label: 'Fuera de horario', tone: 'muted', occupancy: 0 };
+    const status = getBaseStatus(input);
+    if (!status.disabled && input.now && classifyMadridCivilSlot({ date: input.date, time: input.time }, input.now).isPast) {
+        return input.pastAllowed
+            ? { ...status, restricted: true, label: `Pasada · ${status.label}` }
+            : { ...status, disabled: true, restricted: false, label: 'Pasada' };
     }
+    return status;
+}
+
+function getBaseStatus(input: AdminSlotStatusInput): AdminSlotStatus {
     if (!input.occupancy) return { disabled: true, label: 'Cargando…', tone: 'muted', occupancy: 0 };
 
     const keys = getCanonicalSlotBlocks(input.time, input.durationMinutes).map((time) => slotOccupancyKey(input.date, time));
-    if (keys.some((key) => input.blockedSlotKeys.has(key))) {
-        return { disabled: true, label: 'Bloqueado', tone: 'blocked', occupancy: 0 };
-    }
+    const outsideSchedule = !doesSessionFitWithinSchedule(input.siteConfig, input.time, input.durationMinutes);
 
     const counts = keys.map((key) => parseCount(input.occupancy?.[key]));
     if (counts.some((count) => count === undefined)) {
@@ -82,14 +98,22 @@ export function getAdminCreateSlotStatus(input: AdminSlotStatusInput): AdminSlot
     const withMismatch = (status: AdminSlotStatus): AdminSlotStatus => (mismatch ? { ...status, mismatch } : status);
 
     const maxCapacity = input.siteConfig.maxCapacity;
-    if (occupancy >= maxCapacity) return withMismatch({ disabled: true, label: 'Lleno', tone: 'full', occupancy });
-
     if (input.userId) {
         const target = new Set(keys);
         const duplicated = input.appointments
             .filter((appointment) => appointment.userId === input.userId && ['pending', 'approved'].includes(appointment.status))
             .some((appointment) => appointmentKeys(appointment).some((key) => target.has(key)));
         if (duplicated) return withMismatch({ disabled: true, label: 'Duplicado', tone: 'duplicate', occupancy });
+    }
+
+    if (keys.some((key) => input.blockedSlotKeys.has(key))) {
+        return withMismatch({ disabled: false, restricted: true, label: 'Bloqueado', tone: 'blocked', occupancy });
+    }
+    if (outsideSchedule) {
+        return withMismatch({ disabled: false, restricted: true, label: 'Fuera de horario', tone: 'muted', occupancy });
+    }
+    if (occupancy >= maxCapacity) {
+        return withMismatch({ disabled: false, restricted: true, label: `Lleno ${occupancy}/${maxCapacity}`, tone: 'full', occupancy });
     }
 
     if (occupancy > 0) {

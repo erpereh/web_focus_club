@@ -90,6 +90,12 @@ export interface PlanRecurringAppointmentsInput {
   minBookingNoticeHours?: number;
   /** site_config.blockSameDayBooking for customer series. Admin series never pass it. */
   blockSameDayBooking?: boolean;
+  /**
+   * Admin series whose availability restrictions (past, notice, schedule,
+   * blocked, capacity) were already collected and confirmed by the admin.
+   * Overlaps with the customer's appointments and every bono rule still apply.
+   */
+  skipAvailabilityChecks?: boolean;
 }
 
 export interface RecurringEndDateOption {
@@ -330,6 +336,14 @@ export function planRecurringAppointments(input: PlanRecurringAppointmentsInput)
   const userSlotKeys = new Set(input.userSlotKeys);
 
   for (const date of dates) {
+    const occurrenceKeys = slotBlocks.map((time) => slotOccupancyDocId(date, time));
+    if (input.skipAvailabilityChecks) {
+      if (occurrenceKeys.some((key) => userSlotKeys.has(key))) {
+        return emptyFail(`El cliente ya tiene una cita que se solapa el ${formatDateEs(date)}.`);
+      }
+      occurrenceKeys.forEach((key) => userSlotKeys.add(key));
+      continue;
+    }
     const slotTime = slotDateTime(date, input.startTime);
     if (Number.isNaN(slotTime.getTime()) || slotTime <= input.now) {
       return emptyFail(`La franja del ${formatDateEs(date)} a las ${input.startTime} ya no esta disponible.`);
@@ -361,7 +375,6 @@ export function planRecurringAppointments(input: PlanRecurringAppointmentsInput)
       return emptyFail(`La franja del ${formatDateEs(date)} no es valida para el horario configurado.`);
     }
 
-    const occurrenceKeys = slotBlocks.map((time) => slotOccupancyDocId(date, time));
     if (occurrenceKeys.some((key) => input.blockedKeys.has(key))) {
       return emptyFail(`La franja del ${formatDateEs(date)} esta bloqueada.`);
     }

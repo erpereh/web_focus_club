@@ -27,6 +27,16 @@ import {
 import { newNotificationOperation, sessionsOf, writeNotificationOutbox } from "./notifications/outbox.js";
 import { parseOccupancyCount } from "./slotOccupancy.js";
 import {
+  authorizeAdminOverride,
+  bookingPayloadHash,
+  collectAdminSlotRestrictions,
+  isValidAdminSlotTime,
+  parseAdminOverrideRequest,
+  parseRequestId,
+  readIdempotencyMarker,
+  writeIdempotencyMarker,
+} from "./adminBookingOverrides.js";
+import {
   calculateActiveSeriesMetadata,
   isActiveOccurrenceStatus,
   isHistoricalReplacementOccurrence,
@@ -250,6 +260,13 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
       if (!parsed.ok) throwHttps("invalid-argument", parsed.message);
       const input = parsed.value;
       if (!input.userId) throwHttps("invalid-argument", "El campo cliente es obligatorio.");
+      if (!isValidAdminSlotTime(input.startTime, input.durationMinutes)) {
+        throwHttps("invalid-argument", "La fecha u hora no tiene un formato valido.");
+      }
+      const requestData = request.data as Record<string, unknown>;
+      const requestId = parseRequestId(requestData.requestId);
+      const overrideRequest = parseAdminOverrideRequest(requestData);
+      const payloadHash = bookingPayloadHash({ ...input, kind: "series" });
 
       const occurrenceDates = generateRecurringOccurrenceDates(input.startDate, input.intervalDays, input.endDate);
       if (occurrenceDates.length === 0) {
@@ -275,6 +292,8 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         .where("estado", "==", "activo");
 
       const result = await db.runTransaction(async (transaction) => {
+        const marker = await readIdempotencyMarker(transaction, db, { requestId, adminUid, kind: "series", payloadHash });
+        if (marker.previous) return { ...marker.previous, replayed: true };
         const [
           userSnap,
           siteConfigSnap,
@@ -329,22 +348,47 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           ...docSnap.data(),
         } as BonoDoc & { id: string }));
 
+        const nowDate = getNowDate();
         const plan = planRecurringAppointments({
           startDate: input.startDate,
           startTime: input.startTime,
           endDate: input.endDate,
           intervalDays: input.intervalDays,
           durationMinutes: input.durationMinutes,
-          now: getNowDate(),
+          now: nowDate,
           siteConfig: config,
           occupancyByKey,
           blockedKeys,
           userSlotKeys,
           activeBonos,
+          skipAvailabilityChecks: true,
         });
         if (!plan.ok) throwHttps("failed-precondition", plan.message);
 
-        const now = new Date().toISOString();
+        // Availability restrictions are collected for every date (the admin may
+        // confirm them); overlaps and bono rules stay hard inside the plan.
+        const restrictions = occurrenceDates.flatMap((date) => {
+          const blockedTimes = new Set<string>();
+          const occupancyByTime = new Map<string, number>();
+          getCanonicalSlotBlocks(input.startTime, input.durationMinutes).forEach((time) => {
+            const key = slotOccupancyDocId(date, time);
+            if (blockedKeys.has(key)) blockedTimes.add(time);
+            occupancyByTime.set(time, occupancyByKey.get(key) ?? 0);
+          });
+          return collectAdminSlotRestrictions(
+            { config, blockedTimes, occupancyByTime },
+            { slot: { date, time: input.startTime }, durationMinutes: input.durationMinutes, now: nowDate },
+          ).restrictions;
+        });
+        const now = nowDate.toISOString();
+        const adminOverride = authorizeAdminOverride({
+          restrictions,
+          request: overrideRequest,
+          status: "approved",
+          adminUid,
+          adminEmail,
+          now,
+        });
         const bonoRef = db.collection("bonos").doc(plan.writes.bono.bonoId);
         const historialEntries = plan.writes.dates.map((date, index) => ({
           fecha: now,
@@ -373,6 +417,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           createdByUid: adminUid,
           createdByAdminUid: adminUid,
           approvedByAdminUid: adminUid,
+          ...(adminOverride ? { adminOverride } : {}),
           createdAt: now,
           updatedAt: now,
           approvedAt: now,
@@ -397,6 +442,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
             assignedTrainer: input.assignedTrainer,
             createdByAdmin: true,
             createdByAdminUid: adminUid,
+            ...(adminOverride ? { adminOverride } : {}),
             recurrenceSeriesId: seriesRef.id,
             recurrenceIndex: index,
             bonoId: plan.writes.bono.bonoId,
@@ -413,12 +459,17 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           createdSlots.push(slot);
         });
 
+        // Sessions registered retroactively are bookkeeping: the customer is
+        // only told about upcoming ones (no outbox at all when none are).
+        const upcoming = createdSlots
+          .map((slot, index) => ({ slot, ref: appointmentRefs[index] }))
+          .filter(({ slot }) => (madridCivilSlotToInstant(slot)?.getTime() ?? 0) > nowDate.getTime());
         writeNotificationOutbox(transaction, operation, {
           userId: input.userId!,
           event: "appointment_series_confirmed",
           seriesId: seriesRef.id,
-          appointmentIds: appointmentRefs.slice(0, createdSlots.length).map((ref) => ref.id),
-          sessions: sessionsOf(createdSlots),
+          appointmentIds: upcoming.map(({ ref }) => ref.id),
+          sessions: sessionsOf(upcoming.map(({ slot }) => slot)),
           customerName: userProfile.name,
           customerEmail: userProfile.email,
           actor: "admin",
@@ -461,13 +512,29 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           createdAt: now,
           timestamp: now,
         });
+        if (adminOverride) {
+          transaction.create(db.collection("activity_logs").doc(), {
+            action: "recurring_appointments_created_with_admin_override",
+            adminUid,
+            adminEmail,
+            seriesId: seriesRef.id,
+            targetUid: input.userId,
+            restrictions: adminOverride.restrictions,
+            pastDateConfirmed: adminOverride.pastDateConfirmed,
+            createdAt: now,
+            timestamp: now,
+          });
+        }
 
-        return {
+        const response = {
           seriesId: seriesRef.id,
           appointmentIds: appointmentRefs.map((ref) => ref.id),
           occurrenceCount: plan.writes.occurrenceCount,
           totalMinutes: plan.writes.totalMinutes,
+          ...(adminOverride ? { overriddenRestrictions: adminOverride.restrictions } : {}),
         };
+        writeIdempotencyMarker(transaction, marker, { adminUid, kind: "series", payloadHash, result: response, now });
+        return response;
       });
 
       return { success: true, ...result };

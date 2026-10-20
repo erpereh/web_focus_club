@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase-admin/app";
 import { createHash } from "node:crypto";
 import { getAuth } from "firebase-admin/auth";
-import { DocumentReference, DocumentSnapshot, FieldValue, getFirestore, QueryDocumentSnapshot, Transaction } from "firebase-admin/firestore";
+import { DocumentReference, DocumentSnapshot, FieldValue, getFirestore, Transaction } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
@@ -31,7 +31,6 @@ import {
   SAME_DAY_CHANGE_MESSAGE,
   SAME_DAY_CHANGE_NOT_ALLOWED,
   shouldReconcileAppointmentTransition,
-  slotOccupancyDocId,
   validateOwnFutureAppointment,
 } from "./appointmentLifecycle.js";
 import {
@@ -50,10 +49,10 @@ import {
 } from "./appointmentProposals.js";
 import { createBonoRenewalHandlers } from "./bonoRenewal.js";
 import { createAdminAppointmentStatusHandlers } from "./adminAppointmentStatus.js";
-import { createCustomerBookingHandlers, getBonoMinutosRestantes } from "./customerBooking.js";
+import { createAdminAppointmentCreateHandlers } from "./adminAppointmentCreate.js";
+import { createCustomerBookingHandlers } from "./customerBooking.js";
 import {
   applyApprovalDeductionInTransaction,
-  deductAppointmentMinutesInTransaction,
   readFinanceContext,
   refundAppointmentMinutesInTransaction,
 } from "./appointmentFinance.js";
@@ -89,16 +88,7 @@ import {
 } from "./slotMigrations.js";
 import {
   type AppointmentType,
-  evaluateSlot,
   getAppointmentType,
-  loadCustomerActiveAppointments,
-  loadSiteConfig,
-  loadSlotDay,
-  loadTrainerActiveAppointments,
-  NUTRITION_DURATION_MINUTES,
-  parseAppointmentTypeInput,
-  SLOT_REJECTION_MESSAGES,
-  type SlotRejectionReason,
 } from "./slotValidation.js";
 import {
   createUserFromAdminCore,
@@ -113,7 +103,6 @@ const db = getFirestore();
 const GOOGLE_CALENDAR_ID = defineSecret("GOOGLE_CALENDAR_ID");
 const REGION = "europe-west1";
 const APPOINTMENT_SERVICE_TYPE = "Bono Mensual de Entrenamiento";
-const NUTRITION_SERVICE_TYPE = "Consulta de nutrición";
 const CONTACT_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const CONTACT_RATE_LIMIT_MAX_REQUESTS = 5;
 const CONTACT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -203,36 +192,12 @@ interface DeleteUserFromAdminRequest {
   targetUid?: unknown;
 }
 
-interface CreateAppointmentFromAdminRequest {
-  userId?: unknown;
-  date?: unknown;
-  time?: unknown;
-  durationMinutes?: unknown;
-  serviceType?: unknown;
-  assignedTrainer?: unknown;
-  status?: unknown;
-  comment?: unknown;
-  appointmentType?: unknown;
-}
-
 interface ParsedAdminUserData {
   name: string;
   email: string;
   phone: string;
   role: AdminUserRole;
   isTrainer: boolean;
-}
-
-interface ParsedAdminAppointmentData {
-  userId: string;
-  slot: TimeSlot;
-  duration: AppointmentDuration;
-  durationMinutes: number;
-  serviceType: string;
-  assignedTrainer: string;
-  status: "pending" | "approved";
-  comment: string;
-  appointmentType: AppointmentType;
 }
 
 interface AppointmentDoc {
@@ -290,20 +255,6 @@ interface AppointmentDoc {
   updatedAt?: string;
 }
 
-interface BonoDoc {
-  id?: string;
-  userId: string;
-  tamano?: number;
-  minutosTotales?: number;
-  minutosRestantes?: number;
-  fechaExpiracion?: string;
-  estado: "activo" | "agotado" | "expirado" | "eliminado";
-  tipo?: string;
-  sesionesTotales?: number;
-  sesionesRestantes?: number;
-  modalidad?: string;
-}
-
 interface SlotOccupancy {
   date: string;
   time: string;
@@ -317,12 +268,6 @@ interface TrainerDoc {
   active?: boolean;
   /** Professionals the admin marked as nutrition-capable (missing = false). */
   offersNutrition?: boolean;
-}
-
-interface ServiceDoc {
-  title?: string;
-  duration?: string;
-  active?: boolean;
 }
 
 
@@ -348,10 +293,6 @@ function appointmentSlotKeys(appointment: AppointmentDoc): Set<string> {
 
 function appointmentDurationMinutes(appointment: AppointmentDoc): number {
   return sessionMinutesOf(appointment);
-}
-
-function isBonoExpired(bono: BonoDoc, now = getNowDate()): boolean {
-  return Boolean(bono.fechaExpiracion && new Date(bono.fechaExpiracion) < now);
 }
 
 /**
@@ -771,50 +712,6 @@ function parseDeleteUserFromAdminData(data: unknown): { targetUid: string } {
   };
 }
 
-function parseCreateAppointmentFromAdminData(data: unknown): ParsedAdminAppointmentData {
-  if (!isRecord(data)) {
-    throw toHttpsError("invalid-argument", "Los datos de la cita no son validos.");
-  }
-
-  const userId = normalizeTextField(data.userId, "cliente", 128);
-  const date = normalizeTextField(data.date, "fecha", 10);
-  const time = normalizeTextField(data.time, "hora", 5);
-  const durationMinutes = Number(data.durationMinutes);
-  const serviceType = normalizeTextField(data.serviceType, "servicio", 180);
-  const assignedTrainer = normalizeTextField(data.assignedTrainer, "entrenador", 128);
-  const status = data.status;
-  const comment = normalizeTextField(data.comment, "comentario", 1000, false);
-  const appointmentType = parseAppointmentTypeInput(data.appointmentType);
-  if (!appointmentType) {
-    throw toHttpsError("invalid-argument", "El tipo de cita no es valido.");
-  }
-  if (appointmentType === "nutrition" && durationMinutes !== NUTRITION_DURATION_MINUTES) {
-    throw toHttpsError("invalid-argument", "Las consultas de nutricion duran 30 minutos.");
-  }
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
-    throw toHttpsError("invalid-argument", "La fecha u hora no tiene un formato valido.");
-  }
-  if (![30, 45, 60].includes(durationMinutes)) {
-    throw toHttpsError("invalid-argument", "La duracion de la cita no es valida.");
-  }
-  if (status !== "pending" && status !== "approved") {
-    throw toHttpsError("invalid-argument", "El estado inicial de la cita no es valido.");
-  }
-
-  return {
-    userId,
-    slot: { date, time },
-    duration: String(durationMinutes) as AppointmentDuration,
-    durationMinutes,
-    serviceType,
-    assignedTrainer,
-    status,
-    comment,
-    appointmentType,
-  };
-}
-
 async function requireAdmin(requestUid: string): Promise<UserProfile> {
   const adminSnap = await db.collection("users").doc(requestUid).get();
   const adminProfile = adminSnap.exists ? adminSnap.data() as UserProfile : undefined;
@@ -877,76 +774,6 @@ async function addAdminUserActivityLog(data: Record<string, unknown>): Promise<v
   } catch (error) {
     console.error("[AdminUsers] Failed to write activity log", error);
   }
-}
-
-/** Admin-facing error for a refused slot; `details.reason` lets the UI explain it. */
-function slotRejectionError(reason: SlotRejectionReason): HttpsError {
-  return toHttpsError("failed-precondition", SLOT_REJECTION_MESSAGES[reason], { reason });
-}
-
-/**
- * Writes for an appointment created directly as approved: one seat per 15-min
- * block (absolute counts read in the same transaction) and the bono debit.
- * The debit needs exactly one active bono, the same rule customers book with.
- */
-function applyApprovedAppointmentWrites(
-  transaction: Transaction,
-  input: ParsedAdminAppointmentData,
-  appointmentRef: DocumentReference,
-  appointment: AppointmentDoc,
-  occupancyByTime: Map<string, number>,
-  activeBonoDocs: QueryDocumentSnapshot[],
-  now: string,
-): { bonoWarning?: string; minutesAudit?: Record<string, unknown> } {
-  const delta = new Map<string, number>();
-  addOccupancyDelta(delta, getCanonicalSlotBlocks(input.slot.time, input.durationMinutes)
-    .map((time) => slotOccupancyDocId(input.slot.date, time)), 1);
-  const current = new Map<string, unknown>();
-  getCanonicalSlotBlocks(input.slot.time, input.durationMinutes).forEach((time) => {
-    current.set(slotOccupancyDocId(input.slot.date, time), occupancyByTime.get(time) ?? 0);
-  });
-  planOccupancyWrites(delta, current).writes.forEach((write) => {
-    transaction.set(
-      db.collection("slot_occupancy").doc(write.key),
-      { date: write.date, time: write.time, count: write.count },
-      { merge: true },
-    );
-  });
-
-  // Nutrition shares capacity but never consumes bono minutes.
-  if (input.appointmentType === "nutrition") return {};
-
-  if (activeBonoDocs.length === 0) {
-    return { bonoWarning: "Cita creada aprobada sin descuento: el cliente no tiene bono activo." };
-  }
-  if (activeBonoDocs.length > 1) {
-    return { bonoWarning: "Cita creada aprobada sin descuento: el cliente tiene más de un bono activo." };
-  }
-  const bonoDoc = activeBonoDocs[0];
-  const bono = { id: bonoDoc.id, ...bonoDoc.data() } as BonoDoc;
-  if (isBonoExpired(bono)) {
-    return { bonoWarning: "Cita creada aprobada sin descuento: el bono activo esta expirado." };
-  }
-
-  const availableMinutes = getBonoMinutosRestantes(bono);
-  if (availableMinutes < input.durationMinutes) {
-    return {
-      bonoWarning: `Cita creada aprobada sin descuento: el bono solo tiene ${availableMinutes} min disponibles.`,
-    };
-  }
-
-  const minutesAudit = deductAppointmentMinutesInTransaction(
-    transaction,
-    appointmentRef,
-    appointment,
-    bonoDoc,
-    input.durationMinutes,
-    now,
-    false,
-  );
-  return minutesAudit
-    ? { minutesAudit }
-    : { bonoWarning: "Cita creada aprobada sin descuento: no se han podido reservar los minutos del bono." };
 }
 
 export const createSupportConversation = onCall(
@@ -1166,183 +993,28 @@ export const deleteUserFromAdmin = onCall<DeleteUserFromAdminRequest>(
   },
 );
 
-export const createAppointmentFromAdmin = onCall<CreateAppointmentFromAdminRequest>(
+const adminAppointmentCreate = createAdminAppointmentCreateHandlers({
+  db,
+  requireAdmin,
+  getNowDate,
+  notifyAdmin: async (appointmentId, appointment) => {
+    await sendAppointmentEmailSafely(
+      `admin-created:${appointmentId}`,
+      appointmentId,
+      appointment as unknown as AppointmentDoc,
+      "confirmed",
+      "admin",
+      ADMIN_NOTIFICATION_EMAIL,
+    );
+  },
+});
+
+export const createAppointmentFromAdmin = onCall(
   {
     region: REGION,
     secrets: [BREVO_API_KEY],
   },
-  async (request) => {
-    if (!request.auth) {
-      throw toHttpsError("permission-denied", "Debes iniciar sesion como admin.");
-    }
-
-    await requireAdmin(request.auth.uid);
-    const adminUid = request.auth.uid;
-    const adminEmail = request.auth.token.email ?? "";
-    const input = parseCreateAppointmentFromAdminData(request.data);
-    const appointmentRef = db.collection("appointments").doc();
-    const userRef = db.collection("users").doc(input.userId);
-    const trainerRef = db.collection("trainers").doc(input.assignedTrainer);
-    const serviceRef = input.serviceType.includes("/")
-      ? null
-      : db.collection("services").doc(input.serviceType);
-    const serviceTitleQuery = db.collection("services").where("title", "==", input.serviceType).limit(1);
-    const bonosQuery = db.collection("bonos")
-      .where("userId", "==", input.userId)
-      .where("estado", "==", "activo");
-
-    const result = await db.runTransaction(async (transaction) => {
-      const isNutrition = input.appointmentType === "nutrition";
-      const [
-        userSnap,
-        trainerSnap,
-        serviceIdSnap,
-        config,
-        customerAppointments,
-        trainerAppointments,
-        serviceTitleSnap,
-        bonosSnap,
-      ] = await Promise.all([
-        transaction.get(userRef),
-        transaction.get(trainerRef),
-        serviceRef ? transaction.get(serviceRef) : Promise.resolve(undefined),
-        loadSiteConfig(transaction, db),
-        loadCustomerActiveAppointments(transaction, db, input.userId),
-        isNutrition
-          ? loadTrainerActiveAppointments(transaction, db, input.assignedTrainer)
-          : Promise.resolve([]),
-        transaction.get(serviceTitleQuery),
-        transaction.get(bonosQuery),
-      ]);
-      const day = await loadSlotDay(transaction, db, config, input.slot.date);
-
-      if (!userSnap.exists) {
-        throw toHttpsError("failed-precondition", "No se ha encontrado el cliente indicado.");
-      }
-
-      const userProfile = userSnap.data() as UserProfile;
-      if (!userProfile.email || !userProfile.name) {
-        throw toHttpsError("failed-precondition", "El perfil del cliente no esta completo.");
-      }
-
-      if (!trainerSnap.exists) {
-        throw toHttpsError("failed-precondition", "No se ha encontrado el entrenador indicado.");
-      }
-      const trainer = trainerSnap.data() as TrainerDoc;
-      if (trainer.active === false) {
-        throw toHttpsError("failed-precondition", "El entrenador seleccionado no esta activo.");
-      }
-      if (isNutrition && trainer.offersNutrition !== true) {
-        throw slotRejectionError("trainer_not_nutrition");
-      }
-
-      // Nutrition is not a catalogue service: it always uses its own label.
-      const service = isNutrition
-        ? { title: NUTRITION_SERVICE_TYPE, active: true } as ServiceDoc
-        : serviceIdSnap?.exists
-          ? serviceIdSnap.data() as ServiceDoc
-          : serviceTitleSnap.docs[0]?.data() as ServiceDoc | undefined;
-      if (!service) {
-        throw toHttpsError("failed-precondition", "No se ha encontrado el servicio seleccionado.");
-      }
-      if (service.active === false) {
-        throw toHttpsError("failed-precondition", "El servicio seleccionado no esta activo.");
-      }
-
-      const rejection = evaluateSlot(day, {
-        slot: input.slot,
-        durationMinutes: input.durationMinutes,
-        appointmentType: input.appointmentType,
-        now: getNowDate(),
-        customerAppointments,
-        trainer: {
-          id: input.assignedTrainer,
-          exists: true,
-          active: true,
-          offersNutrition: trainer.offersNutrition === true,
-        },
-        trainerAppointments,
-      });
-      if (rejection) throw slotRejectionError(rejection);
-
-      const now = new Date().toISOString();
-      const appointment: AppointmentDoc = {
-        userId: input.userId,
-        name: userProfile.name,
-        email: userProfile.email,
-        phone: userProfile.phone || "",
-        serviceType: isNutrition ? NUTRITION_SERVICE_TYPE : input.serviceType,
-        sessionType: service.title || input.serviceType,
-        appointmentType: input.appointmentType,
-        duration: input.duration,
-        preferredSlots: [input.slot],
-        reason: input.comment,
-        status: input.status,
-        date: input.slot.date,
-        time: input.slot.time,
-        assignedTrainer: input.assignedTrainer,
-        createdByAdmin: true,
-        createdByAdminUid: adminUid,
-        minutesRefundedAt: null,
-        minutesRefundReason: null,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      let bonoWarning: string | undefined;
-      if (input.status === "approved") {
-        appointment.approvedSlot = input.slot;
-        const writeResult = applyApprovedAppointmentWrites(
-          transaction,
-          input,
-          appointmentRef,
-          appointment,
-          day.occupancyByTime,
-          bonosSnap.docs,
-          now,
-        );
-        bonoWarning = writeResult.bonoWarning;
-        if (writeResult.minutesAudit) Object.assign(appointment, writeResult.minutesAudit);
-      }
-
-      transaction.create(appointmentRef, appointment);
-      transaction.create(db.collection("activity_logs").doc(), {
-        action: "appointment_created_by_admin",
-        adminUid,
-        adminEmail,
-        appointmentId: appointmentRef.id,
-        targetUid: input.userId,
-        targetEmail: userProfile.email,
-        status: input.status,
-        date: input.slot.date,
-        time: input.slot.time,
-        serviceType: input.serviceType,
-        createdAt: now,
-        timestamp: now,
-      });
-
-      return { appointmentId: appointmentRef.id, appointment, bonoWarning };
-    });
-
-    // The customer is notified by onAppointmentCustomerNotification (create
-    // trigger); only the existing admin email is sent from here.
-    if (result.appointment.status === "approved") {
-      await sendAppointmentEmailSafely(
-        `admin-created:${result.appointmentId}`,
-        result.appointmentId,
-        result.appointment,
-        "confirmed",
-        "admin",
-        ADMIN_NOTIFICATION_EMAIL,
-      );
-    }
-
-    return {
-      success: true,
-      appointmentId: result.appointmentId,
-      bonoWarning: result.bonoWarning,
-    };
-  },
+  adminAppointmentCreate.createAppointmentFromAdmin,
 );
 
 const recurringSeries = createRecurringSeriesHandlers({

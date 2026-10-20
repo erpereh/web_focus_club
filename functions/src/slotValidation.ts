@@ -180,6 +180,14 @@ export function evaluateSlot(day: SlotDayContext, input: SlotCheckInput): SlotRe
     return "slot_full";
   }
 
+  return evaluateSlotConflicts(input);
+}
+
+/**
+ * Customer duplicates and professional checks: rules no admin can override.
+ * Shared by `evaluateSlot` and the admin override flow.
+ */
+export function evaluateSlotConflicts(input: SlotCheckInput): SlotRejectionReason | undefined {
   const target = slotRangeKeys(input.slot, input.durationMinutes);
   const excluded = new Set(input.excludeAppointmentIds ?? []);
   const customerConflict = input.customerAppointments.some(({ id, data }) => !excluded.has(id)

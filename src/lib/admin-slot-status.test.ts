@@ -14,6 +14,8 @@ const TONE_TO_REASON: Record<AdminSlotTone, string | null> = {
     muted: 'outside_schedule',
 };
 
+const HARD_REASONS = new Set(['invalid_occupancy', 'appointment_conflict']);
+
 function approved(id: string, userId: string, time: string, duration: number): Appointment {
     return {
         id,
@@ -52,7 +54,9 @@ describe('admin "Nueva cita" grid matches evaluateSlot (shared fixture)', () => 
                 userId: 'user-1',
             });
             expect(TONE_TO_REASON[status.tone]).toBe(testCase.expected);
-            expect(status.disabled).toBe(testCase.expected !== null);
+            // Only rules an admin can never override stay disabled; the rest need a confirmation.
+            expect(status.disabled).toBe(HARD_REASONS.has(testCase.expected ?? ''));
+            expect(Boolean(status.restricted)).toBe(testCase.expected !== null && !HARD_REASONS.has(testCase.expected));
         });
     }
 });
@@ -80,7 +84,7 @@ describe('getAdminCreateSlotStatus', () => {
             appointments,
             occupancy: { '2030-01-15_18:15': 5, '2030-01-15_18:30': 5 },
         });
-        expect(status).toMatchObject({ disabled: true, tone: 'full', occupancy: 5, mismatch: { registered: 5, approved: 3 } });
+        expect(status).toMatchObject({ disabled: false, restricted: true, tone: 'full', occupancy: 5, mismatch: { registered: 5, approved: 3 } });
     });
 
     it('waits for the counters instead of showing free seats', () => {
@@ -90,6 +94,33 @@ describe('getAdminCreateSlotStatus', () => {
     it('shows partial occupancy against the configured capacity', () => {
         expect(getAdminCreateSlotStatus({ ...base, occupancy: { '2030-01-15_18:30': 3 } }))
             .toMatchObject({ disabled: false, label: '3/4', tone: 'partial' });
+    });
+
+    it('keeps full, blocked and off-schedule slots selectable but restricted', () => {
+        expect(getAdminCreateSlotStatus({ ...base, occupancy: { '2030-01-15_18:15': 4 } }))
+            .toMatchObject({ disabled: false, restricted: true, tone: 'full', label: 'Lleno 4/4' });
+        expect(getAdminCreateSlotStatus({ ...base, occupancy: {}, blockedSlotKeys: new Set(['2030-01-15_18:30']) }))
+            .toMatchObject({ disabled: false, restricted: true, tone: 'blocked' });
+        expect(getAdminCreateSlotStatus({ ...base, time: '06:00', occupancy: {} }))
+            .toMatchObject({ disabled: false, restricted: true, label: 'Fuera de horario' });
+    });
+
+    it('never makes a customer duplicate or a corrupt counter selectable', () => {
+        const own = { ...approved('own', 'u1', '18:15', 30), preferredSlots: [{ date: base.date, time: '18:15' }], approvedSlot: { date: base.date, time: '18:15' } };
+        expect(getAdminCreateSlotStatus({ ...base, occupancy: { '2030-01-15_18:15': 1 }, appointments: [own], userId: 'u1' }))
+            .toMatchObject({ disabled: true, tone: 'duplicate' });
+        expect(getAdminCreateSlotStatus({ ...base, occupancy: { '2030-01-15_18:15': -1 } }))
+            .toMatchObject({ disabled: true, tone: 'invalid' });
+    });
+
+    it('keeps past slots disabled until past dates are enabled, then restricted', () => {
+        const now = new Date('2030-01-15T18:00:00.000Z'); // 19:00 in Madrid
+        expect(getAdminCreateSlotStatus({ ...base, occupancy: {}, now }))
+            .toMatchObject({ disabled: true, label: 'Pasada' });
+        expect(getAdminCreateSlotStatus({ ...base, occupancy: {}, now, pastAllowed: true }))
+            .toMatchObject({ disabled: false, restricted: true, label: 'Pasada · Libre' });
+        expect(getAdminCreateSlotStatus({ ...base, time: '20:00', occupancy: {}, now }))
+            .toMatchObject({ disabled: false, label: 'Libre' });
     });
 
     it('asks for a date first', () => {

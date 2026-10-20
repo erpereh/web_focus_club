@@ -137,6 +137,13 @@ import {
 } from '@/lib/admin-create-client';
 import { getAdminCreateSlotStatus } from '@/lib/admin-slot-status';
 import {
+  type AdminOverridePrompt,
+  isValidAdminSlotTime,
+  newAdminBookingRequestId,
+  parseAdminOverridePrompt,
+} from '@/lib/admin-booking-overrides';
+import { AdminOverrideConfirmModal } from '@/components/admin/AdminOverrideConfirmModal';
+import {
   getAppointments,
   getAppointmentsByUser,
   updateAppointmentStatusFromAdmin as updateAppointmentStatusFromAdminFS,
@@ -1211,6 +1218,13 @@ export default function AdminPage() {
   const [createAppointmentWarning, setCreateAppointmentWarning] = useState('');
   const [creatingAppointment, setCreatingAppointment] = useState(false);
   const [appointmentClientLocked, setAppointmentClientLocked] = useState(false);
+  // Past dates need an explicit opt-in here and a second confirmation in the popup.
+  const [createAllowPast, setCreateAllowPast] = useState(false);
+  const [createOverridePrompt, setCreateOverridePrompt] = useState<AdminOverridePrompt | null>(null);
+  const [createOverrideError, setCreateOverrideError] = useState('');
+  // One idempotency key per booking attempt: reused by confirmations and retries,
+  // renewed when the booking data changes or the modal is reopened.
+  const createRequestRef = useRef<{ key: string; id: string } | null>(null);
 
   // Site config (dynamic time slots)
   const [siteConfig, setSiteConfig] = useState<SiteConfig>(DEFAULT_SITE_CONFIG);
@@ -1585,6 +1599,8 @@ export default function AdminPage() {
     blockedSlotKeys: createBlockedSlotKeys,
     appointments,
     userId: createAppointmentForm.userId || undefined,
+    now: new Date(),
+    pastAllowed: createAllowPast,
   });
 
   // Manejar inicio de sesión admin con Firebase Auth
@@ -1643,6 +1659,10 @@ export default function AdminPage() {
     setCreateAppointmentClientSearch(client ? `${client.name} ${client.email}` : '');
     setCreateAppointmentError('');
     setCreateAppointmentWarning('');
+    setCreateAllowPast(false);
+    setCreateOverridePrompt(null);
+    setCreateOverrideError('');
+    createRequestRef.current = null;
     setShowCreateAppointmentModal(true);
   };
 
@@ -1654,12 +1674,22 @@ export default function AdminPage() {
     setCreateAppointmentWarning('');
     setCreatingAppointment(false);
     setAppointmentClientLocked(false);
+    setCreateAllowPast(false);
+    setCreateOverridePrompt(null);
+    setCreateOverrideError('');
+    createRequestRef.current = null;
   };
 
   const validateCreateAppointmentForm = () => {
     if (!createAppointmentForm.userId) return 'Selecciona un cliente.';
     if (!createAppointmentForm.date) return 'Selecciona una fecha.';
     if (!createAppointmentForm.time) return 'Selecciona una hora disponible.';
+    if (!isValidAdminSlotTime(createAppointmentForm.time, createAppointmentForm.durationMinutes)) {
+      return 'La hora debe ir en tramos de 15 minutos y la sesión debe terminar antes de medianoche.';
+    }
+    if (!createAllowPast && createAppointmentForm.date < getMadridDateKey(new Date())) {
+      return 'Activa "Registrar cita en fecha pasada" para crear citas en días anteriores.';
+    }
     if (!createAppointmentForm.serviceType) return 'Selecciona un servicio.';
     if (!createAppointmentForm.assignedTrainer) {
       return createAppointmentForm.appointmentType === 'nutrition'
@@ -1684,17 +1714,31 @@ export default function AdminPage() {
     return '';
   };
 
-  const handleCreateAppointmentFromAdmin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const validationError = validateCreateAppointmentForm();
-    if (validationError) {
-      setCreateAppointmentError(validationError);
-      return;
+  const getCreateRequestId = () => {
+    const form = createAppointmentForm;
+    const key = JSON.stringify([
+      form.bookingType, form.userId, form.date, form.time, form.durationMinutes, form.serviceType,
+      form.assignedTrainer, form.status, form.comment.trim(), form.appointmentType, form.intervalDays, form.endDate,
+    ]);
+    if (createRequestRef.current?.key !== key) {
+      createRequestRef.current = { key, id: newAdminBookingRequestId() };
     }
+    return createRequestRef.current.id;
+  };
 
+  /** Sends the booking; with `confirmation` it carries the restrictions the admin accepted. */
+  const submitCreateAppointment = async (confirmation?: { fingerprint: string; confirmPastDate: boolean }) => {
+    // Double clicks never send a second request while one is in flight.
+    if (creatingAppointment) return;
     setCreatingAppointment(true);
     setCreateAppointmentError('');
     setCreateAppointmentWarning('');
+    setCreateOverrideError('');
+
+    const requestId = getCreateRequestId();
+    const confirmationFields = confirmation
+      ? { acknowledgedRestrictions: confirmation.fingerprint, confirmPastDate: confirmation.confirmPastDate }
+      : {};
 
     try {
       if (createAppointmentForm.bookingType === 'recurring') {
@@ -1708,11 +1752,13 @@ export default function AdminPage() {
           comment: createAppointmentForm.comment.trim(),
           intervalDays: createAppointmentForm.intervalDays,
           endDate: createAppointmentForm.endDate,
+          requestId,
+          ...confirmationFields,
         });
         await refreshData();
         closeCreateAppointmentModal();
         const t = toast({
-          title: 'Entrenamiento recurrente creado',
+          title: result.overriddenRestrictions?.length ? 'Entrenamiento recurrente creado con excepciones' : 'Entrenamiento recurrente creado',
           description: `${result.occurrenceCount} sesiones · ${result.totalMinutes} min descontados del bono.`,
         });
         setTimeout(() => t.dismiss(), 4500);
@@ -1729,20 +1775,42 @@ export default function AdminPage() {
         status: createAppointmentForm.status,
         comment: createAppointmentForm.comment.trim(),
         appointmentType: createAppointmentForm.appointmentType,
+        requestId,
+        ...confirmationFields,
       });
       await refreshData();
       closeCreateAppointmentModal();
       const t = toast({
-        title: 'Cita creada',
-        description: result.bonoWarning || 'La cita se ha creado correctamente.',
+        title: result.overriddenRestrictions?.length ? 'Cita creada con excepciones' : 'Cita creada',
+        description: result.bonoWarning || (result.overriddenRestrictions?.length
+          ? 'La excepción ha quedado registrada en el historial de actividad.'
+          : 'La cita se ha creado correctamente.'),
       });
       setTimeout(() => t.dismiss(), 4500);
     } catch (err) {
+      // Restrictions (new, or changed since the popup opened): show/refresh the popup.
+      const prompt = parseAdminOverridePrompt(getCallableErrorDetails(err));
+      if (prompt) {
+        setCreateOverridePrompt(prompt);
+        return;
+      }
       console.error('Error creating appointment from admin:', err);
-      setCreateAppointmentError(getAdminCallableErrorMessage(err, 'Error al crear la cita.'));
+      const message = getAdminCallableErrorMessage(err, 'Error al crear la cita.');
+      if (confirmation) setCreateOverrideError(message);
+      else setCreateAppointmentError(message);
     } finally {
       setCreatingAppointment(false);
     }
+  };
+
+  const handleCreateAppointmentFromAdmin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const validationError = validateCreateAppointmentForm();
+    if (validationError) {
+      setCreateAppointmentError(validationError);
+      return;
+    }
+    await submitCreateAppointment();
   };
 
   const closeCreateClientModal = () => {
@@ -7642,14 +7710,44 @@ export default function AdminPage() {
 
                         <div className="grid sm:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-sm text-[var(--color-text-secondary)] mb-2">Fecha *</label>
+                            <label htmlFor="create-appointment-date" className="block text-sm text-[var(--color-text-secondary)] mb-2">Fecha *</label>
                             <input
+                              id="create-appointment-date"
                               type="date"
                               value={createAppointmentForm.date}
-                              min={formatDateInputLocal(new Date())}
+                              min={createAllowPast ? undefined : formatDateInputLocal(new Date())}
                               onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, date: e.target.value, time: '', endDate: '' }))}
-                              className="w-full px-4 py-3 rounded-xl bg-input border border-border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]"
+                              className={cn(
+                                'w-full px-4 py-3 rounded-xl bg-input border text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent-val)]',
+                                createAppointmentForm.date && createAppointmentForm.date < getMadridDateKey(new Date())
+                                  ? 'border-amber-500/50'
+                                  : 'border-border'
+                              )}
                             />
+                            <label className="mt-2 flex items-center gap-2 text-xs text-[var(--color-text-secondary)] cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={createAllowPast}
+                                onChange={(e) => {
+                                  const allow = e.target.checked;
+                                  setCreateAllowPast(allow);
+                                  if (!allow) {
+                                    // Leaving past mode never keeps a past date selected silently.
+                                    const today = formatDateInputLocal(new Date());
+                                    setCreateAppointmentForm(prev => (prev.date && prev.date < today
+                                      ? { ...prev, date: today, time: '', endDate: '' }
+                                      : prev));
+                                  }
+                                }}
+                                className="h-3.5 w-3.5 accent-amber-500"
+                              />
+                              Registrar cita en fecha pasada
+                            </label>
+                            {createAllowPast && (
+                              <p className="mt-1 text-[11px] text-amber-300">
+                                Las fechas pasadas se piden confirmar de nuevo antes de crear la cita.
+                              </p>
+                            )}
                           </div>
                           <div>
                             <label htmlFor="create-appointment-duration" className="block text-sm text-[var(--color-text-secondary)] mb-2">Duracion *</label>
@@ -7770,7 +7868,7 @@ export default function AdminPage() {
                               return formatRecurringSeriesPreview(dates.length, createAppointmentForm.durationMinutes);
                             })()}
                             <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
-                              La disponibilidad de todas las fechas se valida al crear. Si una falla, no se crea ninguna.
+                              La disponibilidad de todas las fechas se valida al crear. Si alguna tiene restricciones se pedirá confirmación; si algo falla, no se crea ninguna.
                             </p>
                           </div>
                         )}
@@ -7781,6 +7879,7 @@ export default function AdminPage() {
                             <div className="flex flex-wrap gap-3 text-[10px] text-[var(--color-text-secondary)]">
                               <span>Libre</span>
                               <span className="text-amber-300">Parcial</span>
+                              <span className="inline-flex items-center gap-1 text-orange-300"><AlertTriangle className="w-3 h-3" />Con restricción</span>
                               <span className="text-red-300">No disponible</span>
                             </div>
                           </div>
@@ -7794,17 +7893,23 @@ export default function AdminPage() {
                                   type="button"
                                   disabled={slotStatus.disabled}
                                   onClick={() => setCreateAppointmentForm(prev => ({ ...prev, time }))}
+                                  title={slotStatus.restricted ? 'Requiere confirmación del administrador' : undefined}
                                   className={cn(
                                     'min-h-14 rounded-xl border px-2 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed',
                                     selected && 'bg-[var(--color-accent-val)] text-[var(--color-bg-base)] border-[var(--color-accent-val)]',
-                                    !selected && slotStatus.tone === 'free' && 'bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)] hover:shadow-emerald-glow',
-                                    !selected && slotStatus.tone === 'partial' && 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20',
-                                    !selected && ['blocked', 'full', 'duplicate', 'invalid'].includes(slotStatus.tone) && 'bg-red-500/10 border-red-500/20 text-red-300/70',
+                                    selected && slotStatus.restricted && 'ring-2 ring-orange-400',
+                                    !selected && slotStatus.restricted && 'border-dashed bg-orange-500/[0.07] border-orange-400/50 text-orange-200 hover:bg-orange-500/15',
+                                    !selected && !slotStatus.restricted && slotStatus.tone === 'free' && 'bg-[var(--color-accent-dim)] border-[var(--color-accent-border)] text-[var(--color-accent-val)] hover:shadow-emerald-glow',
+                                    !selected && !slotStatus.restricted && slotStatus.tone === 'partial' && 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20',
+                                    !selected && slotStatus.disabled && ['blocked', 'full', 'duplicate', 'invalid'].includes(slotStatus.tone) && 'bg-red-500/10 border-red-500/20 text-red-300/70',
                                     !selected && slotStatus.mismatch && 'ring-1 ring-amber-400/60',
-                                    !selected && slotStatus.tone === 'muted' && 'bg-muted/10 border-border text-[var(--color-text-secondary)]'
+                                    !selected && slotStatus.disabled && slotStatus.tone === 'muted' && 'bg-muted/10 border-border text-[var(--color-text-secondary)]'
                                   )}
                                 >
-                                  <span className="block">{time}</span>
+                                  <span className="flex items-center justify-center gap-1">
+                                    {slotStatus.restricted && <AlertTriangle className="w-3 h-3 shrink-0" aria-hidden="true" />}
+                                    {time}
+                                  </span>
                                   <span className="block text-[10px] mt-0.5">{slotStatus.label}</span>
                                 </button>
                               );
@@ -7828,6 +7933,26 @@ export default function AdminPage() {
                               </div>
                             );
                           })()}
+                          <div className="mt-3 flex flex-wrap items-center gap-3">
+                            <label htmlFor="create-appointment-manual-time" className="text-xs text-[var(--color-text-secondary)]">
+                              Otra hora (fuera del horario)
+                            </label>
+                            <input
+                              id="create-appointment-manual-time"
+                              type="time"
+                              step={900}
+                              value={timeSlots.includes(createAppointmentForm.time) ? '' : createAppointmentForm.time}
+                              onChange={(e) => setCreateAppointmentForm(prev => ({ ...prev, time: e.target.value }))}
+                              className="px-3 py-2 rounded-xl bg-input border border-dashed border-orange-400/50 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-orange-400"
+                            />
+                            {createAppointmentForm.time && !timeSlots.includes(createAppointmentForm.time) && (
+                              <span className="text-[11px] text-orange-300">
+                                {isValidAdminSlotTime(createAppointmentForm.time, createAppointmentForm.durationMinutes)
+                                  ? 'Requiere confirmación: fuera del horario configurado.'
+                                  : 'Usa tramos de 15 minutos y termina antes de medianoche.'}
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         <div>
@@ -7904,6 +8029,25 @@ export default function AdminPage() {
                     </GlassCard>
                   </motion.div>
                 </motion.div>
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {showCreateAppointmentModal && createOverridePrompt && (
+                <AdminOverrideConfirmModal
+                  prompt={createOverridePrompt}
+                  isSeries={createAppointmentForm.bookingType === 'recurring'}
+                  totalSessions={createAppointmentForm.bookingType === 'recurring'
+                    ? generateRecurringOccurrenceDates(createAppointmentForm.date, createAppointmentForm.intervalDays, createAppointmentForm.endDate).length
+                    : 1}
+                  saving={creatingAppointment}
+                  error={createOverrideError}
+                  onConfirm={(confirmation) => { void submitCreateAppointment(confirmation); }}
+                  onCancel={() => {
+                    setCreateOverridePrompt(null);
+                    setCreateOverrideError('');
+                  }}
+                />
               )}
             </AnimatePresence>
 

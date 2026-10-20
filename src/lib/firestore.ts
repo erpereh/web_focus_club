@@ -25,6 +25,7 @@ import {
     manualBonoAdjustmentErrorMessage,
 } from './bono-adjustments';
 import { isBonoOverdue, planBonoExpirationRecalculation } from './bono-expiration';
+import type { AdminRestriction } from './admin-booking-overrides';
 import { v4 as uuidv4 } from 'uuid';
 import type {
     UserProfile,
@@ -536,7 +537,7 @@ export function subscribeUsers(
 export type AdminUserRole = 'admin' | 'trainer' | 'user';
 export type AdminUserAccessMethod = 'password' | 'email-reset';
 
-export interface CreateAppointmentFromAdminInput {
+export type CreateAppointmentFromAdminInput = {
     userId: string;
     date: string;
     time: string;
@@ -547,9 +548,26 @@ export interface CreateAppointmentFromAdminInput {
     comment: string;
     /** Omitido = entrenamiento. Nutrición exige 30 min y un profesional de nutrición. */
     appointmentType?: AppointmentType;
+} & AdminBookingConfirmationFields;
+
+/**
+ * Idempotencia y excepciones de las altas del admin: el mismo `requestId` en
+ * reintentos y confirmaciones; `acknowledgedRestrictions` es la huella que
+ * devolvió el servidor al pedir confirmación.
+ */
+export interface AdminBookingConfirmationFields {
+    requestId: string;
+    acknowledgedRestrictions?: string;
+    confirmPastDate?: boolean;
 }
 
-export interface CreateRecurringAppointmentsFromAdminInput {
+export interface AdminBookingResultFields {
+    overriddenRestrictions?: AdminRestriction[];
+    /** El servidor ya había procesado esta misma operación (doble clic, reintento). */
+    replayed?: boolean;
+}
+
+export type CreateRecurringAppointmentsFromAdminInput = {
     userId: string;
     date: string;
     time: string;
@@ -559,9 +577,9 @@ export interface CreateRecurringAppointmentsFromAdminInput {
     comment: string;
     intervalDays: number;
     endDate: string;
-}
+} & AdminBookingConfirmationFields;
 
-export interface CreateRecurringAppointmentsFromAdminResult {
+export interface CreateRecurringAppointmentsFromAdminResult extends AdminBookingResultFields {
     success: boolean;
     seriesId: string;
     appointmentIds: string[];
@@ -852,10 +870,10 @@ export async function rescheduleOwnRecurringAppointment(
 
 export async function createAppointmentFromAdmin(
     input: CreateAppointmentFromAdminInput
-): Promise<{ success: boolean; appointmentId: string; bonoWarning?: string }> {
+): Promise<{ success: boolean; appointmentId: string; bonoWarning?: string } & AdminBookingResultFields> {
     const callable = httpsCallable<
         CreateAppointmentFromAdminInput,
-        { success: boolean; appointmentId: string; bonoWarning?: string }
+        { success: boolean; appointmentId: string; bonoWarning?: string } & AdminBookingResultFields
     >(firebaseFunctions, 'createAppointmentFromAdmin');
 
     const result = await callable(input);
