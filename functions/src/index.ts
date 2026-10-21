@@ -58,6 +58,7 @@ import {
 } from "./appointmentFinance.js";
 import { addOccupancyDelta, appointmentOccupancyKeys, planOccupancyWrites, sessionMinutesOf } from "./slotOccupancy.js";
 import { readSeriesForOccurrence, seriesMetadataPatch } from "./seriesMetadata.js";
+import { notChargedCancellationPatch } from "./cancellationCharge.js";
 import { createSupportChatHandlers } from "./supportChat";
 import {
   createCustomerSuggestionHandlers,
@@ -1418,6 +1419,8 @@ export const cancelOwnAppointment = onCall<CancelOwnAppointmentRequest>(
         cancelledBy: "customer",
         cancelledAt: now,
         cancellationReason: "cancelled_by_customer",
+        // Customers can only cancel before the day of the session: always without charge.
+        ...notChargedCancellationPatch("customer", now, requestUid),
         updatedAt: now,
       }, { merge: true });
     });

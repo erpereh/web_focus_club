@@ -22,6 +22,12 @@ export const APPOINTMENT_DELETIONS_COLLECTION = "appointment_deletions";
 import { openCustomerConfirmation, withdrawOpenProposalPatch, type CustomerConfirmation, type AppointmentProposal, type ProposalHistoryEntry } from "./appointmentProposals.js";
 import { readSeriesForOccurrence, type SeriesReadResult, seriesMetadataPatch } from "./seriesMetadata.js";
 import {
+  type CancellationCharge,
+  cancellationChargePatch,
+  chargeableMinutesOf,
+  isCancellationCharge,
+} from "./cancellationCharge.js";
+import {
   addOccupancyDelta,
   appointmentOccupancyKeys,
   InvalidOccupancyError,
@@ -69,6 +75,7 @@ const STATUSES: readonly AppointmentStatus[] = ["pending", "approved", "rejected
 const ALLOWED_TRANSITIONS = new Set([
   "pending>approved",
   "pending>rejected",
+  "pending>cancelled",
   "approved>cancelled",
   "approved>pending",
   "rejected>pending",
@@ -95,6 +102,8 @@ interface AdminAppointmentData extends FinanceAppointment {
   assignedTrainer?: string | null;
   recurrenceSeriesId?: string;
   createdAt?: unknown;
+  cancellationCharge?: unknown;
+  cancellationChargedMinutes?: unknown;
   customerConfirmation?: CustomerConfirmation | null;
   proposal?: AppointmentProposal | null;
   proposalHistory?: ProposalHistoryEntry[];
@@ -126,6 +135,13 @@ function parseStatus(value: unknown): AppointmentStatus {
     fail("invalid-argument", "El estado indicado no es válido.", "invalid_request");
   }
   return value as AppointmentStatus;
+}
+
+/** Missing = "not_charged": an admin tab opened before this field existed keeps refunding, as it always did. */
+function parseCancellationCharge(value: unknown): CancellationCharge | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isCancellationCharge(value)) fail("invalid-argument", "La modalidad de cancelación no es válida.", "invalid_request");
+  return value;
 }
 
 function isSlot(value: unknown): value is SlotLike {
@@ -345,7 +361,11 @@ export function buildDeletionRecord(input: {
       pendingRefundMinutes: pending,
       refundReason: outcome.kind === "unavailable"
         ? outcome.reason
-        : pending > 0 ? "La devolución superaba el máximo del bono." : null,
+        : outcome.kind === "charged"
+          ? "cancelled_with_charge"
+          : pending > 0 ? "La devolución superaba el máximo del bono." : null,
+      cancellationCharge: isCancellationCharge(appointment.cancellationCharge) ? appointment.cancellationCharge : null,
+      cancellationChargedMinutes: outcome.kind === "charged" ? outcome.amount : 0,
     },
     manualReview: pending > 0 ? { status: "pending", since: input.now.toISOString() } : null,
     ...(pending > 0
@@ -412,6 +432,7 @@ function commitDeletions(
       minutesRefunded: refundedIds.includes(item.id),
       refundStatus: finance.refundStatus,
       pendingRefundMinutes: finance.pendingRefundMinutes,
+      ...(isCancellationCharge(item.data.cancellationCharge) ? { cancellationCharge: item.data.cancellationCharge } : {}),
       timestamp: nowIso,
       createdAt: nowIso,
     });
@@ -564,6 +585,7 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
     const target = parseStatus(data.status);
     const expectedStatus = parseStatus(data.expectedStatus);
     const allowOverCapacity = data.allowOverCapacity === true;
+    const requestedCharge = target === "cancelled" ? parseCancellationCharge(data.cancellationCharge) : undefined;
     const requestedTrainer = data.assignedTrainer === undefined || data.assignedTrainer === null || data.assignedTrainer === ""
       ? undefined
       : parseId(data.assignedTrainer, "El profesional");
@@ -576,7 +598,19 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
       const current = appointment.status;
 
       // Idempotent: repeating the same operation (double click, retry) changes nothing.
-      if (current === target) return { success: true, appointmentId, status: current, changed: false };
+      if (current === target) {
+        if (current !== "cancelled") return { success: true, appointmentId, status: current, changed: false };
+        // A cancellation is final, and so is its charge decision: asking for the
+        // other one never refunds or charges again. Historical cancellations keep
+        // no classification (never reclassified after the fact).
+        const recorded = isCancellationCharge(appointment.cancellationCharge) ? appointment.cancellationCharge : null;
+        if (requestedCharge && recorded && recorded !== requestedCharge) {
+          fail("failed-precondition", recorded === "charged"
+            ? "La cita ya se canceló con cargo."
+            : "La cita ya se canceló sin cargo.", "already_cancelled", { currentCharge: recorded });
+        }
+        return { success: true, appointmentId, status: current, changed: false, cancellationCharge: recorded };
+      }
       if (current !== expectedStatus) {
         fail("failed-precondition", "La cita ha cambiado mientras la gestionabas. Revisa su estado actual.", "status_changed", {
           currentStatus: current,
@@ -730,19 +764,33 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
       writeOccupancy(transaction, db, delta, occupancyRaw);
 
       if (target === "cancelled") {
-        if (finance) refundAppointmentMinutesInTransaction(transaction, appointmentRef, appointment, finance, now);
+        const charge = requestedCharge ?? "not_charged";
+        // With charge the consumed minutes stay consumed; without, they go back
+        // exactly once (same helper and markers as every other refund).
+        const chargedMinutes = charge === "charged" ? chargeableMinutesOf(appointment) : 0;
+        if (charge === "not_charged" && finance) {
+          refundAppointmentMinutesInTransaction(transaction, appointmentRef, appointment, finance, now);
+        }
         if (series?.exists) {
           const patch = seriesMetadataPatch(series.occurrences, new Map([[appointmentId, "cancelled"]]), nowDate, () => FieldValue.delete());
           if (patch) transaction.set(series.seriesRef, patch, { merge: true });
         }
+        const proposalPatch = withdrawOpenProposalPatch(appointment, actor.uid, now, () => FieldValue.delete()) ?? {};
         transaction.set(appointmentRef, {
+          ...proposalPatch,
           status: "cancelled",
           cancelledBy: "admin",
           cancelledAt: now,
+          ...cancellationChargePatch({ charge, chargedMinutes, decidedBy: "admin", decidedByUid: actor.uid, now }),
           updatedAt: now,
         }, { merge: true });
-        transaction.create(db.collection("activity_logs").doc(), { ...logBase, action: "appointment_cancelled" });
-        return { success: true, appointmentId, status: "cancelled", changed: true };
+        transaction.create(db.collection("activity_logs").doc(), {
+          ...logBase,
+          action: "appointment_cancelled",
+          cancellationCharge: charge,
+          chargedMinutes,
+        });
+        return { success: true, appointmentId, status: "cancelled", changed: true, cancellationCharge: charge, chargedMinutes };
       }
 
       // Back to pending: keep the slot the admin sees, drop the stale approvedSlot.

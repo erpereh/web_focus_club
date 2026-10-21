@@ -22,6 +22,7 @@ import {
   type SlotRejectionReason,
   type SlotTimeSlot,
 } from "./slotValidation.js";
+import { notChargedCancellationPatch } from "./cancellationCharge.js";
 
 /**
  * Appointments that wait for the customer's answer keep `status: "pending"`
@@ -347,6 +348,7 @@ export function createAppointmentProposalHandlers(deps: AppointmentProposalDeps)
           cancelledBy: "customer",
           cancelledAt: now,
           cancellationReason: isProposal ? "customer_declined_proposal" : "customer_declined_renewal",
+          ...(isProposal ? {} : notChargedCancellationPatch("customer", now, uid)),
           customerConfirmation: respondedConfirmation,
           ...(isProposal && appointment.proposal
             ? {

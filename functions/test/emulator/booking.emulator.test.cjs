@@ -378,3 +378,93 @@ test("admin override: a full slot needs confirmation, then is created over capac
   assert.equal((await db.doc(`slot_occupancy/${DAY}_10:00`).get()).data().count, 5);
   assert.equal((await db.doc("bonos/bono-1").get()).data().minutosRestantes, 420);
 });
+
+// ------------------------------------------------------------ cancellations with charge
+
+/** Customer books through the real callable, the admin approves: minutes reserved, seat taken. */
+async function bookAndApprove(time) {
+  const booked = await booking.createAppointment(callable("user-1", {
+    duration: "60", preferredSlot: { date: DAY, time }, reason: "", appointmentType: "training",
+  }));
+  const appointmentId = booked.appointmentId ?? booked.id;
+  await admin.updateAppointmentStatusFromAdmin(callable("admin", { appointmentId, status: "approved", expectedStatus: "pending" }));
+  return appointmentId;
+}
+
+const cancelAs = (appointmentId, cancellationCharge, expectedStatus = "approved") => admin.updateAppointmentStatusFromAdmin(callable("admin", {
+  appointmentId, status: "cancelled", expectedStatus, cancellationCharge,
+}));
+
+test("charged cancellation: seat released, minutes kept, and a later deletion refunds nothing", async () => {
+  await resetDatabase();
+  await seed(baseDocuments());
+  const id = await bookAndApprove("16:00");
+  assert.equal((await docData("bonos/bono-1")).minutosRestantes, 420);
+  assert.equal((await docData(`slot_occupancy/${DAY}_16:45`)).count, 1);
+
+  const result = await cancelAs(id, "charged");
+  assert.equal(result.chargedMinutes, 60);
+  const stored = await docData(`appointments/${id}`);
+  assert.equal(stored.status, "cancelled");
+  assert.equal(stored.cancellationCharge, "charged");
+  assert.equal(stored.cancellationChargedMinutes, 60);
+  assert.equal(stored.cancellationChargeDecidedBy, "admin");
+  for (const time of ["16:00", "16:15", "16:30", "16:45"]) {
+    assert.equal((await docData(`slot_occupancy/${DAY}_${time}`)).count, 0, time);
+  }
+  assert.equal((await docData("bonos/bono-1")).minutosRestantes, 420);
+
+  const deleted = await admin.deleteAppointmentsFromAdmin(callable("admin", { appointmentIds: [id] }));
+  assert.deepEqual(deleted.refundedIds, []);
+  const bono = await docData("bonos/bono-1");
+  assert.equal(bono.minutosRestantes, 420);
+  assert.equal(bono.historial.filter((entry) => entry.accion === "devolucion_cita").length, 0);
+  const record = await docData(`appointment_deletions/${id}`);
+  assert.equal(record.finance.refundReason, "cancelled_with_charge");
+  assert.equal(record.finance.cancellationChargedMinutes, 60);
+});
+
+test("real concurrency: cancelling with and without charge at once decides once, refunds at most once", async () => {
+  const outcomes = { charged: 0, not_charged: 0 };
+  for (let index = 0; index < 6; index += 1) {
+    await resetDatabase();
+    await seed(baseDocuments());
+    const id = await bookAndApprove("17:00");
+    const [first, second] = await Promise.all([settle(cancelAs(id, "charged")), settle(cancelAs(id, "not_charged"))]);
+    assert.equal([first, second].filter((result) => result.ok).length, 1, `iteration ${index}: exactly one decision`);
+    assert.equal([first, second].find((result) => !result.ok).reason, "already_cancelled");
+    const stored = await docData(`appointments/${id}`);
+    outcomes[stored.cancellationCharge] += 1;
+    const bono = await docData("bonos/bono-1");
+    const refunds = bono.historial.filter((entry) => entry.accion === "devolucion_cita").length;
+    assert.equal(bono.minutosRestantes, stored.cancellationCharge === "charged" ? 420 : 480);
+    assert.equal(refunds, stored.cancellationCharge === "charged" ? 0 : 1);
+    assert.equal((await docData(`slot_occupancy/${DAY}_17:00`)).count, 0);
+  }
+  console.log("[emulator] charged vs not charged race outcomes", outcomes);
+});
+
+test("real concurrency: repeated cancellations without charge refund exactly once", async () => {
+  await resetDatabase();
+  await seed(baseDocuments());
+  const id = await bookAndApprove("19:00");
+  const results = await Promise.all([1, 2, 3].map(() => settle(cancelAs(id, "not_charged"))));
+  assert.ok(results.every((result) => result.ok), JSON.stringify(results));
+  assert.deepEqual(results.map((result) => result.value.changed).sort(), [false, false, true]);
+  const bono = await docData("bonos/bono-1");
+  assert.equal(bono.minutosRestantes, 480);
+  assert.equal(bono.historial.filter((entry) => entry.accion === "devolucion_cita").length, 1);
+});
+
+test("a pending customer request cancelled with charge keeps its reserved minutes and no seat", async () => {
+  await resetDatabase();
+  await seed(baseDocuments());
+  const booked = await booking.createAppointment(callable("user-1", {
+    duration: "30", preferredSlot: { date: DAY, time: "20:00" }, reason: "", appointmentType: "training",
+  }));
+  const id = booked.appointmentId ?? booked.id;
+  const result = await cancelAs(id, "charged", "pending");
+  assert.equal(result.chargedMinutes, 30);
+  assert.equal((await docData("bonos/bono-1")).minutosRestantes, 450);
+  assert.equal(await docData(`slot_occupancy/${DAY}_20:00`), undefined, "a pending request never held a seat");
+});

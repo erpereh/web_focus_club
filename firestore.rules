@@ -32,13 +32,16 @@ service cloud.firestore {
 
     // APPOINTMENTS
     match /appointments/{appointmentId} {
-      allow create: if isAdmin();
+      allow create: if isAdmin()
+        && !request.resource.data.keys().hasAny(cancellationChargeFields());
 
       allow read: if (isVerified() && resource.data.userId == request.auth.uid)
         || isAdmin()
         || isAssignedTrainer(resource);
 
-      allow update: if (isAdmin() && recurringAppointmentClientUpdateAllowed())
+      // The charge decision of a cancellation is financial: only Cloud Functions
+      // write it, in the same transaction that keeps or refunds the minutes.
+      allow update: if (isAdmin() && recurringAppointmentClientUpdateAllowed() && cancellationChargeUnchanged())
         || (isTrainer()
           && isAssignedTrainer(resource)
           && onlyTrainerNotesChanged());
@@ -219,6 +222,15 @@ service cloud.firestore {
       return !isRecurringAppointment()
         || (recurringAppointmentProtectedFieldsUnchanged()
           && recurringPendingStatusUnchanged());
+    }
+
+    function cancellationChargeFields() {
+      return ['cancellationCharge', 'cancellationChargedMinutes', 'cancellationChargeDecidedBy',
+        'cancellationChargeDecidedByUid', 'cancellationChargeDecidedAt'];
+    }
+
+    function cancellationChargeUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(cancellationChargeFields());
     }
 
     function isTrainer() {

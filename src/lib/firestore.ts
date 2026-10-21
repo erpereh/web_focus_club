@@ -67,6 +67,8 @@ import {
     buildCanonicalBlockedSlotDocuments,
     type BuildBlockedSlotGroupsInput,
 } from './blocked-slots';
+import type { CancellationCharge } from './appointment-cancellation';
+import { addDays, mergeDateRanges } from './admin-statistics-period';
 
 export { normalizeSiteConfig };
 export { doesSessionFitWithinSchedule, generateTimeSlots } from './appointment-slots';
@@ -1087,6 +1089,8 @@ export interface UpdateAppointmentStatusFromAdminInput {
     assignedTrainer?: string;
     /** Explicit admin confirmation to exceed maxCapacity (never bypasses other rules). */
     allowOverCapacity?: boolean;
+    /** Required by the admin UI when cancelling: keep the consumed minutes or refund them. */
+    cancellationCharge?: CancellationCharge;
 }
 
 export interface UpdateAppointmentStatusFromAdminResult {
@@ -1095,6 +1099,8 @@ export interface UpdateAppointmentStatusFromAdminResult {
     status: AdminAppointmentStatus;
     changed: boolean;
     overCapacity?: boolean;
+    cancellationCharge?: CancellationCharge | null;
+    chargedMinutes?: number;
 }
 
 /**
@@ -2549,4 +2555,102 @@ export async function getHeroConfig(): Promise<HeroConfig | null> {
 
 export async function updateHeroConfig(data: Partial<HeroConfig>): Promise<void> {
     await setDoc(doc(db, 'site_content', 'main'), data, { merge: true });
+}
+
+// ============================================
+// ESTADÍSTICAS (solo admin; las reglas de Firestore lo exigen en servidor)
+// ============================================
+
+export interface StatisticsDataRequest {
+    /** Inclusive civil-date ranges (Europe/Madrid) of the current and previous periods. */
+    period: { startKey: string; endKey: string };
+    previous: { startKey: string; endKey: string };
+    todayKey: string;
+    /** Days of history used for retention (approved sessions). */
+    retentionLookbackDays: number;
+    /** Days ahead checked for slot_occupancy drift. */
+    occupancyCheckDays: number;
+}
+
+export interface StatisticsData {
+    appointments: Appointment[];
+    trainers: Trainer[];
+    clients: UserProfile[];
+    activeBonos: Bono[];
+    bonoHistory: Bono[];
+    siteConfig: SiteConfig;
+    blockedSlots: BlockedSlot[];
+    upcomingOccupancy: SlotOccupancy[];
+    pendingApprovalCount: number;
+}
+
+const OPEN_END_DATE_KEY = '9999-12-31';
+/** Customer single requests (the only undated ones) need a live bono, so they are booked well within this window. */
+const UNDATED_REQUEST_LOOKBACK_DAYS = 120;
+
+/**
+ * Bounded reads for /admin/estadisticas. Approved, admin-created and recurring
+ * appointments carry a top-level `date`; customer requests only get it when
+ * approved, so undated requests are found by `createdAt` within a bounded
+ * window instead of reading the whole history. Single-field ranges only: no
+ * composite index is needed.
+ */
+export async function getStatisticsData(request: StatisticsDataRequest): Promise<StatisticsData> {
+    const appointmentsRef = collection(db, 'appointments');
+    const dateRanges = mergeDateRanges([
+        { from: request.previous.startKey, to: request.period.endKey },
+        { from: addDays(request.todayKey, -request.retentionLookbackDays), to: OPEN_END_DATE_KEY },
+    ]);
+    const undatedFrom = addDays(request.previous.startKey, -UNDATED_REQUEST_LOOKBACK_DAYS);
+    const undatedTo = addDays(request.period.endKey, 1);
+    const bonoFrom = addDays(request.previous.startKey, -1);
+    const bonoTo = addDays(request.period.endKey, 2);
+    const occupancyTo = addDays(request.todayKey, request.occupancyCheckDays);
+
+    const [datedSnaps, undatedSnap, pendingSnap, clientsSnap, trainers, activeBonos, expiredSnap, replacedSnap, siteConfig, blockedSnap, occupancySnap] = await Promise.all([
+        Promise.all(dateRanges.map((range) => getDocs(query(appointmentsRef, where('date', '>=', range.from), where('date', '<=', range.to))))),
+        getDocs(query(appointmentsRef, where('createdAt', '>=', undatedFrom), where('createdAt', '<', undatedTo))),
+        getDocs(query(appointmentsRef, where('status', '==', 'pending'))),
+        getDocs(query(collection(db, 'users'), where('role', '==', 'user'))),
+        getTrainers(),
+        getAllActiveBonos(),
+        getDocs(query(collection(db, 'bonos'), where('fechaExpiracion', '>=', bonoFrom), where('fechaExpiracion', '<', bonoTo))),
+        getDocs(query(collection(db, 'bonos'), where('replacedAt', '>=', bonoFrom), where('replacedAt', '<', bonoTo))),
+        getSiteConfig(),
+        getDocs(query(collection(db, 'blocked_slots'), where('date', '>=', request.previous.startKey), where('date', '<=', request.period.endKey))),
+        getDocs(query(collection(db, 'slot_occupancy'), where('date', '>=', request.todayKey), where('date', '<=', occupancyTo))),
+    ]);
+
+    const appointments = new Map<string, Appointment>();
+    for (const snap of datedSnaps) {
+        for (const d of snap.docs) appointments.set(d.id, { id: d.id, ...d.data() } as Appointment);
+    }
+    for (const d of [...undatedSnap.docs, ...pendingSnap.docs]) {
+        if (!appointments.has(d.id)) appointments.set(d.id, { id: d.id, ...d.data() } as Appointment);
+    }
+
+    const ended = [...expiredSnap.docs, ...replacedSnap.docs].map((d) => normalizeBonoDoc(d.id, d.data() as BonoData));
+    const bonoHistory = new Map(ended.map((bono) => [bono.id, bono]));
+    // Newer bonos of those customers tell whether they renewed.
+    const oldestAssignment = ended.map((bono) => bono.fechaAsignacion || bono.createdAt).filter(Boolean).sort()[0];
+    if (oldestAssignment) {
+        const newerSnap = await getDocs(query(collection(db, 'bonos'), where('fechaAsignacion', '>', oldestAssignment)));
+        const endedUsers = new Set(ended.map((bono) => bono.userId));
+        for (const d of newerSnap.docs) {
+            const bono = normalizeBonoDoc(d.id, d.data() as BonoData);
+            if (endedUsers.has(bono.userId)) bonoHistory.set(bono.id, bono);
+        }
+    }
+
+    return {
+        appointments: [...appointments.values()],
+        trainers,
+        clients: clientsSnap.docs.map((d) => ({ ...(d.data() as UserProfile), uid: (d.data() as UserProfile).uid ?? d.id })),
+        activeBonos,
+        bonoHistory: [...bonoHistory.values()],
+        siteConfig,
+        blockedSlots: blockedSnap.docs.map((d) => ({ id: d.id, ...d.data() } as BlockedSlot)),
+        upcomingOccupancy: occupancySnap.docs.map((d) => d.data() as SlotOccupancy),
+        pendingApprovalCount: pendingSnap.size,
+    };
 }

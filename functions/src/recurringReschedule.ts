@@ -48,6 +48,7 @@ import {
   type SiteConfig,
 } from "./siteConfig.js";
 import { newNotificationOperation, sessionsOf, writeNotificationOutbox } from "./notifications/outbox.js";
+import { notChargedCancellationPatch } from "./cancellationCharge.js";
 
 export type RecurringRescheduleScope = "single" | "series" | "following";
 export type RecurringRescheduleActorType = "admin" | "customer";
@@ -1417,6 +1418,7 @@ async function runCustomerSeriesReplacement(
         cancelledBy: customerUid,
         cancelledAt: now,
         cancellationReason: "customer_series_schedule_reduction",
+        ...notChargedCancellationPatch("customer", now, customerUid),
         updatedAt: now,
         ...refundPatches.get(occurrence.id),
       }, { merge: true });

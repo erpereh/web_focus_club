@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Repeat } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { cn } from '@/lib/utils';
+import { withCancellationVisual } from '@/lib/appointment-cancellation';
 import { getAppointmentType, getOpenCustomerConfirmation, type Appointment, type Trainer, type UserProfile } from '@/types';
 import { AppointmentReadOnlyModal, type AppointmentStatusVisual } from './AppointmentReadOnlyModal';
 import {
@@ -145,7 +146,7 @@ export function AppointmentsCalendar({
                         const client = getClientForAppointment(appointment);
                         const clientName = client?.name || appointment.name;
                         const trainerName = getTrainerName(appointment, trainers);
-                        const statusVisual = statusConfig[appointment.status];
+                        const statusVisual = withCancellationVisual(appointment, statusConfig[appointment.status]);
                         const durationMinutes = schedule?.durationMinutes;
 
                         return (

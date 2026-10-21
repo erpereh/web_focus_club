@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
 import { cn } from '@/lib/utils';
+import { withCancellationVisual } from '@/lib/appointment-cancellation';
 import { getAppointmentType, getOpenCustomerConfirmation, type Appointment } from '@/types';
 import { formatLongDate, resolveAppointmentSchedule } from './appointment-calendar-utils';
 
@@ -51,7 +52,7 @@ export function AppointmentReadOnlyModal({
   const titleId = useId();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const schedule = resolveAppointmentSchedule(appointment);
-  const statusVisual = statusConfig[appointment.status];
+  const statusVisual = withCancellationVisual(appointment, statusConfig[appointment.status]);
   const timeRange = schedule
     ? schedule.endTime
       ? `${schedule.time} - ${schedule.endTime}`

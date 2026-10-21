@@ -6,6 +6,7 @@ import {
   type LifecycleBono,
   reconcileAppointmentMinutes,
 } from "./appointmentLifecycle.js";
+import { chargeableMinutesOf, isChargedCancellation } from "./cancellationCharge.js";
 
 /**
  * Bono minute movements tied to one appointment. Shared by the callables and
@@ -16,6 +17,8 @@ import {
 
 export interface FinanceAppointment extends LifecycleAppointment {
   userId: string;
+  /** Set by a charged cancellation: its minutes are never refunded afterwards. */
+  cancellationCharge?: unknown;
   serviceType?: string;
   duration?: string | number;
 }
@@ -95,6 +98,8 @@ export function resolveRefundTarget(appointment: FinanceAppointment, context: Fi
 
 export type RefundOutcome =
   | { kind: "not_applicable" }
+  /** Cancelled with charge: the consumed minutes stay consumed (`amount` may be 0). */
+  | { kind: "charged"; amount: number }
   | { kind: "unavailable"; amount: number; reason: string }
   | { kind: "refunded"; amount: number; cappedMinutes: number; targetBonoId: string; redirectedFrom?: string };
 
@@ -130,6 +135,11 @@ export function refundAppointmentMinutesInTransaction(
 ): RefundResult {
   const persist = options.persistAppointment !== false;
   if (appointment.appointmentType === "nutrition") return NOT_APPLICABLE;
+  // Single guard for every later path (trigger, delete, block-and-delete):
+  // a charge decided by the admin is never undone by a refund.
+  if (isChargedCancellation(appointment)) {
+    return { refunded: false, appointmentPatch: {}, outcome: { kind: "charged", amount: chargeableMinutesOf(appointment) } };
+  }
   const alreadyRefunded = Boolean(appointment.minutesRefundedAt);
   const reserved = appointment.minutesDeducted === true && Boolean(appointment.minutesDeductedAt);
   if (alreadyRefunded || !reserved) return NOT_APPLICABLE;

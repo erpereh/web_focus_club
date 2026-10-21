@@ -163,6 +163,15 @@ export interface Appointment {
     cancelledBy?: string;
     cancelledAt?: string;
     cancellationReason?: string;
+    /** Modalidad de la cancelación (solo Functions). Ausente en cancelaciones antiguas = «Sin clasificar». */
+    cancellationCharge?: 'charged' | 'not_charged';
+    /** Minutos consumidos que se mantienen en una cancelación con cargo (0 si no había descuento). */
+    cancellationChargedMinutes?: number;
+    cancellationChargeDecidedBy?: 'admin' | 'customer' | 'system';
+    cancellationChargeDecidedByUid?: string;
+    cancellationChargeDecidedAt?: string;
+    minutesRefundPendingReview?: boolean;
+    minutesRefundPendingAmount?: number;
     modifiedBy?: string;
     modifiedAt?: string;
     previousPreferredSlot?: TimeSlot | null;
@@ -390,6 +399,9 @@ export interface Bono {
     createdAt: string;
     // Última edición masiva del admin (los avisos de esa escritura van solo al historial)
     notificationBulkOperationId?: string;
+    /** Bono que lo sustituyó al asignar uno nuevo (renovación). */
+    replacedByBonoId?: string;
+    replacedAt?: string;
     // Campos legacy (solo lectura, para bonos creados antes de la migración)
     tipo?: string;
     sesionesTotales?: number;

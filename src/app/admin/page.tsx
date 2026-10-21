@@ -44,6 +44,8 @@ import {
   Globe,
   Lock,
   CalendarOff,
+  CalendarX,
+  ChartLine,
   Dumbbell,
   FileText,
   Search,
@@ -89,6 +91,9 @@ import {
   trainersForAppointmentType,
 } from '@/lib/appointment-types';
 import { AdminSlotPickerModal } from '@/components/admin/AdminSlotPickerModal';
+import { CancelAppointmentModal } from '@/components/admin/CancelAppointmentModal';
+import { parseAdminDeepLink } from '@/lib/admin-deep-link';
+import { type CancellationCharge, getCancellationCategory, withCancellationVisual } from '@/lib/appointment-cancellation';
 import { AppointmentRescheduleModal } from '@/components/admin/AppointmentRescheduleModal';
 import { getRecurringRescheduleErrorMessage } from '@/lib/recurring-reschedule';
 import { getCanonicalSlotBlocks } from '@/lib/appointment-slots';
@@ -1129,6 +1134,8 @@ export default function AdminPage() {
   const [seriesApprovalTrainer, setSeriesApprovalTrainer] = useState('');
   const [seriesActionBusy, setSeriesActionBusy] = useState(false);
   const [statusActionBusyId, setStatusActionBusyId] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
+  const [cancelError, setCancelError] = useState('');
   const [createDayOccupancy, setCreateDayOccupancy] = useState<Record<string, unknown> | null>(null);
   const [showSeriesReturnPendingModal, setShowSeriesReturnPendingModal] = useState(false);
   const [seriesReturnPendingId, setSeriesReturnPendingId] = useState<string | null>(null);
@@ -1349,6 +1356,23 @@ export default function AdminPage() {
       refreshTrainerData().catch(console.error);
     }
   }, [isAdmin, isTrainerRole]);
+
+  // Direct links from /admin/estadisticas (`/admin?tab=appointments&status=pending`), applied once.
+  const deepLinkAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!isAdmin || deepLinkAppliedRef.current) return;
+    deepLinkAppliedRef.current = true;
+    const link = parseAdminDeepLink(window.location.search);
+    if (!link.tab) return;
+    if (link.tab === 'appointments') {
+      setStatusFilter(link.status ?? 'all');
+      setTrainerFilter(link.trainerId ? toTrainerFilter(link.trainerId) : 'all');
+      setAppointmentSearch('');
+    }
+    if (link.tab === 'clients' && link.clientQuery) setClientSearch(link.clientQuery);
+    switchTab(link.tab);
+    window.history.replaceState(null, '', window.location.pathname);
+  }, [isAdmin]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -2076,9 +2100,45 @@ export default function AdminPage() {
     }
   };
 
+  const openCancelAppointment = (appointment: Appointment) => {
+    if (statusActionBusyId) return;
+    setCancelError('');
+    setCancelTarget(appointment);
+  };
+
+  /** Cancels with the modality chosen in the popup; the server re-validates everything in one transaction. */
+  const handleCancelAppointment = async (charge: CancellationCharge) => {
+    const target = cancelTarget;
+    if (!target || statusActionBusyId) return;
+    setStatusActionBusyId(target.id);
+    setCancelError('');
+    try {
+      await updateAppointmentStatusFromAdminFS({
+        appointmentId: target.id,
+        status: 'cancelled',
+        expectedStatus: target.status,
+        cancellationCharge: charge,
+      });
+      setCancelTarget(null);
+      await refreshData();
+    } catch (error) {
+      console.error('Error cancelling appointment:', error);
+      const details = getCallableErrorDetails(error);
+      setCancelError(details?.reason === 'already_cancelled'
+        ? `La cita ya estaba cancelada ${details.currentCharge === 'charged' ? 'con cargo' : 'sin cargo'}. No se ha cambiado nada.`
+        : getAdminCallableErrorMessage(error, 'No se pudo cancelar la cita.'));
+      await refreshData();
+    } finally {
+      setStatusActionBusyId(null);
+    }
+  };
+
   const handleDeleteAppointment = async (appointment: Appointment) => {
     if (statusActionBusyId) return;
-    if (!confirm('¿Estás seguro de eliminar esta cita?')) return;
+    const deleteMessage = getCancellationCategory(appointment) === 'charged'
+      ? '¿Eliminar esta cita cancelada con cargo? El cargo se mantiene: no se devolverán minutos al bono.'
+      : '¿Estás seguro de eliminar esta cita?';
+    if (!confirm(deleteMessage)) return;
     setStatusActionBusyId(appointment.id);
     try {
       const result = await deleteAppointmentsFromAdminFS([appointment.id]);
@@ -3148,6 +3208,20 @@ export default function AdminPage() {
               )}
             </button>
 
+            <Link
+              href="/admin/estadisticas"
+              onClick={() => setSidebarOpen(false)}
+              className={cn(
+                'w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-left',
+                pathname?.startsWith('/admin/estadisticas')
+                  ? 'bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] border border-[var(--color-accent-border)] shadow-lg shadow-emerald/10'
+                  : 'text-[var(--color-text-secondary)] hover:bg-muted/50 hover:text-[var(--color-text-primary)]'
+              )}
+            >
+              <ChartLine className="w-5 h-5" />
+              <span className="font-medium">Estadísticas</span>
+            </Link>
+
             <p className="text-xs text-[var(--color-text-secondary)] uppercase tracking-wider mt-6 mb-3 px-3">Gestión</p>
 
             <button
@@ -3376,8 +3450,8 @@ export default function AdminPage() {
                                 </p>
                               </div>
                             </div>
-                            <span className={cn('px-3 py-1 rounded-full text-xs font-medium border', statusConfig[appointment.status].color)}>
-                              {statusConfig[appointment.status].label}
+                            <span className={cn('px-3 py-1 rounded-full text-xs font-medium border', withCancellationVisual(appointment, statusConfig[appointment.status]).color)}>
+                              {withCancellationVisual(appointment, statusConfig[appointment.status]).label}
                             </span>
                           </div>
                         );
@@ -3608,9 +3682,9 @@ export default function AdminPage() {
                                         </span>
                                       )}
                                     </h3>
-                                    <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border', statusConfig[appointment.status].color)}>
+                                    <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border', withCancellationVisual(appointment, statusConfig[appointment.status]).color)}>
                                       <StatusIcon className="w-3 h-3" />
-                                      {statusConfig[appointment.status].label}
+                                      {withCancellationVisual(appointment, statusConfig[appointment.status]).label}
                                     </span>
                                     {getAppointmentType(appointment) === 'nutrition' && (
                                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border border-lime-500/30 bg-lime-500/10 text-lime-400">
@@ -3831,6 +3905,16 @@ export default function AdminPage() {
                                     >
                                       Rechazar
                                     </PremiumButton>
+                                    <PremiumButton
+                                      variant="ghost"
+                                      size="sm"
+                                      icon={<CalendarX className="w-4 h-4" />}
+                                      disabled={statusActionBusyId !== null}
+                                      onClick={() => openCancelAppointment(appointment)}
+                                      className="flex-1 lg:flex-none text-destructive hover:bg-destructive/10"
+                                    >
+                                      Cancelar
+                                    </PremiumButton>
                                   </>
                                 )}
                                 {appointment.status === 'approved' && appointment.recurrenceSeriesId && (
@@ -3866,7 +3950,7 @@ export default function AdminPage() {
                                       size="sm"
                                       icon={<XCircle className="w-4 h-4" />}
                                       disabled={statusActionBusyId !== null}
-                                      onClick={() => handleStatusUpdate(appointment.id, 'cancelled')}
+                                      onClick={() => openCancelAppointment(appointment)}
                                       className="w-full text-destructive hover:bg-destructive/10"
                                     >
                                       Cancelar
@@ -3896,6 +3980,16 @@ export default function AdminPage() {
                                       className="w-full"
                                     >
                                       Modificar
+                                    </PremiumButton>
+                                    <PremiumButton
+                                      variant="ghost"
+                                      size="sm"
+                                      icon={<XCircle className="w-4 h-4" />}
+                                      disabled={statusActionBusyId !== null}
+                                      onClick={() => openCancelAppointment(appointment)}
+                                      className="w-full text-destructive hover:bg-destructive/10"
+                                    >
+                                      Cancelar
                                     </PremiumButton>
                                   </>
                                 )}
@@ -8624,7 +8718,7 @@ export default function AdminPage() {
                           <div className="space-y-3">
                             {clientAppointmentsHistory.map((appt) => {
                               const slot = getAppointmentEffectiveSlot(appt);
-                              const apptStatus = statusConfig[appt.status];
+                              const apptStatus = withCancellationVisual(appt, statusConfig[appt.status]);
                               return (
                                 <div key={appt.id} className="p-3 rounded-xl bg-muted/10 border border-white/5">
                                   <div className="flex items-center justify-between mb-1">
@@ -8780,6 +8874,26 @@ export default function AdminPage() {
                     </GlassCard>
                   </motion.div>
                 </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ============================================
+                CANCELAR CITA (con o sin cargo)
+                ============================================ */}
+            <AnimatePresence>
+              {cancelTarget && (
+                <CancelAppointmentModal
+                  key="cancel-appointment"
+                  appointment={cancelTarget}
+                  whenLabel={(() => {
+                    const slot = getAppointmentEffectiveSlot(cancelTarget);
+                    return slot ? `${formatSlotLabel(slot)} · ${cancelTarget.duration} min` : `${cancelTarget.duration} min`;
+                  })()}
+                  saving={statusActionBusyId === cancelTarget.id}
+                  error={cancelError}
+                  onConfirm={(charge) => { void handleCancelAppointment(charge); }}
+                  onCancel={() => { setCancelTarget(null); setCancelError(''); }}
+                />
               )}
             </AnimatePresence>
 

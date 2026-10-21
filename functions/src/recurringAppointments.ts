@@ -14,6 +14,7 @@ import {
   type LifecycleBono,
 } from "./appointmentLifecycle.js";
 import { doesSessionFitWithinSchedule, generateTimeSlots, normalizeSiteConfig, type SiteConfig } from "./siteConfig.js";
+import { notChargedCancellationPatch } from "./cancellationCharge.js";
 
 /**
  * Firestore transactions are treated as having a 500-write maximum.
@@ -570,6 +571,7 @@ export function buildPendingSeriesOccurrencePatch(input: {
     patch.cancelledBy = "customer";
     patch.cancelledAt = input.now;
     patch.cancellationReason = "cancelled_by_customer";
+    Object.assign(patch, notChargedCancellationPatch("customer", input.now));
   }
   return patch;
 }

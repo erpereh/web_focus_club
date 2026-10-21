@@ -47,6 +47,7 @@ import {
   validReplacementSlot,
 } from "./recurringScheduleReplacement.js";
 import { newNotificationOperation, sessionsOf, writeNotificationOutbox } from "./notifications/outbox.js";
+import { cancellationChargePatch } from "./cancellationCharge.js";
 
 interface TimeSlot {
   date: string;
@@ -1018,6 +1019,7 @@ async function replaceRecurringSeriesScheduleFromAdmin(
         cancelledBy: "admin",
         cancelledAt: now,
         cancellationReason: "admin_series_schedule_reduction",
+        ...cancellationChargePatch({ charge: "not_charged", chargedMinutes: 0, decidedBy: "admin", decidedByUid: adminUid, now }),
         updatedAt: now,
         ...refundPatches.get(occurrence.occurrence.id),
       }, { merge: true });

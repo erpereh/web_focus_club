@@ -452,3 +452,61 @@ Hasta que se active, los registros simplemente no se borran; no hay ningún otro
 - **Functions:** redesplegar el commit anterior con el mismo filtro. Las callables nuevas quedan sin uso.
 - **Hosting:** desde la consola, restaurar la versión anterior.
 - **Reglas:** volver a `allow write: if isAdmin();` en `slot_occupancy` **solo** si se vuelve también a la web anterior, que escribía contadores desde el navegador.
+
+## 6. Release de cancelaciones con cargo y estadísticas (octubre 2026)
+
+Cambios:
+
+- La modalidad de cancelación (con o sin cargo) la decide el admin.
+- Guarda central que impide devolver minutos de una cancelación con cargo.
+- Nueva página `/admin/estadisticas`.
+
+No requiere publicar una versión nueva de la app móvil: los campos nuevos son aditivos y los contratos no cambian. El detalle está en `cancelaciones-con-cargo-y-estadisticas.md`.
+
+### 6.1 Verificaciones locales antes de desplegar
+
+Las mismas de 5.1, y además:
+
+```bash
+npm run lint
+```
+
+```bash
+npx tsc --noEmit
+```
+
+`test:emulator` ejecuta ahora también `rules.emulator.test.cjs`, que prueba las reglas reales con `@firebase/rules-unit-testing`.
+
+### 6.2 Orden de despliegue
+
+1. **Functions.** Funciones con cambios de comportamiento:
+   - `updateAppointmentStatusFromAdmin`: modalidad y `pending → cancelled`.
+   - `deleteAppointmentsFromAdmin` y `blockSlotsFromAdmin`: no devuelven un cargo y lo registran en `appointment_deletions`.
+   - `onAppointmentApproved`: el trigger ya no devuelve minutos de un cargo. **Es imprescindible desplegarlo antes de usar el popup.**
+   - `cancelOwnAppointment`, `cancelOwnRecurringAppointmentSeries`, `replaceOwnRecurringSeriesSchedule`, `replaceRecurringSeriesScheduleFromAdmin` y `respondToAppointmentConfirmation`: registran `not_charged`.
+
+   ```powershell
+   firebase deploy --only "functions:updateAppointmentStatusFromAdmin,functions:deleteAppointmentsFromAdmin,functions:blockSlotsFromAdmin,functions:onAppointmentApproved,functions:cancelOwnAppointment,functions:cancelOwnRecurringAppointmentSeries,functions:replaceOwnRecurringSeriesSchedule,functions:replaceRecurringSeriesScheduleFromAdmin,functions:respondToAppointmentConfirmation"
+   ```
+
+   Como alternativa, el despliegue completo con el filtro de 5.2.
+2. **Hosting**, con el paso 2.4. Incluye el popup, las etiquetas y `/admin/estadisticas`.
+3. **Reglas de Firestore**, al final. Las reglas nuevas protegen los campos `cancellationCharge*`, que solo pueden escribir las Functions.
+   ```bash
+   firebase deploy --only firestore:rules
+   ```
+
+**Índices:** no hace falta ninguno nuevo. Las estadísticas solo hacen rangos sobre un campo y filtros de igualdad simples.
+
+### 6.3 Verificaciones en producción tras desplegar
+
+- Cancelar con cargo una cita de prueba de hoy: el bono no cambia, el aforo baja y la agenda muestra «Cancelada con cargo».
+- Volver a pulsar Cancelar con la otra modalidad: aparece el aviso «ya estaba cancelada» y no se escribe nada.
+- Eliminar esa cita: el bono sigue igual y `appointment_deletions/{id}.finance.refundReason == "cancelled_with_charge"`.
+- Abrir `/admin/estadisticas` con un usuario que no sea admin: se redirige y las lecturas se deniegan.
+
+### 6.4 Rollback
+
+- **Hosting:** restaurar la versión anterior. La web antigua cancela sin enviar modalidad, y el servidor lo trata como «sin cargo».
+- **Functions:** redesplegar el commit anterior. Si se ha usado el popup, los cargos ya registrados quedan como datos. Ojo: el borrado antiguo devolvería sus minutos si alguien elimina una de esas citas, así que mientras dure el rollback no hay que borrar citas canceladas con cargo.
+- **Reglas:** se pueden mantener; solo afectan a los campos nuevos.
