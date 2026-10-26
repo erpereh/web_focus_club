@@ -8854,7 +8854,7 @@ export default function AdminPage() {
                     <GlassCard className="p-6">
                       <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-1">Aprobar serie</h2>
                       <p className="text-sm text-[var(--color-text-secondary)] mb-6">
-                        Se confirmar?n todas las sesiones pendientes. Los minutos ya est?n reservados y no se volver?n a descontar.
+                        Se confirmarán todas las sesiones pendientes. Los minutos ya están reservados y no se volverán a descontar.
                       </p>
                       <div className="space-y-4 mb-6">
                         <div>
