@@ -128,11 +128,22 @@ function describe(restrictions: AdminRestriction[]): string {
   return [...new Set(restrictions.map((item) => ADMIN_RESTRICTION_LABELS[item.reason]))].join(", ");
 }
 
+/** What the admin is doing when a restriction is skipped: only changes the wording. */
+export type AdminOverrideOperation = "create" | "reschedule" | "approve";
+
+const OVERRIDE_CONFIRM_ACTION: Record<AdminOverrideOperation, string> = {
+  create: "crear la cita",
+  reschedule: "guardar el cambio",
+  approve: "aprobar",
+};
+
 /**
  * Never skips a restriction silently: without a matching acknowledgement the
  * caller gets `admin_override_required` with the full, current list (and
  * `changed` when what the admin confirmed is no longer what applies).
  * Returns the audit record to store, or undefined when nothing was overridden.
+ * Creations may only override as approved; reschedules and approvals of a
+ * pending appointment may too (a pending one takes no seat until approved).
  */
 export function authorizeAdminOverride(input: {
   restrictions: AdminRestriction[];
@@ -141,13 +152,15 @@ export function authorizeAdminOverride(input: {
   adminUid: string;
   adminEmail: string;
   now: string;
+  operation?: AdminOverrideOperation;
 }): AdminOverrideAudit | undefined {
   const { restrictions, request } = input;
+  const operation = input.operation ?? "create";
   if (restrictions.length === 0) return undefined;
 
   const fingerprint = restrictionsFingerprint(restrictions);
   const requiresPastConfirmation = restrictions.some((item) => item.reason === "slot_not_future");
-  if (input.status !== "approved") {
+  if (operation === "create" && input.status !== "approved") {
     throw new HttpsError(
       "failed-precondition",
       `La franja tiene restricciones (${describe(restrictions)}). Solo se pueden autorizar excepciones en citas creadas como aprobadas.`,
@@ -163,7 +176,7 @@ export function authorizeAdminOverride(input: {
         ? "Las condiciones de la franja han cambiado. Revisa las restricciones y vuelve a confirmar."
         : pastMissing && request.acknowledgedRestrictions === fingerprint
           ? "Confirma explícitamente que quieres registrar una cita en fecha pasada."
-          : `La franja tiene restricciones (${describe(restrictions)}). Confírmalas para crear la cita igualmente.`,
+          : `La franja tiene restricciones (${describe(restrictions)}). Confírmalas para ${OVERRIDE_CONFIRM_ACTION[operation]} igualmente.`,
       {
         reason: ADMIN_OVERRIDE_REQUIRED,
         restrictions,
@@ -208,6 +221,14 @@ export function bookingPayloadHash(payload: unknown): string {
   return createHash("sha256").update(stableJson(payload)).digest("hex");
 }
 
+/** One kind per admin operation, so an id can never be replayed as another operation. */
+export type AdminRequestKind = "single" | "series" | "reschedule_single" | "reschedule_series";
+
+/** Optional `requestId`: older clients that do not send one keep working without idempotency. */
+export function parseOptionalRequestId(value: unknown): string | undefined {
+  return value === undefined || value === null ? undefined : parseRequestId(value);
+}
+
 export interface IdempotencyMarker {
   ref: DocumentReference;
   /** Result of the earlier identical request, when this one is a repeat. */
@@ -221,7 +242,7 @@ export interface IdempotencyMarker {
 export async function readIdempotencyMarker(
   transaction: Transaction,
   db: Firestore,
-  input: { requestId: string; adminUid: string; kind: "single" | "series"; payloadHash: string },
+  input: { requestId: string; adminUid: string; kind: AdminRequestKind; payloadHash: string },
 ): Promise<IdempotencyMarker> {
   const ref = db.collection(ADMIN_BOOKING_REQUESTS).doc(input.requestId);
   const snap = await transaction.get(ref);
@@ -238,7 +259,7 @@ export async function readIdempotencyMarker(
 export function writeIdempotencyMarker(
   transaction: Transaction,
   marker: IdempotencyMarker,
-  input: { adminUid: string; kind: "single" | "series"; payloadHash: string; result: Record<string, unknown>; now: string },
+  input: { adminUid: string; kind: AdminRequestKind; payloadHash: string; result: Record<string, unknown>; now: string },
 ): void {
   transaction.create(marker.ref, {
     adminUid: input.adminUid,

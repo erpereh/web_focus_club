@@ -176,6 +176,41 @@ describe('InteractiveCalendar', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /18:00, No disponible/i })).toBeDisabled());
   });
 
+  it('keeps full slots selectable only for admin calendars that allow them, still flagged as full', async () => {
+    subscribeMonthAvailability.mockImplementation((
+      _year: number,
+      _month: number,
+      callback: (data: { occupancy: Record<string, number>; blockedSlots: unknown[] }) => void,
+    ) => {
+      callback({
+        occupancy: { '2026-09-17_10:00': 4, '2026-09-17_18:00': 5 },
+        blockedSlots: [{ id: 'blocked', date: '2026-09-17', time: '18:30', createdBy: '', createdAt: '' }],
+      });
+      return vi.fn();
+    });
+    const onSelectSlot = vi.fn();
+    render(
+      <InteractiveCalendar
+        selectedSlot={null}
+        onSelectSlot={onSelectSlot}
+        onClearSlot={vi.fn()}
+        selectedDuration={60}
+        availabilityLabelMode="occupancy"
+        allowFullSlots
+      />,
+    );
+    await waitFor(() => expect(screen.queryByText('Cargando disponibilidad...')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /17 de Septiembre/i }));
+
+    const full = screen.getByRole('button', { name: /10:00, Completa 4\/4/i });
+    expect(full).toBeEnabled();
+    expect(full.className).toContain('text-red-300');
+    // Blocked wins over full: it is never selectable.
+    expect(screen.getByRole('button', { name: /18:00, Bloqueada/i })).toBeDisabled();
+    fireEvent.click(full);
+    expect(onSelectSlot).toHaveBeenCalledWith({ date: '2026-09-17', time: '10:00' });
+  });
+
   it('reports loading and errors without exposing a usable calendar', async () => {
     const onAvailabilityStateChange = vi.fn();
     subscribeMonthAvailability.mockImplementation((

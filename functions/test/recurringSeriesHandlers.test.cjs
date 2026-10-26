@@ -258,6 +258,67 @@ test("approval aborts atomically when a modified pending slot has become full", 
   assert.equal(db.operations.some((operation) => operation.type === "write"), false);
 });
 
+async function expectOverridePrompt(promise) {
+  const error = await promise.then(() => assert.fail("expected an admin confirmation request"), (caught) => caught);
+  assert.equal(error.code, "failed-precondition");
+  assert.equal(error.details.reason, "admin_override_required");
+  return error.details;
+}
+
+test("a pending series moved into a full slot with an exception can still be approved over capacity", async () => {
+  const documents = pendingFixture(2);
+  addOccupancy(documents, "2026-09-08", "12:00", 2);
+  const db = new FakeFirestore(documents);
+  const move = { appointmentId: "pending-0", startSlot: { date: "2026-09-08", time: "12:00" }, endDate: "2026-09-15", assignedTrainer: null };
+
+  // 1. Move: the admin confirms the full slot; a pending series takes no seat yet.
+  const movePrompt = await expectOverridePrompt(adminHandlers(db).replaceRecurringSeriesScheduleFromAdmin(adminRequest(move)));
+  await adminHandlers(db).replaceRecurringSeriesScheduleFromAdmin(adminRequest({ ...move, acknowledgedRestrictions: movePrompt.fingerprint }));
+  slotKeys("2026-09-08", "12:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 2));
+
+  // 2. Approve: capacity is asked again (it is now that the seat is taken) and nothing is written.
+  const before = clone(Object.fromEntries(db.documents));
+  db.operations = [];
+  const approvePrompt = await expectOverridePrompt(
+    recurringHandlers(db).approveRecurringAppointmentSeriesFromAdmin(adminRequest({ seriesId: "series-1" })),
+  );
+  assert.deepEqual(approvePrompt.restrictions, [
+    { date: "2026-09-08", time: "12:00", reason: "slot_full", occupancy: 2, maxCapacity: 2 },
+  ]);
+  assert.deepEqual(Object.fromEntries(db.documents), before);
+
+  // 3. Confirmed approval: seats over capacity, minutes untouched (already reserved) and audited.
+  const result = await recurringHandlers(db).approveRecurringAppointmentSeriesFromAdmin(adminRequest({
+    seriesId: "series-1",
+    acknowledgedRestrictions: approvePrompt.fingerprint,
+  }));
+  assert.deepEqual(result.overriddenRestrictions, approvePrompt.restrictions);
+  assert.equal(db.documents.get("appointment_recurrences/series-1").status, "approved");
+  slotKeys("2026-09-08", "12:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 3));
+  slotKeys("2026-09-15", "12:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 1));
+  assert.equal(db.documents.get("bonos/bono-1").minutosRestantes, 300);
+  const logs = [...db.documents.entries()].filter(([path]) => path.startsWith("activity_logs/")).map(([, value]) => value);
+  assert.ok(logs.some((log) => log.action === "recurring_series_schedule_replaced_with_admin_override"));
+  assert.ok(logs.some((log) => log.action === "recurring_appointments_approved"));
+  const approvalOverride = logs.find((log) => log.action === "recurring_series_approved_with_admin_override");
+  assert.deepEqual(approvalOverride.restrictions, approvePrompt.restrictions);
+});
+
+test("series approval never overrides a blocked slot, even with a confirmation", async () => {
+  const documents = pendingFixture(2);
+  addOccupancy(documents, "2026-09-08", "10:00", 2);
+  documents["blocked_slots/block"] = { date: "2026-09-15", time: "11:00" };
+  const db = new FakeFirestore(documents);
+  await assert.rejects(
+    recurringHandlers(db).approveRecurringAppointmentSeriesFromAdmin(adminRequest({
+      seriesId: "series-1",
+      acknowledgedRestrictions: "2026-09-08|10:00|slot_full|2|2",
+    })),
+    (error) => error.code === "failed-precondition" && /bloqueada/.test(error.message),
+  );
+  assert.equal(db.operations.some((operation) => operation.type === "write"), false);
+});
+
 test("reduction followed by rejection or cancellation refunds only reservations still active", async (t) => {
   for (const action of ["reject", "cancel"]) {
     await t.test(action, async () => {

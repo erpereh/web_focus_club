@@ -612,7 +612,8 @@ export function validateRecurringRescheduleAvailability(input: {
         affected?.appointment.id,
       );
     }
-    if (finalCount > config.maxCapacity) {
+    // Only added seats can exceed capacity: leaving (or staying in) a slot already over it never fails.
+    if (delta > 0 && finalCount > config.maxCapacity) {
       return planError(
         input.draft.scope,
         "slot_full",

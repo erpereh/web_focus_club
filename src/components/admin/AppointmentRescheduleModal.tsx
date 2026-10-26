@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   CalendarClock,
   Check,
@@ -18,6 +18,13 @@ import { PremiumSelect } from '@/components/ui/premium-select';
 import { RecurringHastaSelect } from '@/components/ui/recurring-hasta-select';
 import { GlassCard } from '@/components/ui/glass-card';
 import { PremiumButton } from '@/components/ui/premium-button';
+import { AdminOverrideConfirmModal } from '@/components/admin/AdminOverrideConfirmModal';
+import {
+  type AdminOverridePrompt,
+  getCallableErrorDetails,
+  newAdminBookingRequestId,
+  parseAdminOverridePrompt,
+} from '@/lib/admin-booking-overrides';
 import {
   getAppointmentRecurrence,
   getAvailabilityForDates,
@@ -59,6 +66,10 @@ export interface AppointmentRescheduleSubmit {
   scope: RecurringRescheduleScope | null;
   assignedTrainer: string | null;
   endDate?: string;
+  /** Same id across retries and the capacity confirmation of one change. */
+  requestId: string;
+  /** Fingerprint of the full slots the admin confirmed to go over. */
+  acknowledgedRestrictions?: string;
 }
 
 export interface AppointmentRescheduleModalProps {
@@ -190,6 +201,9 @@ export function AppointmentRescheduleModal({
   const [seriesMetadataPhase, setSeriesMetadataPhase] = useState<'idle' | 'loading' | 'ready' | 'unavailable' | 'error'>('idle');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [overridePrompt, setOverridePrompt] = useState<AdminOverridePrompt | null>(null);
+  const [overrideError, setOverrideError] = useState('');
+  const requestRef = useRef<{ key: string; id: string } | null>(null);
 
   const selectedTrainerId = trainerSelection.kind === 'trainer' ? trainerSelection.trainerId : null;
   const trainerDecisionReady = trainerSelection.kind !== 'pending';
@@ -392,6 +406,8 @@ export function AppointmentRescheduleModal({
           userBookedSlotKeys: calendarContext.userBookedSlotKeys,
           siteConfig: config,
           now: new Date(),
+          // Full sessions are confirmed by the admin when saving (server prompt).
+          allowFullCapacity: true,
         }));
         setHastaAvailabilityPhase('ready');
       })
@@ -419,11 +435,13 @@ export function AppointmentRescheduleModal({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !busy) onClose();
+      if (event.key !== 'Escape' || busy) return;
+      if (overridePrompt) setOverridePrompt(null);
+      else onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [busy, onClose]);
+  }, [busy, onClose, overridePrompt]);
 
   const handleScopeChange = (nextScope: RecurringRescheduleScope) => {
     if (nextScope === scope || (nextScope === 'series' && managedSeriesCount === 0)) return;
@@ -484,7 +502,14 @@ export function AppointmentRescheduleModal({
         && (targetSlotChanged || trainerChanged)),
   );
 
-  const handleSubmit = async () => {
+  /** One id per intended change: kept across retries and the capacity confirmation. */
+  const getRequestId = (submit: Omit<AppointmentRescheduleSubmit, 'requestId' | 'acknowledgedRestrictions'>) => {
+    const key = JSON.stringify([submit.slot, submit.scope, submit.assignedTrainer, submit.endDate ?? null]);
+    if (requestRef.current?.key !== key) requestRef.current = { key, id: newAdminBookingRequestId() };
+    return requestRef.current.id;
+  };
+
+  const handleSubmit = async (confirmation?: { fingerprint: string }) => {
     if (busy) return;
     if (isRecurring && !scope) {
       setError('Elige qué citas quieres modificar.');
@@ -509,15 +534,29 @@ export function AppointmentRescheduleModal({
 
     setBusy(true);
     setError('');
+    setOverrideError('');
+    const submit = {
+      slot: effectiveSlot,
+      scope: isSeriesFlow ? 'series' as const : isRecurring ? 'single' as const : null,
+      assignedTrainer: selectedTrainerId,
+      ...(isSeriesFlow ? { endDate } : {}),
+    };
     try {
       await onSave({
-        slot: effectiveSlot,
-        scope: isSeriesFlow ? 'series' : isRecurring ? 'single' : null,
-        assignedTrainer: selectedTrainerId,
-        ...(isSeriesFlow ? { endDate } : {}),
+        ...submit,
+        requestId: getRequestId(submit),
+        ...(confirmation ? { acknowledgedRestrictions: confirmation.fingerprint } : {}),
       });
     } catch (saveError) {
-      setError(getRecurringRescheduleErrorMessage(saveError, 'Error al modificar la franja.'));
+      // Full slots (new, or changed since the popup opened): show/refresh the confirmation.
+      const prompt = parseAdminOverridePrompt(getCallableErrorDetails(saveError));
+      if (prompt) {
+        setOverridePrompt(prompt);
+        return;
+      }
+      const message = getRecurringRescheduleErrorMessage(saveError, 'Error al modificar la franja.');
+      if (confirmation) setOverrideError(message);
+      else setError(message);
     } finally {
       setBusy(false);
     }
@@ -731,6 +770,7 @@ export function AppointmentRescheduleModal({
                   userBookedSlotKeys={calendarContext.userBookedSlotKeys}
                   occupancyCreditsByKey={calendarContext.occupancyCreditsByKey}
                   allowPastDates={!isSeriesFlow && !isRecurringPending}
+                  allowFullSlots
                   disabled={busy}
                   showSelectedSlotSummary={false}
                   availabilityLabelMode="occupancy"
@@ -836,13 +876,35 @@ export function AppointmentRescheduleModal({
           <PremiumButton
             variant="cta"
             icon={<CalendarClock className="h-4 w-4" />}
-            onClick={handleSubmit}
+            onClick={() => { void handleSubmit(); }}
             disabled={!canSave}
           >
             {busy ? 'Guardando...' : 'Guardar cambio'}
           </PremiumButton>
         </footer>
       </motion.div>
+
+      {/* Its own overlay click must not also reach this backdrop and close the reschedule modal. */}
+      <div onClick={(event) => event.stopPropagation()}>
+        <AnimatePresence>
+          {overridePrompt && (
+            <AdminOverrideConfirmModal
+              prompt={overridePrompt}
+              mode="reschedule"
+              isSeries={isSeriesFlow}
+              totalSessions={selectedEndOption?.occurrenceCount}
+              pendingNote={appointment.status === 'pending'}
+              saving={busy}
+              error={overrideError}
+              onConfirm={({ fingerprint }) => { void handleSubmit({ fingerprint }); }}
+              onCancel={() => {
+                setOverridePrompt(null);
+                setOverrideError('');
+              }}
+            />
+          )}
+        </AnimatePresence>
+      </div>
     </motion.div>
   );
 }

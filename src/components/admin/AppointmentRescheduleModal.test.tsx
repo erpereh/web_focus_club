@@ -71,6 +71,7 @@ vi.mock('@/components/ui/interactive-calendar', () => ({
       <div
         data-testid="calendar"
         data-allow-past-dates={props.allowPastDates ? 'true' : 'false'}
+        data-allow-full-slots={props.allowFullSlots ? 'true' : 'false'}
         data-selected-date={props.selectedDate ?? ''}
       >
         <button type="button" onClick={() => props.onSelectDate?.('2026-09-20')}>Elegir fecha</button>
@@ -238,6 +239,7 @@ describe('AppointmentRescheduleModal', () => {
     expect(screen.getByRole('button', { name: /Guardar cambio/i })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: /Guardar cambio/i }));
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({
+      requestId: expect.any(String),
       slot: { date: '2026-09-14', time: '10:00' },
       scope: 'single',
       assignedTrainer: 'trainer-2',
@@ -290,6 +292,7 @@ describe('AppointmentRescheduleModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /Guardar cambio/i }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({
+      requestId: expect.any(String),
       slot: { date: '2026-09-20', time: '18:00' },
       scope: null,
       assignedTrainer: null,
@@ -319,6 +322,7 @@ describe('AppointmentRescheduleModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /Guardar cambio/i }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({
+      requestId: expect.any(String),
       slot: { date: '2026-09-20', time: '18:00' },
       scope: 'series',
       assignedTrainer: null,
@@ -372,6 +376,7 @@ describe('AppointmentRescheduleModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /Guardar cambio/i }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({
+      requestId: expect.any(String),
       slot: { date: '2026-09-14', time: '10:00' },
       scope: null,
       assignedTrainer: 'trainer-2',
@@ -419,6 +424,7 @@ describe('AppointmentRescheduleModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /Guardar cambio/i }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({
+      requestId: expect.any(String),
       slot: { date: '2026-09-14', time: '10:00' },
       scope: null,
       assignedTrainer: null,
@@ -673,6 +679,7 @@ describe('AppointmentRescheduleModal', () => {
     fireEvent.click(saveButton);
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({
+      requestId: expect.any(String),
       slot: { date: '2026-09-20', time: '18:00' },
       scope: 'series',
       assignedTrainer: null,
@@ -756,10 +763,86 @@ describe('AppointmentRescheduleModal', () => {
     expect(screen.getByRole('button', { name: /Guardar cambio/i })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: /Guardar cambio/i }));
     await waitFor(() => expect(onSave).toHaveBeenCalledWith({
+      requestId: expect.any(String),
       slot: { date: '2026-09-14', time: '10:00' },
       scope: null,
       assignedTrainer: 'trainer-2',
     }));
+  });
+
+  describe('capacity exceptions', () => {
+    const overrideError = () => Object.assign(new Error('La franja tiene restricciones (aforo completo).'), {
+      details: {
+        reason: 'admin_override_required',
+        fingerprint: 'fp-1',
+        requiresPastConfirmation: false,
+        changed: false,
+        restrictions: [{ date: '2026-09-20', time: '18:00', reason: 'slot_full', occupancy: 4, maxCapacity: 4 }],
+      },
+    });
+
+    function renderIndividual(
+      status: Appointment['status'],
+      onSave: (input: unknown) => Promise<void>,
+      onClose: () => void = vi.fn(),
+    ) {
+      const individual = { ...appointment('a1', '2026-09-14', status), recurrenceSeriesId: undefined };
+      render(
+        <AppointmentRescheduleModal
+          appointment={individual}
+          appointments={[individual]}
+          trainers={[]}
+          onClose={onClose}
+          onSave={onSave}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Elegir fecha' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Elegir hora' }));
+    }
+
+    it('lets the admin pick full slots and confirms them with the same request id', async () => {
+      const onSave = vi.fn<(input: unknown) => Promise<void>>()
+        .mockRejectedValueOnce(overrideError())
+        .mockResolvedValueOnce(undefined);
+      renderIndividual('approved', onSave);
+      expect(screen.getByTestId('calendar')).toHaveAttribute('data-allow-full-slots', 'true');
+
+      fireEvent.click(screen.getByRole('button', { name: /Guardar cambio/i }));
+      const dialog = await screen.findByRole('alertdialog');
+      expect(dialog).toHaveTextContent('La nueva franja tiene restricciones');
+      expect(dialog).toHaveTextContent('Aforo completo: 4/4 personas (quedaría en 5/4)');
+      expect(dialog).not.toHaveTextContent('no ocupa plaza');
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Confirmar' }));
+      await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+      const [first] = onSave.mock.calls[0] as [{ requestId: string; acknowledgedRestrictions?: string }];
+      const [second] = onSave.mock.calls[1] as [{ requestId: string; acknowledgedRestrictions?: string }];
+      expect(first.acknowledgedRestrictions).toBeUndefined();
+      expect(second).toMatchObject({
+        slot: { date: '2026-09-20', time: '18:00' },
+        acknowledgedRestrictions: 'fp-1',
+        requestId: first.requestId,
+      });
+    });
+
+    it('explains that a pending appointment takes no seat and shows confirmation errors in the popup', async () => {
+      const onSave = vi.fn<(input: unknown) => Promise<void>>()
+        .mockRejectedValueOnce(overrideError())
+        .mockRejectedValueOnce(Object.assign(new Error('fallo'), { details: { reason: 'slot_blocked' } }));
+      const onClose = vi.fn();
+      renderIndividual('pending', onSave, onClose);
+
+      fireEvent.click(screen.getByRole('button', { name: /Guardar cambio/i }));
+      const dialog = await screen.findByRole('alertdialog');
+      expect(dialog).toHaveTextContent('no ocupa plaza hasta que se apruebe');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Confirmar' }));
+      await waitFor(() => expect(within(dialog).getByRole('alert')).toBeInTheDocument());
+
+      // Dismissing the popup from its backdrop must not also close the reschedule modal.
+      fireEvent.click(dialog.parentElement as HTMLElement);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByRole('dialog', { name: 'Modificar cita' })).toBeInTheDocument();
+    });
   });
 
   it('keeps a series disabled when availability fails', async () => {

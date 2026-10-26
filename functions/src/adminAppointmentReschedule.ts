@@ -25,6 +25,15 @@ import {
 } from "./siteConfig.js";
 import { withdrawOpenProposalPatch } from "./appointmentProposals.js";
 import {
+  type AdminRestriction,
+  authorizeAdminOverride,
+  bookingPayloadHash,
+  parseAdminOverrideRequest,
+  parseOptionalRequestId,
+  readIdempotencyMarker,
+  writeIdempotencyMarker,
+} from "./adminBookingOverrides.js";
+import {
   appointmentRangeKeys,
   getAppointmentType,
   rangesOverlap,
@@ -256,24 +265,15 @@ function assertSchedule(config: Partial<SiteConfig>, slot: TimeSlot, duration: n
   return normalized;
 }
 
+/** Hard rules only: capacity is an overridable restriction (see collectCapacityRestrictions). */
 function assertFutureTargetAvailability(input: {
   selectedAppointmentId: string;
-  targetSlot: TimeSlot;
   targetKeys: string[];
-  status: string;
-  maxCapacity: number;
   blockedKeys: Set<string>;
-  occupancyByKey: Map<string, unknown>;
   userAppointments: AppointmentRecord[];
 }): void {
   if (input.targetKeys.some((key) => input.blockedKeys.has(key))) {
     throwHttps("failed-precondition", "La franja seleccionada esta bloqueada.", "slot_blocked");
-  }
-  if (input.status === "pending" && input.targetKeys.some((key) => {
-    const count = assertOccupancyCount(input.occupancyByKey.get(key));
-    return count >= input.maxCapacity;
-  })) {
-    throwHttps("failed-precondition", "La franja seleccionada esta llena.", "slot_full");
   }
   const targetKeySet = new Set(input.targetKeys);
   const hasConflict = input.userAppointments.some((appointment) => {
@@ -285,14 +285,16 @@ function assertFutureTargetAvailability(input: {
   }
 }
 
+/**
+ * Absolute counts for the delta. Capacity is not checked here: it is a
+ * restriction of the seats a change adds (collectCapacityRestrictions), so
+ * releasing or keeping a seat in a slot already over capacity never fails.
+ */
 function buildAbsoluteOccupancyWrites(input: {
   keys: string[];
   deltaByKey: Map<string, number>;
   currentByKey: Map<string, unknown>;
-  config: SiteConfig;
-  now: Date;
 }): Array<{ key: string; date: string; time: string; count: number }> {
-  const today = getMadridDateKey(input.now);
   const writes: Array<{ key: string; date: string; time: string; count: number }> = [];
   for (const key of input.keys) {
     const current = assertOccupancyCount(input.currentByKey.get(key));
@@ -304,12 +306,42 @@ function buildAbsoluteOccupancyWrites(input: {
     const separator = key.indexOf("_");
     const date = key.slice(0, separator);
     const time = key.slice(separator + 1);
-    if (date >= today && count > input.config.maxCapacity) {
-      throwHttps("failed-precondition", "La franja seleccionada esta llena.", "slot_full");
-    }
     if (delta !== 0) writes.push({ key, date, time, count });
   }
   return writes;
+}
+
+/**
+ * `slot_full` restrictions of the target sessions, for the admin to confirm.
+ * Only seats the change adds count (blocks with a positive delta ending over
+ * capacity); `occupancy` is the count without this appointment, so the prompt
+ * reads "quedaría en occupancy + 1". A pending appointment takes no seat: its
+ * target is flagged when it is already full.
+ */
+function collectCapacityRestrictions(input: {
+  sessions: Array<{ slot: TimeSlot; keys: string[] }>;
+  deltaByKey: Map<string, number>;
+  currentByKey: Map<string, unknown>;
+  maxCapacity: number;
+  consumesCapacity: boolean;
+}): AdminRestriction[] {
+  const restrictions: AdminRestriction[] = [];
+  for (const session of input.sessions) {
+    const counts = input.consumesCapacity
+      ? session.keys
+        .filter((key) => (input.deltaByKey.get(key) ?? 0) > 0)
+        .map((key) => assertOccupancyCount(input.currentByKey.get(key)) + (input.deltaByKey.get(key) ?? 0) - 1)
+      : session.keys.map((key) => assertOccupancyCount(input.currentByKey.get(key)));
+    if (!counts.some((count) => count >= input.maxCapacity)) continue;
+    restrictions.push({
+      date: session.slot.date,
+      time: session.slot.time,
+      reason: "slot_full",
+      occupancy: Math.max(...counts),
+      maxCapacity: input.maxCapacity,
+    });
+  }
+  return restrictions;
 }
 
 function safeCivilDate(appointment: AppointmentData): string | undefined {
@@ -328,23 +360,17 @@ function firstIntersection(left: string[], right: Set<string>): string | undefin
   return firstReplacementIntersection(left, right);
 }
 
+/** Hard rules only: capacity is an overridable restriction (see collectCapacityRestrictions). */
 function assertSeriesFutureAvailability(input: {
   desired: Array<{ slot: TimeSlot; keys: string[] }>;
   blockedKeys: Set<string>;
   userAppointments: AppointmentRecord[];
   excludedAppointmentIds: Set<string>;
-  occupancyByKey?: Map<string, unknown>;
-  maxCapacity?: number;
-  consumesCapacity?: boolean;
 }): void {
   const desiredKeys = new Set<string>();
   for (const occurrence of input.desired) {
     if (occurrence.keys.some((key) => input.blockedKeys.has(key))) {
       throwHttps("failed-precondition", "Una de las franjas de la serie esta bloqueada.", "slot_blocked");
-    }
-    if (input.consumesCapacity === false && input.occupancyByKey && input.maxCapacity !== undefined
-      && occurrence.keys.some((key) => assertOccupancyCount(input.occupancyByKey?.get(key)) >= input.maxCapacity!)) {
-      throwHttps("failed-precondition", "Una de las franjas de la serie esta llena.", "slot_full");
     }
     if (firstIntersection(occurrence.keys, desiredKeys)) {
       throwHttps("failed-precondition", "Dos sesiones de la serie se solaparian.", "appointment_conflict");
@@ -399,13 +425,22 @@ async function rescheduleAppointmentFromAdmin(
   request: CallableRequest,
 ): Promise<Record<string, unknown>> {
   const adminUid = await requireAdminForRequest(deps, request);
+  const adminEmail = request.auth?.token.email ?? "";
   const input = parseSingleInput(request.data);
   if (!input) {
     throwHttps("invalid-argument", "Los datos de la modificacion no son validos.", "invalid_request");
   }
+  const data = request.data as Record<string, unknown>;
+  const requestId = parseOptionalRequestId(data.requestId);
+  const overrideRequest = parseAdminOverrideRequest(data);
+  const payloadHash = bookingPayloadHash({ ...input, kind: "reschedule_single" });
 
   const selectedRef = deps.db.collection("appointments").doc(input.appointmentId);
   return deps.db.runTransaction(async (transaction: Transaction) => {
+    const marker = requestId
+      ? await readIdempotencyMarker(transaction, deps.db, { requestId, adminUid, kind: "reschedule_single", payloadHash })
+      : undefined;
+    if (marker?.previous) return { ...marker.previous, replayed: true };
     const selectedSnap = await transaction.get(selectedRef);
     if (!selectedSnap.exists) {
       throwHttps("failed-precondition", "No se ha encontrado la cita indicada.", "appointment_not_found");
@@ -561,19 +596,14 @@ async function rescheduleAppointmentFromAdmin(
         keys: occupancyKeysToRead,
         deltaByKey: occupancyDelta,
         currentByKey: occupancyByKey,
-        config,
-        now: transactionNow,
       })
       : [];
-    if (slotChanged && targetState.isFuture && config) {
+    const futureTargetConfig = slotChanged && targetState.isFuture ? config : undefined;
+    if (futureTargetConfig) {
       assertFutureTargetAvailability({
         selectedAppointmentId: selectedRef.id,
-        targetSlot: input.slot,
         targetKeys,
-        status: appointment.status,
-        maxCapacity: config.maxCapacity,
         blockedKeys,
-        occupancyByKey,
         userAppointments: userAppointmentsSnap?.docs.map((snap) => ({
           id: snap.id,
           data: snap.data() as AppointmentData,
@@ -582,6 +612,24 @@ async function rescheduleAppointmentFromAdmin(
     }
 
     const now = transactionNow.toISOString();
+    // Every hard rule passed: a full target is only accepted with the admin's explicit confirmation.
+    const adminOverride = authorizeAdminOverride({
+      restrictions: futureTargetConfig
+        ? collectCapacityRestrictions({
+          sessions: [{ slot: input.slot, keys: targetKeys }],
+          deltaByKey: occupancyDelta,
+          currentByKey: occupancyByKey,
+          maxCapacity: futureTargetConfig.maxCapacity,
+          consumesCapacity: appointment.status === "approved",
+        })
+        : [],
+      request: overrideRequest,
+      status: appointment.status as "pending" | "approved",
+      adminUid,
+      adminEmail,
+      now,
+      operation: "reschedule",
+    });
     const patch: Record<string, unknown> = {
       updatedAt: now,
       modifiedAt: now,
@@ -648,7 +696,31 @@ async function rescheduleAppointmentFromAdmin(
       trainerChanged,
       createdAt: now,
     });
-    return { success: true, appointmentId: selectedRef.id };
+    if (adminOverride) {
+      transaction.create(deps.db.collection("activity_logs").doc(), {
+        action: "appointment_rescheduled_with_admin_override",
+        adminUid,
+        adminEmail,
+        appointmentId: selectedRef.id,
+        targetUid: appointment.userId,
+        recurrenceSeriesId: appointment.recurrenceSeriesId ?? null,
+        status: appointment.status,
+        oldSlot: currentSlot && isSlot(currentSlot) ? currentSlot : null,
+        newSlot: input.slot,
+        restrictions: adminOverride.restrictions,
+        createdAt: now,
+        timestamp: now,
+      });
+    }
+    const response: Record<string, unknown> = {
+      success: true,
+      appointmentId: selectedRef.id,
+      ...(adminOverride ? { overriddenRestrictions: adminOverride.restrictions } : {}),
+    };
+    if (marker) {
+      writeIdempotencyMarker(transaction, marker, { adminUid, kind: "reschedule_single", payloadHash, result: response, now });
+    }
+    return response;
   });
 }
 
@@ -657,13 +729,23 @@ async function replaceRecurringSeriesScheduleFromAdmin(
   request: CallableRequest,
 ): Promise<Record<string, unknown>> {
   const adminUid = await requireAdminForRequest(deps, request);
+  const adminEmail = request.auth?.token.email ?? "";
   const input = parseSeriesInput(request.data);
   if (!input) {
     throwHttps("invalid-argument", "Los datos de la modificacion no son validos.", "invalid_request");
   }
+  const data = request.data as Record<string, unknown>;
+  const requestId = parseOptionalRequestId(data.requestId);
+  const overrideRequest = parseAdminOverrideRequest(data);
+  const payloadHash = bookingPayloadHash({ ...input, kind: "reschedule_series" });
 
   const selectedRef = deps.db.collection("appointments").doc(input.appointmentId);
   return deps.db.runTransaction(async (transaction: Transaction) => {
+    // A repeat of an applied request returns its result: no second outbox, logs or finance.
+    const marker = requestId
+      ? await readIdempotencyMarker(transaction, deps.db, { requestId, adminUid, kind: "reschedule_series", payloadHash })
+      : undefined;
+    if (marker?.previous) return { ...marker.previous, replayed: true };
     // Read the selected document first. It identifies the series only; it is never an anchor.
     const selectedSnap = await transaction.get(selectedRef);
     if (!selectedSnap.exists) {
@@ -897,9 +979,6 @@ async function replaceRecurringSeriesScheduleFromAdmin(
       desired,
       blockedKeys,
       excludedAppointmentIds: oldFutureIds,
-      occupancyByKey,
-      maxCapacity: config.maxCapacity,
-      consumesCapacity: !isPendingSeries,
       userAppointments: userAppointmentsSnap.docs.map((snap) => ({
         id: snap.id,
         data: snap.data() as AppointmentData,
@@ -909,8 +988,6 @@ async function replaceRecurringSeriesScheduleFromAdmin(
       keys: occupancyKeysToRead,
       deltaByKey: occupancyDelta,
       currentByKey: occupancyByKey,
-      config,
-      now: nowDate,
     });
 
     const createdRefs = Array.from({ length: newCount }, () => deps.db.collection("appointments").doc());
@@ -992,6 +1069,23 @@ async function replaceRecurringSeriesScheduleFromAdmin(
         ],
       };
     }
+
+    // Every hard rule passed: full sessions are only accepted with the admin's explicit confirmation.
+    const adminOverride = authorizeAdminOverride({
+      restrictions: collectCapacityRestrictions({
+        sessions: desired,
+        deltaByKey: occupancyDelta,
+        currentByKey: occupancyByKey,
+        maxCapacity: config.maxCapacity,
+        consumesCapacity: !isPendingSeries,
+      }),
+      request: overrideRequest,
+      status: isPendingSeries ? "pending" : "approved",
+      adminUid,
+      adminEmail,
+      now,
+      operation: "reschedule",
+    });
 
     // All reads and validation are complete. Only writes follow this point.
     const operation = newNotificationOperation(deps.db);
@@ -1143,7 +1237,21 @@ async function replaceRecurringSeriesScheduleFromAdmin(
       newTrainer: input.assignedTrainer,
       createdAt: now,
     });
-    return {
+    if (adminOverride) {
+      transaction.create(deps.db.collection("activity_logs").doc(), {
+        action: "recurring_series_schedule_replaced_with_admin_override",
+        adminUid,
+        adminEmail,
+        seriesId,
+        appointmentId: selectedRef.id,
+        targetUid: series.userId,
+        status: series.status,
+        restrictions: adminOverride.restrictions,
+        createdAt: now,
+        timestamp: now,
+      });
+    }
+    const response: Record<string, unknown> = {
       success: true,
       seriesId,
       appointmentId: selectedRef.id,
@@ -1153,7 +1261,12 @@ async function replaceRecurringSeriesScheduleFromAdmin(
       oldFutureCount: managedOccurrences.length,
       newFutureCount: desired.length,
       minutesDelta,
+      ...(adminOverride ? { overriddenRestrictions: adminOverride.restrictions } : {}),
     };
+    if (marker) {
+      writeIdempotencyMarker(transaction, marker, { adminUid, kind: "reschedule_series", payloadHash, result: response, now });
+    }
+    return response;
   });
 }
 
@@ -1182,11 +1295,8 @@ async function returnRecurringSeriesToPendingFromAdmin(
     }
 
     const occurrencesQuery = deps.db.collection("appointments").where("recurrenceSeriesId", "==", input.seriesId);
-    const configRef = deps.db.collection("site_config").doc("main");
-    const [occurrencesSnap, configSnap] = await Promise.all([
-      transaction.get(occurrencesQuery),
-      transaction.get(configRef),
-    ]);
+    // Releasing seats needs no capacity configuration.
+    const occurrencesSnap = await transaction.get(occurrencesQuery);
     const nowDate = deps.getNowDate();
     const now = nowDate.toISOString();
     const approved = occurrencesSnap.docs
@@ -1240,13 +1350,10 @@ async function returnRecurringSeriesToPendingFromAdmin(
     occupancySnaps.forEach((snap, index) => {
       occupancyByKey.set(occupancyKeysToRead[index], snap.exists ? (snap.data() as SlotOccupancyData).count : 0);
     });
-    const config = normalizeSiteConfig(configSnap.exists ? configSnap.data() as Partial<SiteConfig> : undefined);
     const occupancyWrites = buildAbsoluteOccupancyWrites({
       keys: occupancyKeysToRead,
       deltaByKey: occupancyDelta,
       currentByKey: occupancyByKey,
-      config,
-      now: nowDate,
     });
 
     const deleted = FieldValue.delete();

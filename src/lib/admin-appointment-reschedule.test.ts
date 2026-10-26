@@ -63,4 +63,33 @@ describe('admin appointment reschedule Firestore wrappers', () => {
         );
         expect(callable).toHaveBeenCalledWith(input);
     });
+
+    it('forwards the request id and the confirmed capacity fingerprint unchanged', async () => {
+        const callable = vi.fn(async () => ({
+            data: { success: true, appointmentId: 'appointment-1', overriddenRestrictions: [] },
+        }));
+        mocks.httpsCallable.mockReturnValue(callable);
+        const input = {
+            appointmentId: 'appointment-1',
+            slot: { date: '2026-09-20', time: '18:00' },
+            assignedTrainer: null,
+            requestId: 'request-1234',
+            acknowledgedRestrictions: '2026-09-20|18:00|slot_full|4|4',
+        };
+
+        await rescheduleAppointmentFromAdmin(input);
+        await replaceRecurringSeriesScheduleFromAdmin({
+            appointmentId: 'appointment-1',
+            startSlot: input.slot,
+            endDate: '2026-10-04',
+            assignedTrainer: null,
+            requestId: 'request-5678',
+            acknowledgedRestrictions: input.acknowledgedRestrictions,
+        });
+        expect(callable).toHaveBeenNthCalledWith(1, input);
+        expect(callable).toHaveBeenNthCalledWith(2, expect.objectContaining({
+            requestId: 'request-5678',
+            acknowledgedRestrictions: input.acknowledgedRestrictions,
+        }));
+    });
 });

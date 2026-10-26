@@ -55,6 +55,12 @@ function isRestriction(value: unknown): value is AdminRestriction {
         && REASONS.has(item.reason);
 }
 
+/** `details` of a callable error (reason, overridable flags...). */
+export function getCallableErrorDetails(error: unknown): Record<string, unknown> | undefined {
+    const details = (error as { details?: unknown } | null)?.details;
+    return details && typeof details === 'object' ? details as Record<string, unknown> : undefined;
+}
+
 /** Reads the confirmation request from a callable error's `details`, if it is one. */
 export function parseAdminOverridePrompt(details: Record<string, unknown> | undefined): AdminOverridePrompt | undefined {
     if (details?.reason !== 'admin_override_required') return undefined;

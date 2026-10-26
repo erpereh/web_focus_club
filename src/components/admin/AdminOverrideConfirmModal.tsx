@@ -9,15 +9,39 @@ import {
     groupAdminRestrictions,
 } from '@/lib/admin-booking-overrides';
 
+export type AdminOverrideMode = 'create' | 'reschedule' | 'approve';
+
 export interface AdminOverrideConfirmModalProps {
     prompt: AdminOverridePrompt;
-    /** Serie recurrente: cambia los textos y avisa de que se crea todo o nada. */
+    /** Serie recurrente: cambia los textos y avisa de que se aplica todo o nada. */
     isSeries: boolean;
     totalSessions?: number;
+    /** Qué se confirma: crear (por defecto), modificar o aprobar. Solo cambia los textos. */
+    mode?: AdminOverrideMode;
+    /** La cita modificada sigue pendiente: aún no ocupa plaza. */
+    pendingNote?: boolean;
     saving: boolean;
     error?: string;
     onConfirm: (input: { fingerprint: string; confirmPastDate: boolean }) => void;
     onCancel: () => void;
+}
+
+const TITLES: Record<AdminOverrideMode, [single: string, series: string]> = {
+    create: ['La cita tiene restricciones', 'La serie tiene restricciones'],
+    reschedule: ['La nueva franja tiene restricciones', 'La nueva programación tiene restricciones'],
+    approve: ['La aprobación supera el aforo', 'La aprobación de la serie supera el aforo'],
+};
+
+function describeOverride(mode: AdminOverrideMode, isSeries: boolean, affected: number, total: number): string {
+    if (!isSeries) {
+        if (mode === 'reschedule') return 'La franja elegida no cumple las reglas normales de reserva. Puedes guardar el cambio igualmente como administrador.';
+        if (mode === 'approve') return 'La franja está completa. Puedes aprobar la cita igualmente como administrador.';
+        return 'La franja elegida no cumple las reglas normales de reserva. Puedes crearla igualmente como administrador.';
+    }
+    const sessions = `${affected} de ${total} sesiones no cumplen las reglas normales de reserva.`;
+    if (mode === 'reschedule') return `${sessions} Si confirmas, se guarda la nueva programación completa; si algo falla, no se cambia ninguna cita.`;
+    if (mode === 'approve') return `${sessions} Si confirmas, se aprueba la serie completa; si algo falla, no se aprueba ninguna cita.`;
+    return `${sessions} Si confirmas, se crea la serie completa; si algo falla, no se crea ninguna cita.`;
 }
 
 function formatLongDate(date: string): string {
@@ -35,6 +59,8 @@ export function AdminOverrideConfirmModal({
     prompt,
     isSeries,
     totalSessions,
+    mode = 'create',
+    pendingNote = false,
     saving,
     error,
     onConfirm,
@@ -70,12 +96,10 @@ export function AdminOverrideConfirmModal({
                 <header className="border-b border-white/10 p-5">
                     <h2 id="admin-override-title" className="flex items-center gap-2 text-lg font-bold text-[var(--color-text-primary)]">
                         <ShieldAlert className="h-5 w-5 text-amber-400" />
-                        {isSeries ? 'La serie tiene restricciones' : 'La cita tiene restricciones'}
+                        {TITLES[mode][isSeries ? 1 : 0]}
                     </h2>
                     <p id="admin-override-description" className="mt-1 text-sm text-[var(--color-text-secondary)]">
-                        {isSeries
-                            ? `${groups.length} de ${totalSessions ?? groups.length} sesiones no cumplen las reglas normales de reserva. Si confirmas, se crea la serie completa; si algo falla, no se crea ninguna cita.`
-                            : 'La franja elegida no cumple las reglas normales de reserva. Puedes crearla igualmente como administrador.'}
+                        {describeOverride(mode, isSeries, groups.length, totalSessions ?? groups.length)}
                     </p>
                 </header>
 
@@ -106,6 +130,12 @@ export function AdminOverrideConfirmModal({
                         ))}
                     </ul>
 
+                    {pendingNote && (
+                        <p className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-[var(--color-text-secondary)]">
+                            La cita sigue pendiente: no ocupa plaza hasta que se apruebe, y al aprobarla se volverá a pedir confirmación si la franja sigue completa.
+                        </p>
+                    )}
+
                     {prompt.requiresPastConfirmation && (
                         <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
                             <input
@@ -123,7 +153,7 @@ export function AdminOverrideConfirmModal({
                     )}
 
                     <p className="text-xs text-[var(--color-text-secondary)]">
-                        La excepción quedará registrada con tu usuario, la fecha y los motivos superados. Antes de crear se vuelve a validar todo en el servidor.
+                        La excepción quedará registrada con tu usuario, la fecha y los motivos superados. {mode === 'create' ? 'Antes de crear' : 'Antes de guardar'} se vuelve a validar todo en el servidor.
                     </p>
                 </div>
 

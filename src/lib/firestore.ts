@@ -760,13 +760,23 @@ export async function updateOwnAppointmentSlot(input: {
     await callable(input);
 }
 
-export interface AdminAppointmentRescheduleInput {
+/**
+ * Excepciones de aforo al modificar o aprobar: `acknowledgedRestrictions` es
+ * la huella que devolvió el servidor al pedir confirmación. `requestId` es
+ * opcional al modificar; se mantiene en reintentos y confirmaciones.
+ */
+export interface AdminRescheduleConfirmationFields {
+    requestId?: string;
+    acknowledgedRestrictions?: string;
+}
+
+export interface AdminAppointmentRescheduleInput extends AdminRescheduleConfirmationFields {
     appointmentId: string;
     slot: TimeSlot;
     assignedTrainer: string | null;
 }
 
-export interface AdminAppointmentRescheduleResult {
+export interface AdminAppointmentRescheduleResult extends AdminBookingResultFields {
     success: true;
     appointmentId: string;
     changed?: boolean;
@@ -784,14 +794,14 @@ export async function rescheduleAppointmentFromAdmin(
     return result.data;
 }
 
-export interface AdminRecurringSeriesScheduleReplacementInput {
+export interface AdminRecurringSeriesScheduleReplacementInput extends AdminRescheduleConfirmationFields {
     appointmentId: string;
     startSlot: TimeSlot;
     endDate: string;
     assignedTrainer: string | null;
 }
 
-export interface AdminRecurringSeriesScheduleReplacementResult {
+export interface AdminRecurringSeriesScheduleReplacementResult extends AdminBookingResultFields {
     success: true;
     seriesId: string;
     appointmentId: string;
@@ -1032,10 +1042,12 @@ export async function approveRecurringAppointmentSeriesFromAdmin(input: {
     seriesId: string;
     assignedTrainer?: string;
     sessionType?: string;
-}): Promise<{ success: boolean; seriesId: string; appointmentIds: string[] }> {
+    /** Huella de las franjas llenas que el admin ha confirmado superar. */
+    acknowledgedRestrictions?: string;
+}): Promise<{ success: boolean; seriesId: string; appointmentIds: string[] } & AdminBookingResultFields> {
     const callable = httpsCallable<
         typeof input,
-        { success: boolean; seriesId: string; appointmentIds: string[] }
+        { success: boolean; seriesId: string; appointmentIds: string[] } & AdminBookingResultFields
     >(firebaseFunctions, 'approveRecurringAppointmentSeriesFromAdmin');
     const result = await callable(input);
     return result.data;

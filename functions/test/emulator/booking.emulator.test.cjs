@@ -468,3 +468,179 @@ test("a pending customer request cancelled with charge keeps its reserved minute
   assert.equal((await docData("bonos/bono-1")).minutosRestantes, 450);
   assert.equal(await docData(`slot_occupancy/${DAY}_20:00`), undefined, "a pending request never held a seat");
 });
+
+// ------------------------------------------------------------ admin overrides when modifying and approving
+
+const { createAdminAppointmentRescheduleHandlers } = require("../../lib/adminAppointmentReschedule.js");
+const { createRecurringSeriesHandlers } = require("../../lib/recurringSeries.js");
+const { appointmentOccupancyKeys } = require("../../lib/slotOccupancy.js");
+const reschedule = createAdminAppointmentRescheduleHandlers({ db, requireAdmin: async () => undefined, getNowDate });
+const series = createRecurringSeriesHandlers({
+  db,
+  requireAdmin: async () => undefined,
+  getNowDate,
+  appointmentSlotKeys: (appointment) => new Set(appointmentOccupancyKeys(appointment)),
+  defaultServiceType: "Entrenamiento personal",
+});
+
+function addDays(date, days) {
+  const next = new Date(`${date}T12:00:00.000Z`);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next.toISOString().slice(0, 10);
+}
+
+function hourOccupancy(date, hour, count) {
+  return Object.fromEntries(["00", "15", "30", "45"].map((minutes) => [
+    `slot_occupancy/${date}_${hour}:${minutes}`, { date, time: `${hour}:${minutes}`, count },
+  ]));
+}
+
+async function hourCounts(date, hour) {
+  return Promise.all(["00", "15", "30", "45"].map(async (minutes) => (await docData(`slot_occupancy/${date}_${hour}:${minutes}`))?.count ?? 0));
+}
+
+async function logActions() {
+  return (await db.collection("activity_logs").get()).docs.map((snap) => snap.data().action);
+}
+
+function approvedAt(userId, date, time) {
+  const slot = { date, time };
+  return { userId, status: "approved", duration: "60", approvedSlot: slot, preferredSlots: [slot], date, time, assignedTrainer: null };
+}
+
+/** Resolves with the confirmation request a callable answers with. */
+function promptOf(promise) {
+  return promise.then(() => assert.fail("expected a confirmation request"), (error) => error.details);
+}
+
+test("modify override, full flow: pending moved into a full slot, then approved over capacity", async () => {
+  await resetDatabase();
+  await seed(baseDocuments(hourOccupancy(DAY, "10", 4)));
+  const booked = await booking.createAppointment(callable("user-1", {
+    duration: "60", preferredSlot: { date: DAY, time: "18:00" }, reason: "", appointmentType: "training",
+  }));
+  const id = booked.appointmentId ?? booked.id;
+  const move = { appointmentId: id, slot: { date: DAY, time: "10:00" }, assignedTrainer: null };
+
+  const prompt = await promptOf(reschedule.rescheduleAppointmentFromAdmin(callable("admin", move)));
+  assert.equal(prompt.reason, "admin_override_required");
+  await reschedule.rescheduleAppointmentFromAdmin(callable("admin", { ...move, acknowledgedRestrictions: prompt.fingerprint }));
+  assert.equal((await docData(`appointments/${id}`)).status, "pending");
+  assert.deepEqual(await hourCounts(DAY, "10"), [4, 4, 4, 4], "a pending appointment takes no seat");
+
+  // Approval asks again (approving is what takes the seat) and honours the admin's confirmation.
+  const approve = { appointmentId: id, status: "approved", expectedStatus: "pending" };
+  const refused = await settle(admin.updateAppointmentStatusFromAdmin(callable("admin", approve)));
+  assert.equal(refused.reason, "slot_full");
+  const approved = await admin.updateAppointmentStatusFromAdmin(callable("admin", { ...approve, allowOverCapacity: true }));
+  assert.equal(approved.overCapacity, true);
+  assert.deepEqual(await hourCounts(DAY, "10"), [5, 5, 5, 5]);
+  assert.equal((await docData(`appointments/${id}`)).status, "approved");
+  assert.equal((await docData("bonos/bono-1")).minutosRestantes, 420, "minutes are reserved once");
+  const actions = await logActions();
+  assert.ok(actions.includes("appointment_rescheduled_with_admin_override"));
+  assert.ok(actions.includes("appointment_approved_over_capacity"));
+});
+
+test("modify override, full flow: pending series moved into a full slot, then approved over capacity", async () => {
+  await resetDatabase();
+  const week = addDays(DAY, 7);
+  const occurrence = (index, date) => ({
+    userId: "user-1", name: "Cliente Uno", email: "uno@example.com", serviceType: "Entrenamiento personal",
+    sessionType: "Entrenamiento personal", duration: "60", status: "pending", assignedTrainer: null,
+    preferredSlots: [{ date, time: "18:00" }], date, time: "18:00", reason: "",
+    recurrenceSeriesId: "series-1", recurrenceIndex: index, bonoId: "bono-1",
+    minutesDeducted: true, minutesDeductedAmount: 60, minutesDeductedAt: "2026-01-01T10:00:00.000Z",
+    minutesRefunded: false, minutesRefundedAmount: null, minutesRefundedAt: null, minutesRefundReason: null,
+    createdAt: "2026-01-01T10:00:00.000Z",
+  });
+  await seed(baseDocuments({
+    ...hourOccupancy(DAY, "10", 4),
+    "bonos/bono-1": {
+      userId: "user-1", tamano: 480, minutosTotales: 480, minutosRestantes: 360, estado: "activo",
+      fechaExpiracion: "2099-12-31T22:59:59.000Z", historial: [],
+    },
+    "services/service-1": { title: "Entrenamiento personal", active: true },
+    "appointment_recurrences/series-1": {
+      userId: "user-1", serviceType: "Entrenamiento personal", duration: "60", assignedTrainer: null,
+      startDate: DAY, startTime: "18:00", intervalDays: 7, endDate: week, occurrenceCount: 2, totalMinutes: 120,
+      bonoId: "bono-1", status: "pending", origin: "customer",
+    },
+    "appointments/occ-0": occurrence(0, DAY),
+    "appointments/occ-1": occurrence(1, week),
+  }));
+  const move = { appointmentId: "occ-0", startSlot: { date: DAY, time: "10:00" }, endDate: week, assignedTrainer: null };
+  const movePrompt = await promptOf(reschedule.replaceRecurringSeriesScheduleFromAdmin(callable("admin", move)));
+  await reschedule.replaceRecurringSeriesScheduleFromAdmin(callable("admin", { ...move, acknowledgedRestrictions: movePrompt.fingerprint }));
+  assert.deepEqual(await hourCounts(DAY, "10"), [4, 4, 4, 4]);
+
+  const approvePrompt = await promptOf(series.approveRecurringAppointmentSeriesFromAdmin(callable("admin", { seriesId: "series-1" })));
+  assert.equal(approvePrompt.reason, "admin_override_required");
+  assert.deepEqual(approvePrompt.restrictions.map((item) => item.date), [DAY]);
+  await series.approveRecurringAppointmentSeriesFromAdmin(callable("admin", {
+    seriesId: "series-1", acknowledgedRestrictions: approvePrompt.fingerprint,
+  }));
+  assert.equal((await docData("appointment_recurrences/series-1")).status, "approved");
+  assert.deepEqual(await hourCounts(DAY, "10"), [5, 5, 5, 5]);
+  assert.deepEqual(await hourCounts(week, "10"), [1, 1, 1, 1]);
+  assert.equal((await docData("bonos/bono-1")).minutosRestantes, 360);
+  const actions = await logActions();
+  assert.ok(actions.includes("recurring_series_schedule_replaced_with_admin_override"));
+  assert.ok(actions.includes("recurring_series_approved_with_admin_override"));
+});
+
+test("modify override, concurrency: two admins race for the last seat and only one gets it unconfirmed", async () => {
+  await resetDatabase();
+  await seed(baseDocuments({
+    ...hourOccupancy(DAY, "10", 3),
+    ...hourOccupancy(DAY, "15", 1),
+    ...hourOccupancy(DAY, "16", 1),
+    "appointments/a1": approvedAt("user-1", DAY, "15:00"),
+    "appointments/a2": approvedAt("user-2", DAY, "16:00"),
+  }));
+  const results = await Promise.all(["a1", "a2"].map((appointmentId) => settle(reschedule.rescheduleAppointmentFromAdmin(callable("admin", {
+    appointmentId, slot: { date: DAY, time: "10:00" }, assignedTrainer: null,
+  })))));
+  assert.deepEqual(results.map((result) => (result.ok ? "ok" : result.reason)).sort(), ["admin_override_required", "ok"]);
+  assert.deepEqual(await hourCounts(DAY, "10"), [4, 4, 4, 4], "never over capacity without a confirmation");
+});
+
+test("modify override, concurrency: confirmations made on the same count cannot both pass", async () => {
+  await resetDatabase();
+  await seed(baseDocuments({
+    ...hourOccupancy(DAY, "10", 4),
+    ...hourOccupancy(DAY, "15", 1),
+    ...hourOccupancy(DAY, "16", 1),
+    "appointments/a1": approvedAt("user-1", DAY, "15:00"),
+    "appointments/a2": approvedAt("user-2", DAY, "16:00"),
+  }));
+  const requestFor = (appointmentId, extra = {}) => callable("admin", {
+    appointmentId, slot: { date: DAY, time: "10:00" }, assignedTrainer: null, ...extra,
+  });
+  const prompts = await Promise.all(["a1", "a2"].map((id) => promptOf(reschedule.rescheduleAppointmentFromAdmin(requestFor(id)))));
+  assert.equal(prompts[0].fingerprint, prompts[1].fingerprint, "both admins confirmed the same 4/4 slot");
+  const results = await Promise.all(["a1", "a2"].map((id, index) => reschedule.rescheduleAppointmentFromAdmin(
+    requestFor(id, { acknowledgedRestrictions: prompts[index].fingerprint }),
+  ).then((value) => ({ ok: true, value }), (error) => ({ ok: false, details: error.details }))));
+  assert.equal(results.filter((result) => result.ok).length, 1);
+  const loser = results.find((result) => !result.ok);
+  assert.equal(loser.details.reason, "admin_override_required");
+  assert.equal(loser.details.changed, true, "the second admin must review the new count");
+  assert.deepEqual(await hourCounts(DAY, "10"), [5, 5, 5, 5]);
+});
+
+test("modify override, concurrency: a double click with the same requestId moves the seat once", async () => {
+  await resetDatabase();
+  await seed(baseDocuments({
+    ...hourOccupancy(DAY, "15", 1),
+    "appointments/a1": approvedAt("user-1", DAY, "15:00"),
+  }));
+  const request = callable("admin", {
+    appointmentId: "a1", slot: { date: DAY, time: "10:00" }, assignedTrainer: null, requestId: `emulator-move-${Date.now()}`,
+  });
+  const results = await Promise.all([1, 2].map(() => reschedule.rescheduleAppointmentFromAdmin(request)));
+  assert.equal(results.filter((result) => result.replayed).length, 1);
+  assert.deepEqual(await hourCounts(DAY, "10"), [1, 1, 1, 1]);
+  assert.deepEqual(await hourCounts(DAY, "15"), [0, 0, 0, 0]);
+  assert.equal((await logActions()).filter((action) => action === "appointment_rescheduled_by_admin").length, 1);
+});

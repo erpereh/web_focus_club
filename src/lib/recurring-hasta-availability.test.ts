@@ -76,6 +76,18 @@ describe('evaluateRecurringHastaOptions', () => {
         expect(statuses[2]).toMatchObject({ availability: 'full', problemDate: '2026-09-27' });
     });
 
+    it('lets admins keep full options (confirmed later) while blocked ones stay closed', () => {
+        const full = evaluate({ occupancy: { '2026-09-27_11:00': 5 }, allowFullCapacity: true });
+        expect(full.map((status) => status.availability)).toEqual(['available', 'available', 'available']);
+
+        const blocked = evaluate({
+            occupancy: { '2026-09-25_11:00': 5 },
+            blockedKeys: new Set(['2026-09-27_11:00']),
+            allowFullCapacity: true,
+        });
+        expect(blocked.map((status) => status.availability)).toEqual(['available', 'blocked', 'blocked']);
+    });
+
     it('propagates an intermediate client conflict to later options', () => {
         const statuses = evaluate({
             userBookedSlotKeys: new Set(['2026-09-27_11:00']),

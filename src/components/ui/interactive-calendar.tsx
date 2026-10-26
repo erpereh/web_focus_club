@@ -38,6 +38,11 @@ export interface InteractiveCalendarProps {
   occupancyCreditsByKey?: Map<string, number>;
   /** Allows Admin historical corrections while keeping Portal defaults unchanged. */
   allowPastDates?: boolean;
+  /**
+   * Admin only: full slots stay selectable (still shown as full); the server
+   * then asks the admin to confirm going over capacity. Portal never sets it.
+   */
+  allowFullSlots?: boolean;
   disabled?: boolean;
   showSelectedSlotSummary?: boolean;
   availabilityLabelMode?: 'remaining' | 'occupancy';
@@ -93,6 +98,7 @@ export function InteractiveCalendar({
   minDate,
   occupancyCreditsByKey,
   allowPastDates = false,
+  allowFullSlots = false,
   disabled = false,
   showSelectedSlotSummary = true,
   availabilityLabelMode = 'remaining',
@@ -233,6 +239,9 @@ export function InteractiveCalendar({
     if (allowPastDates && isHistoricalSlot(day, time)) {
       return { disabled: false, reason: null, occupancy: 0 };
     }
+    if (allowFullSlots && availability.reason === 'slot_full') {
+      return { ...availability, disabled: false };
+    }
     return availability;
   };
 
@@ -274,7 +283,7 @@ export function InteractiveCalendar({
     timeSlots.forEach((time) => {
       const result = getDisplayAvailability(day, time);
       if (result.reason === 'slot_full') hasFull = true;
-      if (!result.disabled && result.occupancy > 0) hasPartial = true;
+      else if (!result.disabled && result.occupancy > 0) hasPartial = true;
     });
     return { hasPartial, hasFull };
   };
@@ -438,7 +447,7 @@ export function InteractiveCalendar({
                 const isBlocked = availability.reason === 'slot_blocked';
                 const isConflict = availability.reason === 'appointment_conflict';
                 const isFull = availability.reason === 'slot_full';
-                const isPartial = !availability.disabled && availability.occupancy > 0;
+                const isPartial = !isFull && !availability.disabled && availability.occupancy > 0;
                 const unavailable = disabled || (!allowPastDates && past) || availability.disabled;
                 const remaining = Math.max(0, siteConfig.maxCapacity - availability.occupancy);
                 const availabilityLabel = (!allowPastDates && past) || isConflict
@@ -446,7 +455,7 @@ export function InteractiveCalendar({
                   : isBlocked
                     ? 'Bloqueada'
                     : isFull
-                      ? 'Completa'
+                      ? allowFullSlots ? `Completa ${availability.occupancy}/${siteConfig.maxCapacity}` : 'Completa'
                       : availability.occupancy === 0
                         ? 'Libre'
                         : availabilityLabelMode === 'occupancy'
@@ -470,7 +479,7 @@ export function InteractiveCalendar({
                       isConflict && 'border-blue-500/30 bg-blue-500/10 text-blue-300',
                       isFull && 'border-red-500/30 bg-red-500/10 text-red-300',
                       isPartial && !selected && 'border-amber-400/30 bg-amber-400/10 text-amber-200 hover:border-amber-400/60 hover:bg-amber-400/15',
-                      !unavailable && !isPartial && !selected && 'border-[var(--color-border-base)] bg-[var(--color-accent-val)]/5 text-[var(--color-text-primary)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-accent-val)]/10',
+                      !unavailable && !isPartial && !isFull && !selected && 'border-[var(--color-border-base)] bg-[var(--color-accent-val)]/5 text-[var(--color-text-primary)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-accent-val)]/10',
                       selected && 'border-[var(--color-accent-val)] bg-[var(--color-accent-val)]/20 text-[var(--color-text-primary)] shadow-emerald-glow ring-1 ring-[var(--color-accent-border)]',
                     )}
                   >

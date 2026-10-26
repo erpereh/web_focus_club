@@ -27,6 +27,7 @@ import {
 import { newNotificationOperation, sessionsOf, writeNotificationOutbox } from "./notifications/outbox.js";
 import { parseOccupancyCount } from "./slotOccupancy.js";
 import {
+  type AdminRestriction,
   authorizeAdminOverride,
   bookingPayloadHash,
   collectAdminSlotRestrictions,
@@ -752,6 +753,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
       if (!request.auth) throwHttps("permission-denied", "Debes iniciar sesion como admin.");
       await requireAdmin(request.auth.uid);
       const adminUid = request.auth.uid;
+      const adminEmail = request.auth.token.email ?? "";
       const seriesId = seriesIdFrom(request.data);
       const assignedTrainer = isRecord(request.data) ? optionalText(request.data, "assignedTrainer", 128) : "";
       const sessionType = isRecord(request.data) ? optionalText(request.data, "sessionType", 180) : "";
@@ -884,24 +886,40 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           appointmentSlotKeys(appointment).forEach((key) => userSlotKeys.add(key));
         });
         const internalKeys = new Set<string>();
+        // Full sessions are collected for the admin to confirm; every other rule stays hard.
+        const restrictions: AdminRestriction[] = [];
         prepared.forEach((occurrence) => {
           if (!doesSessionFitWithinSchedule(config, occurrence.slot.time, durationMinutes)) {
             throwHttps("failed-precondition", "Una cita de la serie queda fuera del horario disponible.");
           }
-          occurrence.keys.forEach((key) => {
+          const counts = occurrence.keys.map((key) => {
             if (blockedKeys.has(key)) throwHttps("failed-precondition", "Una franja de la serie esta bloqueada.");
             if (userSlotKeys.has(key) || internalKeys.has(key)) {
               throwHttps("failed-precondition", "Una franja de la serie entra en conflicto con otra cita.");
             }
-            const current = assertOccupancyCount(occupancyByKey.get(key));
-            if (current + 1 > config.maxCapacity) {
-              throwHttps("failed-precondition", "Una franja de la serie esta completa.");
-            }
             internalKeys.add(key);
+            return assertOccupancyCount(occupancyByKey.get(key));
           });
+          if (counts.some((current) => current + 1 > config.maxCapacity)) {
+            restrictions.push({
+              ...occurrence.slot,
+              reason: "slot_full",
+              occupancy: Math.max(...counts),
+              maxCapacity: config.maxCapacity,
+            });
+          }
         });
 
         const now = nowDate.toISOString();
+        const adminOverride = authorizeAdminOverride({
+          restrictions,
+          request: parseAdminOverrideRequest(isRecord(request.data) ? request.data : {}),
+          status: "approved",
+          adminUid,
+          adminEmail,
+          now,
+          operation: "approve",
+        });
         const operation = newNotificationOperation(db);
         prepared.forEach((occurrence) => {
           const patch: Record<string, unknown> = {
@@ -988,8 +1006,25 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           createdAt: now,
           timestamp: now,
         });
+        if (adminOverride) {
+          transaction.create(db.collection("activity_logs").doc(), {
+            action: "recurring_series_approved_with_admin_override",
+            adminUid,
+            adminEmail,
+            seriesId,
+            targetUid: series.userId,
+            affectedAppointmentIds: prepared.map((occurrence) => occurrence.id),
+            restrictions: adminOverride.restrictions,
+            createdAt: now,
+            timestamp: now,
+          });
+        }
 
-        return { seriesId, appointmentIds: prepared.map((occurrence) => occurrence.id) };
+        return {
+          seriesId,
+          appointmentIds: prepared.map((occurrence) => occurrence.id),
+          ...(adminOverride ? { overriddenRestrictions: adminOverride.restrictions } : {}),
+        };
       });
 
       return { success: true, ...result };

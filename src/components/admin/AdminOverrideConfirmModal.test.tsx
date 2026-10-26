@@ -81,4 +81,23 @@ describe('AdminOverrideConfirmModal', () => {
         expect(screen.getByRole('checkbox')).not.toBeChecked();
         expect(screen.getByRole('button', { name: 'Confirmar' })).toBeDisabled();
     });
+
+    it('words reschedules and approvals as saving, not creating', () => {
+        const fullPrompt: AdminOverridePrompt = { ...seriesPrompt, restrictions: [seriesPrompt.restrictions[1]] };
+        const { rerender } = render(
+            <AdminOverrideConfirmModal prompt={fullPrompt} mode="reschedule" isSeries totalSessions={3} pendingNote saving={false} onConfirm={vi.fn()} onCancel={vi.fn()} />,
+        );
+        const dialog = screen.getByRole('alertdialog');
+        expect(dialog).toHaveTextContent('La nueva programación tiene restricciones');
+        expect(dialog).toHaveTextContent('1 de 3 sesiones');
+        expect(dialog).toHaveTextContent('no se cambia ninguna cita');
+        expect(dialog).toHaveTextContent('no ocupa plaza hasta que se apruebe');
+        expect(dialog).toHaveTextContent('Antes de guardar');
+        expect(dialog).not.toHaveTextContent(/crea/);
+
+        rerender(<AdminOverrideConfirmModal prompt={fullPrompt} mode="approve" isSeries totalSessions={3} saving={false} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+        expect(dialog).toHaveTextContent('La aprobación de la serie supera el aforo');
+        expect(dialog).toHaveTextContent('no se aprueba ninguna cita');
+        expect(dialog).not.toHaveTextContent('no ocupa plaza');
+    });
 });

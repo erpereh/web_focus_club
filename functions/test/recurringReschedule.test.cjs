@@ -332,6 +332,18 @@ assert.equal(fullLowerSeriesOccurrence.ok, false);
 assert.equal(fullLowerSeriesOccurrence.error.reason, "slot_full");
 assert.equal(fullLowerSeriesOccurrence.error.problematicAppointmentId, "s1");
 
+// Leaving slots already over capacity (e.g. after an admin exception) is never refused:
+// only seats the change adds are checked against the maximum.
+const overCapacityOrigin = emptyOccupancy(following.draft);
+following.draft.occupancyKeys
+  .filter((key) => (following.draft.occupancyDelta.get(key) ?? 0) < 0)
+  .forEach((key) => overCapacityOrigin.set(key, siteConfig.maxCapacity + 3));
+assert.deepEqual(validate(following.draft, { occupancyByKey: overCapacityOrigin }).ok, true);
+// The target is still refused when it is full.
+const fullTarget = new Map(overCapacityOrigin);
+fullTarget.set(following.draft.affected[0].newKeys[0], siteConfig.maxCapacity);
+assert.equal(validate(following.draft, { occupancyByKey: fullTarget }).error.reason, "slot_full");
+
 const externalSeriesConflict = occurrence("external-series-conflict", 99, "2026-09-18", "pending", "19:00");
 externalSeriesConflict.data.recurrenceSeriesId = "other-series";
 const conflictingLowerSeriesOccurrence = validateSeriesDraft({

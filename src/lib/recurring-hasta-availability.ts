@@ -52,6 +52,7 @@ function evaluateOccurrence(input: {
     now: Date;
     minBookingNoticeHours: number;
     blockSameDayBooking: boolean;
+    allowFullCapacity: boolean;
 }): Omit<RecurringHastaOptionStatus, 'option'> | null {
     const config = normalizeSiteConfig(input.siteConfig);
     const maxCapacity = config.maxCapacity;
@@ -115,7 +116,7 @@ function evaluateOccurrence(input: {
         0,
         (input.occupancy[key] ?? 0) - (input.occupancyCreditsByKey.get(key) ?? 0),
     ));
-    if (effectiveCounts.some((count) => count >= maxCapacity)) {
+    if (!input.allowFullCapacity && effectiveCounts.some((count) => count >= maxCapacity)) {
         return {
             availability: 'full',
             problemDate: input.date,
@@ -152,6 +153,8 @@ export function evaluateRecurringHastaOptions(input: {
     minBookingNoticeHours?: number;
     /** site_config.blockSameDayBooking. Admin callers omit it. */
     blockSameDayBooking?: boolean;
+    /** Admin only: full sessions do not close an option; the server asks to confirm them. */
+    allowFullCapacity?: boolean;
 }): RecurringHastaOptionStatus[] {
     let firstProblem: Omit<RecurringHastaOptionStatus, 'option'> | null = null;
     const checkedDates = new Set<string>();
@@ -174,6 +177,7 @@ export function evaluateRecurringHastaOptions(input: {
                     now: input.now,
                     minBookingNoticeHours: input.minBookingNoticeHours ?? 0,
                     blockSameDayBooking: input.blockSameDayBooking === true,
+                    allowFullCapacity: input.allowFullCapacity === true,
                 });
                 if (firstProblem) break;
             }

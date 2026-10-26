@@ -143,6 +143,7 @@ import {
 import { getAdminCreateSlotStatus } from '@/lib/admin-slot-status';
 import {
   type AdminOverridePrompt,
+  getCallableErrorDetails,
   isValidAdminSlotTime,
   newAdminBookingRequestId,
   parseAdminOverridePrompt,
@@ -463,12 +464,6 @@ function pendingRefundsNotice(pending: PendingRefund[] | undefined): string | nu
   return `Atención: ${total} min de ${pending.length} cita(s) no se han podido devolver automáticamente `
     + 'y quedan pendientes de revisión manual (registro de auditoría de borrados).\n\n'
     + pending.map((item) => `- ${item.appointmentId}: ${item.minutes} min. ${item.reason}`).join('\n');
-}
-
-/** `details` of a callable error (reason, overridable flags...). */
-function getCallableErrorDetails(error: unknown): Record<string, unknown> | undefined {
-  const details = (error as { details?: unknown } | null)?.details;
-  return details && typeof details === 'object' ? details as Record<string, unknown> : undefined;
 }
 
 function getAppointmentPrimarySlot(appointment: Appointment): TimeSlot | undefined {
@@ -1133,6 +1128,8 @@ export default function AdminPage() {
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
   const [seriesApprovalTrainer, setSeriesApprovalTrainer] = useState('');
   const [seriesActionBusy, setSeriesActionBusy] = useState(false);
+  const [seriesApprovalPrompt, setSeriesApprovalPrompt] = useState<AdminOverridePrompt | null>(null);
+  const [seriesApprovalOverrideError, setSeriesApprovalOverrideError] = useState('');
   const [statusActionBusyId, setStatusActionBusyId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
   const [cancelError, setCancelError] = useState('');
@@ -2153,20 +2150,39 @@ export default function AdminPage() {
     }
   };
 
-  const handleApproveRecurringSeries = async () => {
-    if (!selectedSeriesId) return;
+  /** With `confirmation` it carries the full slots the admin accepted to go over. */
+  const handleApproveRecurringSeries = async (confirmation?: { fingerprint: string }) => {
+    if (!selectedSeriesId || seriesActionBusy) return;
     setSeriesActionBusy(true);
+    setSeriesApprovalOverrideError('');
     try {
-      await approveRecurringAppointmentSeriesFromAdminFS({
+      const result = await approveRecurringAppointmentSeriesFromAdminFS({
         seriesId: selectedSeriesId,
         assignedTrainer: seriesApprovalTrainer || undefined,
+        ...(confirmation ? { acknowledgedRestrictions: confirmation.fingerprint } : {}),
       });
       await refreshData();
+      setSeriesApprovalPrompt(null);
       setShowSeriesApprovalModal(false);
       setSelectedSeriesId(null);
       setSeriesApprovalTrainer('');
+      if (result.overriddenRestrictions?.length) {
+        const t = toast({
+          title: 'Serie aprobada superando el aforo',
+          description: 'La excepción ha quedado registrada en el historial de actividad.',
+        });
+        setTimeout(() => t.dismiss(), 4500);
+      }
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'No se pudo aprobar la serie.');
+      // Full slots (new, or changed since the popup opened): show/refresh the popup.
+      const prompt = parseAdminOverridePrompt(getCallableErrorDetails(error));
+      if (prompt) {
+        setSeriesApprovalPrompt(prompt);
+        return;
+      }
+      const message = error instanceof Error ? error.message : 'No se pudo aprobar la serie.';
+      if (confirmation) setSeriesApprovalOverrideError(message);
+      else alert(message);
     } finally {
       setSeriesActionBusy(false);
     }
@@ -8866,7 +8882,7 @@ export default function AdminPage() {
                           variant="cta"
                           icon={<Check className="w-4 h-4" />}
                           disabled={seriesActionBusy}
-                          onClick={handleApproveRecurringSeries}
+                          onClick={() => { void handleApproveRecurringSeries(); }}
                         >
                           {seriesActionBusy ? 'Aprobando...' : 'Aprobar serie'}
                         </PremiumButton>
@@ -8874,6 +8890,25 @@ export default function AdminPage() {
                     </GlassCard>
                   </motion.div>
                 </motion.div>
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {showSeriesApprovalModal && selectedSeriesId && seriesApprovalPrompt && (
+                <AdminOverrideConfirmModal
+                  prompt={seriesApprovalPrompt}
+                  mode="approve"
+                  isSeries
+                  totalSessions={appointments.filter((item) =>
+                    item.recurrenceSeriesId === selectedSeriesId && item.status === 'pending').length}
+                  saving={seriesActionBusy}
+                  error={seriesApprovalOverrideError}
+                  onConfirm={({ fingerprint }) => { void handleApproveRecurringSeries({ fingerprint }); }}
+                  onCancel={() => {
+                    setSeriesApprovalPrompt(null);
+                    setSeriesApprovalOverrideError('');
+                  }}
+                />
               )}
             </AnimatePresence>
 
@@ -9110,24 +9145,36 @@ export default function AdminPage() {
                       setShowEditSlotModal(false);
                       setSelectedAppointmentId(null);
                     }}
-                    onSave={async ({ slot, scope, assignedTrainer, endDate }) => {
+                    onSave={async ({ slot, scope, assignedTrainer, endDate, requestId, acknowledgedRestrictions }) => {
+                      // Same requestId across retries; the fingerprint only after the admin confirmed full slots.
+                      const confirmationFields = { requestId, ...(acknowledgedRestrictions ? { acknowledgedRestrictions } : {}) };
+                      let result: { overriddenRestrictions?: unknown[] };
                       if (scope === 'series') {
                         if (!endDate) throw new Error('Elige una fecha final disponible para la serie.');
-                        await replaceRecurringSeriesScheduleFromAdminFS({
+                        result = await replaceRecurringSeriesScheduleFromAdminFS({
                           appointmentId: selectedAppointmentId,
                           startSlot: slot,
                           endDate,
                           assignedTrainer,
+                          ...confirmationFields,
                         });
                       } else {
-                        await rescheduleAppointmentFromAdminFS({
+                        result = await rescheduleAppointmentFromAdminFS({
                           appointmentId: selectedAppointmentId,
                           slot,
                           assignedTrainer,
+                          ...confirmationFields,
                         });
                       }
                       setShowEditSlotModal(false);
                       setSelectedAppointmentId(null);
+                      if (result.overriddenRestrictions?.length) {
+                        const t = toast({
+                          title: 'Cita modificada con excepciones',
+                          description: 'La excepción de aforo ha quedado registrada en el historial de actividad.',
+                        });
+                        setTimeout(() => t.dismiss(), 4500);
+                      }
                     }}
                   />
                 );

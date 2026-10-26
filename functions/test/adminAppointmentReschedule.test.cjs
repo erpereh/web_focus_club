@@ -735,7 +735,22 @@ test("admin single cannot carry an unchanged inactive trainer from a historical 
   assertNoWrites(db, before);
 });
 
-test("admin single validates a pending future target at capacity and performs no write", async () => {
+/** Expects the admin confirmation request and returns its details. */
+async function expectOverridePrompt(promise) {
+  const error = await promise.then(
+    () => assert.fail("expected an admin confirmation request"),
+    (caught) => caught,
+  );
+  assert.equal(error.code, "failed-precondition");
+  assert.equal(error.details.reason, "admin_override_required");
+  return error.details;
+}
+
+function writesTo(db, prefix) {
+  return db.operations.filter((operation) => operation.type === "write" && operation.target.startsWith(prefix));
+}
+
+test("admin single pending move to a full slot needs confirmation, then keeps the seat count untouched", async () => {
   const documents = {
     "appointments/pending-1": futurePendingAppointment(),
     "trainers/trainer-1": { uid: "trainer-1", active: true },
@@ -744,18 +759,205 @@ test("admin single validates a pending future target at capacity and performs no
   addOccupancy(documents, "2026-09-08", "11:00", 2);
   const db = new FakeFirestore(documents);
   const before = snapshotDocuments(db);
+  const data = {
+    appointmentId: "pending-1",
+    slot: { date: "2026-09-08", time: "11:00" },
+    assignedTrainer: "trainer-1",
+  };
+  const prompt = await expectOverridePrompt(createHandlers(db).rescheduleAppointmentFromAdmin({
+    auth: { uid: "admin-1", token: { email: "admin@example.com" } },
+    data,
+  }));
+  assert.deepEqual(prompt.restrictions, [
+    { date: "2026-09-08", time: "11:00", reason: "slot_full", occupancy: 2, maxCapacity: 2 },
+  ]);
+  assert.equal(prompt.changed, false);
+  assertNoWrites(db, before);
+
+  const result = await createHandlers(db).rescheduleAppointmentFromAdmin({
+    auth: { uid: "admin-1", token: { email: "admin@example.com" } },
+    data: { ...data, acknowledgedRestrictions: prompt.fingerprint },
+  });
+  assert.equal(result.success, true);
+  assert.deepEqual(result.overriddenRestrictions, prompt.restrictions);
+  const updated = db.documents.get("appointments/pending-1");
+  assert.equal(updated.status, "pending");
+  assert.deepEqual(updated.preferredSlots, [{ date: "2026-09-08", time: "11:00" }]);
+  // A pending appointment takes no seat until it is approved.
+  assert.equal(writesTo(db, "slot_occupancy/").length, 0);
+  const log = activityLog(db, "appointment_rescheduled_with_admin_override");
+  assert.equal(log.adminEmail, "admin@example.com");
+  assert.equal(log.status, "pending");
+  assert.deepEqual(log.restrictions, prompt.restrictions);
+});
+
+test("admin single approved move to a full slot is over capacity only after an up-to-date confirmation", async () => {
+  const documents = {
+    "appointments/approved-1": futurePendingAppointment({
+      status: "approved",
+      approvedSlot: { date: "2026-09-07", time: "10:00" },
+    }),
+    "trainers/trainer-1": { uid: "trainer-1", active: true },
+    "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 },
+  };
+  addOccupancy(documents, "2026-09-07", "10:00", 1);
+  addOccupancy(documents, "2026-09-08", "11:00", 2);
+  const data = {
+    appointmentId: "approved-1",
+    slot: { date: "2026-09-08", time: "11:00" },
+    assignedTrainer: "trainer-1",
+  };
+  const db = new FakeFirestore(documents);
+  const prompt = await expectOverridePrompt(createHandlers(db).rescheduleAppointmentFromAdmin({
+    auth: { uid: "admin-1", token: {} },
+    data,
+  }));
+  assert.deepEqual(prompt.restrictions, [
+    { date: "2026-09-08", time: "11:00", reason: "slot_full", occupancy: 2, maxCapacity: 2 },
+  ]);
+
+  // Another booking filled the slot further after the prompt: the old confirmation is stale.
+  slotKeys("2026-09-08", "11:00").forEach((key) => { db.documents.get(`slot_occupancy/${key}`).count = 3; });
+  const before = snapshotDocuments(db);
+  db.operations = [];
+  const stale = await expectOverridePrompt(createHandlers(db).rescheduleAppointmentFromAdmin({
+    auth: { uid: "admin-1", token: {} },
+    data: { ...data, acknowledgedRestrictions: prompt.fingerprint },
+  }));
+  assert.equal(stale.changed, true);
+  assert.equal(stale.restrictions[0].occupancy, 3);
+  assertNoWrites(db, before);
+
+  const result = await createHandlers(db).rescheduleAppointmentFromAdmin({
+    auth: { uid: "admin-1", token: {} },
+    data: { ...data, acknowledgedRestrictions: stale.fingerprint },
+  });
+  assert.deepEqual(result.overriddenRestrictions, stale.restrictions);
+  slotKeys("2026-09-08", "11:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 4));
+  slotKeys("2026-09-07", "10:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 0));
+  assert.deepEqual(db.documents.get("appointments/approved-1").approvedSlot, { date: "2026-09-08", time: "11:00" });
+  assert.ok(activityLog(db, "appointment_rescheduled_by_admin"));
+  assert.ok(activityLog(db, "appointment_rescheduled_with_admin_override"));
+});
+
+test("admin single leaving or shifting inside a slot already over capacity needs no confirmation", async (t) => {
+  for (const [label, target, expectedOld] of [
+    ["moving out", { date: "2026-09-08", time: "11:00" }, 4],
+    ["overlapping shift", { date: "2026-09-07", time: "10:30" }, undefined],
+  ]) {
+    await t.test(label, async () => {
+      const documents = {
+        "appointments/approved-1": futurePendingAppointment({
+          status: "approved",
+          approvedSlot: { date: "2026-09-07", time: "10:00" },
+        }),
+        "trainers/trainer-1": { uid: "trainer-1", active: true },
+        "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 },
+      };
+      addOccupancy(documents, "2026-09-07", "10:00", 5);
+      const db = new FakeFirestore(documents);
+      const result = await createHandlers(db).rescheduleAppointmentFromAdmin({
+        auth: { uid: "admin-1", token: {} },
+        data: { appointmentId: "approved-1", slot: target, assignedTrainer: "trainer-1" },
+      });
+      assert.equal(result.success, true);
+      assert.equal(result.overriddenRestrictions, undefined);
+      assert.equal(activityLog(db, "appointment_rescheduled_with_admin_override"), undefined);
+      if (expectedOld !== undefined) {
+        slotKeys("2026-09-07", "10:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, expectedOld));
+      } else {
+        // 10:30-10:45 keep the seat (delta 0, still 5/2); 10:00-10:15 release it; 11:00-11:15 take it.
+        assert.equal(db.documents.get("slot_occupancy/2026-09-07_10:30").count, 5);
+        assert.equal(db.documents.get("slot_occupancy/2026-09-07_10:00").count, 4);
+        assert.equal(db.documents.get("slot_occupancy/2026-09-07_11:00").count, 1);
+      }
+    });
+  }
+});
+
+test("admin single confirmation never overrides blocked slots or customer overlaps", async (t) => {
+  const cases = [
+    ["blocked", (documents) => {
+      documents["blocked_slots/block"] = { date: "2026-09-08", time: "11:00" };
+    }, "slot_blocked"],
+    ["customer overlap", (documents) => {
+      documents["appointments/other"] = futurePendingAppointment({
+        preferredSlots: [{ date: "2026-09-08", time: "11:00" }],
+        date: "2026-09-08",
+        time: "11:00",
+      });
+    }, "appointment_conflict"],
+  ];
+  for (const [label, mutate, reason] of cases) {
+    await t.test(label, async () => {
+      const documents = {
+        "appointments/pending-1": futurePendingAppointment(),
+        "trainers/trainer-1": { uid: "trainer-1", active: true },
+        "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 },
+      };
+      addOccupancy(documents, "2026-09-08", "11:00", 2);
+      mutate(documents);
+      const db = new FakeFirestore(documents);
+      const before = snapshotDocuments(db);
+      await assert.rejects(
+        createHandlers(db).rescheduleAppointmentFromAdmin({
+          auth: { uid: "admin-1", token: {} },
+          data: {
+            appointmentId: "pending-1",
+            slot: { date: "2026-09-08", time: "11:00" },
+            assignedTrainer: "trainer-1",
+            acknowledgedRestrictions: "2026-09-08|11:00|slot_full|2|2",
+          },
+        }),
+        (error) => error.code === "failed-precondition" && error.details.reason === reason,
+      );
+      assertNoWrites(db, before);
+    });
+  }
+});
+
+test("admin single requestId replays an applied change once and refuses reuse with other data", async () => {
+  const documents = {
+    "appointments/approved-1": futurePendingAppointment({
+      status: "approved",
+      approvedSlot: { date: "2026-09-07", time: "10:00" },
+    }),
+    "trainers/trainer-1": { uid: "trainer-1", active: true },
+    "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 },
+  };
+  addOccupancy(documents, "2026-09-07", "10:00", 1);
+  const db = new FakeFirestore(documents);
+  const data = {
+    appointmentId: "approved-1",
+    slot: { date: "2026-09-08", time: "11:00" },
+    assignedTrainer: "trainer-1",
+    requestId: "reschedule-request-1",
+  };
+  const first = await createHandlers(db).rescheduleAppointmentFromAdmin({ auth: { uid: "admin-1", token: {} }, data });
+  assert.equal(first.replayed, undefined);
+  assert.equal(db.documents.get("admin_booking_requests/reschedule-request-1").kind, "reschedule_single");
+
+  const before = snapshotDocuments(db);
+  db.operations = [];
+  const again = await createHandlers(db).rescheduleAppointmentFromAdmin({ auth: { uid: "admin-1", token: {} }, data });
+  assert.deepEqual(again, { ...first, replayed: true });
+  assertNoWrites(db, before);
+
   await assert.rejects(
     createHandlers(db).rescheduleAppointmentFromAdmin({
       auth: { uid: "admin-1", token: {} },
-      data: {
-        appointmentId: "pending-1",
-        slot: { date: "2026-09-08", time: "11:00" },
-        assignedTrainer: "trainer-1",
-      },
+      data: { ...data, slot: { date: "2026-09-09", time: "11:00" } },
     }),
-    (error) => error.code === "failed-precondition" && error.details.reason === "slot_full",
+    (error) => error.details.reason === "request_id_reused",
   );
-  assertNoWrites(db, before);
+  await assert.rejects(
+    createHandlers(db).rescheduleAppointmentFromAdmin({
+      auth: { uid: "admin-1", token: {} },
+      data: { ...data, requestId: "short" },
+    }),
+    (error) => error.code === "invalid-argument" && error.details.reason === "invalid_request_id",
+  );
+  slotKeys("2026-09-08", "11:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 1));
 });
 
 test("admin single approved reschedule reads delta-zero occupancy and writes only absolute nonzero final counts", async () => {
@@ -952,24 +1154,34 @@ test("admin pending series same-count replacement changes neither bono nor occup
 });
 
 test("admin pending series validates capacity and an eliminated bono before writes", async (t) => {
-  await t.test("full target", async () => {
+  await t.test("full target needs confirmation and takes no seat", async () => {
     const documents = pendingRecurringSeriesFixture();
     addOccupancy(documents, "2026-09-08", "11:00", 2);
     const db = new FakeFirestore(documents);
     const before = snapshotDocuments(db);
-    await assert.rejects(
-      createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
-        auth: { uid: "admin-1", token: {} },
-        data: {
-          appointmentId: "pending-0",
-          startSlot: { date: "2026-09-08", time: "11:00" },
-          endDate: "2026-09-22",
-          assignedTrainer: null,
-        },
-      }),
-      (error) => error.code === "failed-precondition" && error.details.reason === "slot_full",
-    );
+    const data = {
+      appointmentId: "pending-0",
+      startSlot: { date: "2026-09-08", time: "11:00" },
+      endDate: "2026-09-22",
+      assignedTrainer: null,
+    };
+    const prompt = await expectOverridePrompt(createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+      auth: { uid: "admin-1", token: {} },
+      data,
+    }));
+    assert.deepEqual(prompt.restrictions, [
+      { date: "2026-09-08", time: "11:00", reason: "slot_full", occupancy: 2, maxCapacity: 2 },
+    ]);
     assertNoWrites(db, before);
+
+    const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+      auth: { uid: "admin-1", token: {} },
+      data: { ...data, acknowledgedRestrictions: prompt.fingerprint },
+    });
+    assert.deepEqual(result.overriddenRestrictions, prompt.restrictions);
+    assert.equal(writesTo(db, "slot_occupancy/").length, 0);
+    assert.equal(db.documents.get("appointments/pending-0").status, "pending");
+    assert.equal(activityLog(db, "recurring_series_schedule_replaced_with_admin_override").status, "pending");
   });
 
   await t.test("eliminated bono", async () => {
@@ -1549,9 +1761,10 @@ test("admin series replacement rejects blocked, full, conflicting, invalid caden
     ["blocked", (documents) => {
       documents["blocked_slots/block"] = { date: "2026-09-08", time: "11:00" };
     }, "slot_blocked", { endDate: "2026-09-22" }],
-    ["full", (documents) => {
+    ["blocked even when a full slot was confirmed", (documents) => {
       addOccupancy(documents, "2026-09-08", "11:00", 2);
-    }, "slot_full", { endDate: "2026-09-22" }],
+      documents["blocked_slots/block"] = { date: "2026-09-15", time: "11:00" };
+    }, "slot_blocked", { endDate: "2026-09-22", acknowledgedRestrictions: "2026-09-08|11:00|slot_full|2|2" }],
     ["same-user conflict", (documents) => {
       documents["appointments/external"] = futurePendingAppointment({
         preferredSlots: [{ date: "2026-09-08", time: "11:00" }],
@@ -1623,4 +1836,94 @@ test("admin series replacement rejects expired, insufficient, inconsistent, and 
       assertNoWrites(db, before);
     });
   }
+});
+
+test("admin approved series replacement into a full slot is applied over capacity only after confirmation", async () => {
+  const documents = recurringSeriesFixture();
+  addOccupancy(documents, "2026-09-08", "11:00", 2);
+  const db = new FakeFirestore(documents);
+  const before = snapshotDocuments(db);
+  const data = {
+    appointmentId: "future-1",
+    startSlot: { date: "2026-09-08", time: "11:00" },
+    endDate: "2026-09-22",
+    assignedTrainer: "trainer-2",
+  };
+  const prompt = await expectOverridePrompt(createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+    auth: { uid: "admin-1", token: { email: "admin@example.com" } },
+    data,
+  }));
+  // Only the full session is listed; the other two have room.
+  assert.deepEqual(prompt.restrictions, [
+    { date: "2026-09-08", time: "11:00", reason: "slot_full", occupancy: 2, maxCapacity: 2 },
+  ]);
+  assertNoWrites(db, before);
+
+  const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+    auth: { uid: "admin-1", token: { email: "admin@example.com" } },
+    data: { ...data, acknowledgedRestrictions: prompt.fingerprint },
+  });
+  assert.deepEqual(result.overriddenRestrictions, prompt.restrictions);
+  slotKeys("2026-09-08", "11:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 3));
+  slotKeys("2026-09-15", "11:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 1));
+  slotKeys("2026-09-07", "10:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 0));
+  const log = activityLog(db, "recurring_series_schedule_replaced_with_admin_override");
+  assert.equal(log.adminEmail, "admin@example.com");
+  assert.equal(log.status, "approved");
+  assert.deepEqual(log.restrictions, prompt.restrictions);
+  assert.ok(activityLog(db, "recurring_series_schedule_replaced"));
+});
+
+test("admin approved series replacement leaving a slot already over capacity needs no confirmation", async () => {
+  const documents = recurringSeriesFixture();
+  addOccupancy(documents, "2026-09-07", "10:00", 5);
+  const db = new FakeFirestore(documents);
+  const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+    auth: { uid: "admin-1", token: {} },
+    data: {
+      appointmentId: "future-1",
+      startSlot: { date: "2026-09-08", time: "11:00" },
+      endDate: "2026-09-22",
+      assignedTrainer: "trainer-2",
+    },
+  });
+  assert.equal(result.overriddenRestrictions, undefined);
+  slotKeys("2026-09-07", "10:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 4));
+});
+
+test("admin series replacement requestId replays without a second outbox, log or bono change", async () => {
+  const documents = recurringSeriesFixture();
+  const db = new FakeFirestore(documents);
+  const data = {
+    appointmentId: "future-1",
+    startSlot: { date: "2026-09-08", time: "11:00" },
+    endDate: "2026-09-29",
+    assignedTrainer: "trainer-2",
+    requestId: "series-request-1",
+  };
+  const first = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({ auth: { uid: "admin-1", token: {} }, data });
+  assert.equal(first.createdAppointmentIds.length, 1);
+  const outboxCount = [...db.documents.keys()].filter((path) => path.startsWith("notification_outbox/")).length;
+  assert.equal(outboxCount, 1);
+
+  const before = snapshotDocuments(db);
+  db.operations = [];
+  const again = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({ auth: { uid: "admin-1", token: {} }, data });
+  assert.deepEqual(again, { ...first, replayed: true });
+  assertNoWrites(db, before);
+});
+
+test("returning an approved series to pending releases seats from slots already over capacity", async () => {
+  const documents = recurringSeriesFixture({
+    records: { "past-0": { status: "cancelled" }, "pending-5": { status: "cancelled" } },
+    series: { occurrenceCount: 3, totalMinutes: 180, startDate: "2026-09-07" },
+  });
+  addOccupancy(documents, "2026-09-07", "10:00", 5);
+  const db = new FakeFirestore(documents);
+  await createHandlers(db).returnRecurringSeriesToPendingFromAdmin({
+    auth: { uid: "admin-1", token: {} },
+    data: { seriesId: "series-1" },
+  });
+  slotKeys("2026-09-07", "10:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 4));
+  assert.equal(db.documents.get("appointment_recurrences/series-1").status, "pending");
 });
