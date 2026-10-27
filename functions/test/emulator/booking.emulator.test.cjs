@@ -644,3 +644,61 @@ test("modify override, concurrency: a double click with the same requestId moves
   assert.deepEqual(await hourCounts(DAY, "15"), [0, 0, 0, 0]);
   assert.equal((await logActions()).filter((action) => action === "appointment_rescheduled_by_admin").length, 1);
 });
+
+// ------------------------------------------------------------ stale series metadata
+
+const { createRecurringRescheduleHandlers } = require("../../lib/recurringReschedule.js");
+const recurringReschedule = createRecurringRescheduleHandlers({ db, requireAdmin: async () => undefined, getNowDate });
+
+test("stale series: an old browser deletion, a customer single reschedule, then the admin approves", async () => {
+  await resetDatabase();
+  const dates = [DAY, addDays(DAY, 7), addDays(DAY, 14)];
+  const occurrence = (index, date) => ({
+    ...approvedAt("user-1", date, "18:00"),
+    name: "Cliente Uno", email: "uno@example.com", serviceType: "Entrenamiento personal",
+    sessionType: "Entrenamiento personal", reason: "",
+    recurrenceSeriesId: "series-1", recurrenceIndex: index, bonoId: "bono-1",
+    minutesDeducted: true, minutesDeductedAmount: 60, minutesDeductedAt: "2026-01-01T10:00:00.000Z",
+    minutesRefunded: false, minutesRefundedAmount: null, minutesRefundedAt: null, minutesRefundReason: null,
+    createdAt: "2026-01-01T10:00:00.000Z",
+  });
+  await seed(baseDocuments({
+    ...Object.assign({}, ...dates.map((date) => hourOccupancy(date, "18", 1))),
+    "bonos/bono-1": {
+      userId: "user-1", tamano: 480, minutosTotales: 480, minutosRestantes: 300, estado: "activo",
+      fechaExpiracion: "2099-12-31T22:59:59.000Z", historial: [],
+    },
+    "services/service-1": { title: "Entrenamiento personal", active: true },
+    "appointment_recurrences/series-1": {
+      userId: "user-1", serviceType: "Entrenamiento personal", duration: "60", assignedTrainer: null,
+      startDate: dates[0], startTime: "18:00", intervalDays: 7, endDate: dates[2], occurrenceCount: 3, totalMinutes: 180,
+      bonoId: "bono-1", status: "approved", origin: "admin",
+    },
+    ...Object.fromEntries(dates.map((date, index) => [`appointments/occ-${index}`, occurrence(index, date)])),
+  }));
+  // What the panel did before 2026-10-14: deleteDoc from the browser, series untouched.
+  await db.doc("appointments/occ-2").delete();
+  await db.doc(`slot_occupancy/${dates[2]}_18:00`).delete();
+
+  await recurringReschedule.rescheduleOwnRecurringAppointment(callable("user-1", {
+    appointmentId: "occ-1", preferredSlot: { date: dates[1], time: "19:00" }, scope: "single",
+  }));
+  assert.equal((await docData("appointment_recurrences/series-1")).status, "pending");
+
+  const refused = await settle(series.rejectRecurringAppointmentSeriesFromAdmin(callable("admin", { seriesId: "series-1" })));
+  assert.deepEqual(refused, { ok: false, reason: "series_has_approved_occurrences" });
+
+  await series.approveRecurringAppointmentSeriesFromAdmin(callable("admin", { seriesId: "series-1" }));
+  const after = await docData("appointment_recurrences/series-1");
+  assert.equal(after.status, "approved");
+  assert.equal(after.occurrenceCount, 2);
+  assert.equal(after.totalMinutes, 120);
+  assert.equal((await docData("appointments/occ-1")).status, "approved");
+  assert.equal((await docData("bonos/bono-1")).minutosRestantes, 300, "minutes stay exactly as reserved");
+  assert.deepEqual(await hourCounts(dates[0], "18"), [1, 1, 1, 1]);
+  assert.deepEqual(await hourCounts(dates[1], "18"), [0, 0, 0, 0]);
+  assert.deepEqual(await hourCounts(dates[1], "19"), [1, 1, 1, 1]);
+  const logs = (await db.collection("activity_logs").get()).docs.map((snap) => snap.data());
+  const approval = logs.find((log) => log.action === "recurring_appointments_approved");
+  assert.equal(approval.previousOccurrenceCount, 3);
+});

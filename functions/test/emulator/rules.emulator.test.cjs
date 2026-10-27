@@ -16,7 +16,7 @@ if (!host || !projectId.startsWith("demo-")) {
 
 const { assertFails, assertSucceeds, initializeTestEnvironment } = require("@firebase/rules-unit-testing");
 const {
-  collection, doc, getCountFromServer, getDoc, getDocs, query, setDoc, updateDoc, where,
+  collection, deleteDoc, doc, getCountFromServer, getDoc, getDocs, query, setDoc, updateDoc, where,
 } = require("firebase/firestore");
 
 const [hostName, port] = host.split(":");
@@ -106,6 +106,32 @@ test("the charge decision can only be written by Cloud Functions", async () => {
   await assertFails(updateDoc(doc(coach, "appointments/a1"), { cancellationCharge: "charged" }));
   await assertSucceeds(updateDoc(doc(coach, "appointments/a1"), { trainerNotes: "bien", updatedAt: "x" }));
   await assertFails(updateDoc(doc(verified("user-1"), "appointments/a1"), { cancellationCharge: "charged" }));
+});
+
+test("recurring occurrences only leave their series through Cloud Functions", async () => {
+  await env.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    const occurrence = (status) => ({
+      userId: "user-1", status, duration: "60", date: DAY, time: "10:00",
+      preferredSlots: [{ date: DAY, time: "10:00" }], recurrenceSeriesId: "series-1", recurrenceIndex: 0,
+      bonoId: "b1", minutesDeducted: true, minutesDeductedAmount: 60, createdAt: "2026-10-01T10:00:00.000Z",
+    });
+    await Promise.all([
+      setDoc(doc(db, "appointments/r-approved"), { ...occurrence("approved"), approvedSlot: { date: DAY, time: "10:00" } }),
+      setDoc(doc(db, "appointments/r-pending"), occurrence("pending")),
+    ]);
+  });
+  const admin = verified("admin");
+  // These writes used to desync occurrenceCount/totalMinutes of the series.
+  await assertFails(updateDoc(doc(admin, "appointments/r-approved"), { status: "cancelled" }));
+  await assertFails(updateDoc(doc(admin, "appointments/r-pending"), { status: "rejected" }));
+  await assertFails(updateDoc(doc(admin, "appointments/r-approved"), { duration: "30" }));
+  await assertFails(deleteDoc(doc(admin, "appointments/r-approved")));
+  await assertFails(deleteDoc(doc(admin, "appointments/r-pending")));
+  // Notes and non-recurring appointments keep working as before.
+  await assertSucceeds(updateDoc(doc(admin, "appointments/r-approved"), { approvalNotes: "ok" }));
+  await assertSucceeds(updateDoc(doc(verified("coach"), "appointments/a1"), { trainerNotes: "bien", updatedAt: "x" }));
+  await assertSucceeds(deleteDoc(doc(admin, "appointments/a2")));
 });
 
 test("backend audit records stay closed, even to admins", async () => {

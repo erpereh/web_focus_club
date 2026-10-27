@@ -455,6 +455,147 @@ test("historical pending remains pending and keeps mixed series pending after fu
   assert.equal(series.futureOccurrenceCount, 2);
 });
 
+// -------------------------------------------------- stale series metadata
+// Before 2026-10-14 the admin panel cancelled/deleted occurrences from the browser
+// without updating occurrenceCount/totalMinutes. The occurrences are the truth.
+
+const { createRecurringRescheduleHandlers } = require("../lib/recurringReschedule.js");
+
+function staleFixture(storedCount) {
+  const documents = pendingFixture(2);
+  Object.assign(documents["appointment_recurrences/series-1"], {
+    occurrenceCount: storedCount,
+    totalMinutes: storedCount * 60,
+  });
+  return documents;
+}
+
+function activityLogs(db) {
+  return [...db.documents.entries()].filter(([path]) => path.startsWith("activity_logs/")).map(([, value]) => value);
+}
+
+function writes(db) {
+  return db.operations.filter((operation) => operation.type === "write");
+}
+
+test("approval derives the series metadata from its occurrences when the stored one is stale", async () => {
+  const documents = staleFixture(4);
+  addOccupancy(documents, "2026-09-08", "10:00", 0);
+  addOccupancy(documents, "2026-09-15", "11:00", 1);
+  const db = new FakeFirestore(documents);
+  const beforeBono = clone(documents["bonos/bono-1"]);
+
+  await recurringHandlers(db).approveRecurringAppointmentSeriesFromAdmin(adminRequest({ seriesId: "series-1" }));
+
+  const series = db.documents.get("appointment_recurrences/series-1");
+  assert.equal(series.status, "approved");
+  assert.equal(series.occurrenceCount, 2);
+  assert.equal(series.totalMinutes, 120);
+  assert.deepEqual(db.documents.get("bonos/bono-1"), beforeBono, "minutes were already reserved");
+  slotKeys("2026-09-08", "10:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 1));
+  slotKeys("2026-09-15", "11:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 2));
+  const log = activityLogs(db).find((entry) => entry.action === "recurring_appointments_approved");
+  assert.equal(log.previousOccurrenceCount, 4);
+  assert.equal(log.previousTotalMinutes, 240);
+});
+
+test("an in-sync approval logs no metadata correction", async () => {
+  const db = new FakeFirestore(pendingFixture(2));
+  await recurringHandlers(db).approveRecurringAppointmentSeriesFromAdmin(adminRequest({ seriesId: "series-1" }));
+  const log = activityLogs(db).find((entry) => entry.action === "recurring_appointments_approved");
+  assert.equal("previousOccurrenceCount" in log, false);
+});
+
+test("stale approved series: customer moves one session, then the admin approves the series", async () => {
+  const documents = pendingFixture(2);
+  Object.assign(documents["appointment_recurrences/series-1"], {
+    status: "approved",
+    occurrenceCount: 3,
+    totalMinutes: 180,
+  });
+  for (const [id, slot] of [["pending-0", { date: "2026-09-08", time: "10:00" }], ["pending-1", { date: "2026-09-15", time: "11:00" }]]) {
+    Object.assign(documents[`appointments/${id}`], { status: "approved", approvedSlot: slot, assignedTrainer: "trainer-1" });
+    addOccupancy(documents, slot.date, slot.time, 1);
+  }
+  const db = new FakeFirestore(documents);
+  const beforeBono = clone(documents["bonos/bono-1"]);
+  const customer = createRecurringRescheduleHandlers({ db, requireAdmin: async () => ({}), getNowDate: () => fixedNow });
+
+  await customer.rescheduleOwnRecurringAppointment({
+    auth: { uid: "user-1", token: {} },
+    data: { appointmentId: "pending-1", preferredSlot: { date: "2026-09-16", time: "11:00" }, scope: "single" },
+  });
+  const pendingSeries = db.documents.get("appointment_recurrences/series-1");
+  assert.equal(pendingSeries.status, "pending");
+  assert.equal(pendingSeries.occurrenceCount, 3, "the single reschedule keeps the stale count");
+
+  // Rejecting it as a whole would orphan the approved session: refused, nothing written.
+  db.operations = [];
+  await assert.rejects(
+    recurringHandlers(db).rejectRecurringAppointmentSeriesFromAdmin(adminRequest({ seriesId: "series-1" })),
+    (error) => error.details?.reason === "series_has_approved_occurrences",
+  );
+  assert.equal(writes(db).length, 0);
+
+  await recurringHandlers(db).approveRecurringAppointmentSeriesFromAdmin(adminRequest({ seriesId: "series-1" }));
+  const series = db.documents.get("appointment_recurrences/series-1");
+  assert.equal(series.status, "approved");
+  assert.equal(series.occurrenceCount, 2);
+  assert.equal(series.totalMinutes, 120);
+  assert.equal(db.documents.get("appointments/pending-1").status, "approved");
+  assert.deepEqual(db.documents.get("appointments/pending-1").approvedSlot, { date: "2026-09-16", time: "11:00" });
+  assert.deepEqual(db.documents.get("bonos/bono-1"), beforeBono);
+  slotKeys("2026-09-08", "10:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 1));
+  slotKeys("2026-09-15", "11:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 0));
+  slotKeys("2026-09-16", "11:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 1));
+});
+
+test("approval still refuses real occurrence inconsistencies, without writing", async (t) => {
+  const cases = [
+    ["duplicate index", (docs) => { docs["appointments/pending-1"].recurrenceIndex = docs["appointments/pending-0"].recurrenceIndex; }, "invalid_occurrence_index"],
+    ["missing index", (docs) => { delete docs["appointments/pending-1"].recurrenceIndex; }, "invalid_occurrence_index"],
+    ["other customer", (docs) => { docs["appointments/pending-1"].userId = "user-2"; }, "occurrence_owner_mismatch"],
+    ["other duration", (docs) => { docs["appointments/pending-1"].duration = "30"; }, "occurrence_duration_mismatch"],
+    ["already refunded", (docs) => { docs["appointments/pending-1"].minutesRefundedAt = "2026-08-20T10:00:00.000Z"; }, "reservation_mismatch"],
+    ["other bono", (docs) => { docs["appointments/pending-1"].bonoId = "bono-2"; }, "reservation_mismatch"],
+    ["no bono", (docs) => { delete docs["appointment_recurrences/series-1"].bonoId; }, "series_without_bono"],
+  ];
+  for (const [name, mutate, reason] of cases) {
+    await t.test(name, async () => {
+      const documents = staleFixture(3);
+      mutate(documents);
+      const db = new FakeFirestore(documents);
+      await assert.rejects(
+        recurringHandlers(db).approveRecurringAppointmentSeriesFromAdmin(adminRequest({ seriesId: "series-1" })),
+        (error) => error.code === "failed-precondition"
+          && error.message === "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto."
+          && error.details?.reason === reason,
+      );
+      assert.equal(writes(db).length, 0);
+    });
+  }
+});
+
+test("rejection and cancellation of a stale series refund exactly the pending reservations", async (t) => {
+  for (const action of ["reject", "cancel"]) {
+    await t.test(action, async () => {
+      const db = new FakeFirestore(staleFixture(4));
+      if (action === "reject") {
+        await recurringHandlers(db).rejectRecurringAppointmentSeriesFromAdmin(adminRequest({ seriesId: "series-1" }));
+      } else {
+        await recurringHandlers(db).cancelOwnRecurringAppointmentSeries({
+          auth: { uid: "user-1", token: {} }, data: { seriesId: "series-1" },
+        });
+      }
+      assert.equal(db.documents.get("bonos/bono-1").minutosRestantes, 300 + 120);
+      for (const id of ["pending-0", "pending-1"]) {
+        assert.equal(db.documents.get(`appointments/${id}`).minutesRefundedAmount, 60);
+      }
+      assert.equal(db.documents.get("appointment_recurrences/series-1").status, action === "reject" ? "rejected" : "cancelled");
+    });
+  }
+});
+
 // ------------------------------------------------------------ grouped notices
 
 const { classifyAppointmentChange } = require("../lib/notifications/appointmentEvents.js");

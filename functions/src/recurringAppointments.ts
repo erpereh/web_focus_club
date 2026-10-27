@@ -105,6 +105,17 @@ export interface RecurringEndDateOption {
   totalMinutes: number;
 }
 
+/** Shown for every series integrity failure; `details.reason` tells them apart. */
+export const SERIES_CHANGED_MESSAGE = "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.";
+
+export type ReservedSeriesMinutesFailure =
+  | "series_without_bono"
+  | "bono_not_found"
+  | "bono_owner_mismatch"
+  | "no_active_occurrences"
+  | "reservation_mismatch"
+  | "reserved_total_mismatch";
+
 export interface ReservedOccurrenceMinutes {
   bonoId?: string;
   minutesDeducted?: boolean;
@@ -481,19 +492,16 @@ export function validateReservedSeriesMinutes(input: {
   durationMinutes: number;
   bono?: LifecycleBono & { userId?: string };
   occurrences: ReservedOccurrenceMinutes[];
-}): { ok: true } | { ok: false; message: string } {
-  if (!input.seriesBonoId) {
-    return { ok: false, message: "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto." };
-  }
+}): { ok: true } | { ok: false; message: string; reason: ReservedSeriesMinutesFailure } {
+  const changed = (reason: ReservedSeriesMinutesFailure) => ({ ok: false as const, message: SERIES_CHANGED_MESSAGE, reason });
+  if (!input.seriesBonoId) return changed("series_without_bono");
   if (!input.bono) {
-    return { ok: false, message: "No se ha encontrado el bono reservado de la serie." };
+    return { ok: false, message: "No se ha encontrado el bono reservado de la serie.", reason: "bono_not_found" };
   }
   if (input.bono.userId && input.bono.userId !== input.seriesUserId) {
-    return { ok: false, message: "El bono original no pertenece al usuario de esta serie." };
+    return { ok: false, message: "El bono original no pertenece al usuario de esta serie.", reason: "bono_owner_mismatch" };
   }
-  if (input.occurrences.length === 0) {
-    return { ok: false, message: "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto." };
-  }
+  if (input.occurrences.length === 0) return changed("no_active_occurrences");
 
   let deductedTotal = 0;
   for (const occurrence of input.occurrences) {
@@ -502,14 +510,12 @@ export function validateReservedSeriesMinutes(input: {
       || occurrence.minutesDeductedAmount !== input.durationMinutes
       || occurrence.minutesRefunded === true
       || occurrence.minutesRefundedAt) {
-      return { ok: false, message: "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto." };
+      return changed("reservation_mismatch");
     }
     deductedTotal += occurrence.minutesDeductedAmount ?? 0;
   }
 
-  if (deductedTotal !== input.seriesTotalMinutes) {
-    return { ok: false, message: "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto." };
-  }
+  if (deductedTotal !== input.seriesTotalMinutes) return changed("reserved_total_mismatch");
   return { ok: true };
 }
 
@@ -524,7 +530,7 @@ export function planSeriesMinutesRefund(input: {
   for (const occurrence of input.occurrences) {
     const refund = calculateAppointmentRefund(bono, occurrence, input.now);
     if (!refund.ok) {
-      return { ok: false, message: "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto." };
+      return { ok: false, message: SERIES_CHANGED_MESSAGE };
     }
     bono = {
       ...bono,

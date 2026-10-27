@@ -18,6 +18,7 @@ import {
   planSeriesMinutesRefund,
   validateReservedSeriesMinutes,
   buildPendingSeriesOccurrencePatch,
+  SERIES_CHANGED_MESSAGE,
 } from "./recurringAppointments.js";
 import {
   doesSessionFitWithinSchedule,
@@ -192,6 +193,39 @@ function assertOccupancyCount(value: unknown): number {
     });
   }
   return value;
+}
+
+type SeriesChangedReason =
+  | "series_without_bono"
+  | "invalid_series_duration"
+  | "invalid_active_count"
+  | "invalid_occurrence_index"
+  | "occurrence_owner_mismatch"
+  | "occurrence_duration_mismatch";
+
+/** Same message as always (web and app show it as is); the reason pinpoints the failed check. */
+function seriesChanged(reason: SeriesChangedReason): never {
+  throwHttps("failed-precondition", SERIES_CHANGED_MESSAGE, { reason });
+}
+
+function assertSeriesOccurrencesStructure(
+  occurrences: Array<{ data: SeriesAppointment }>,
+  series: Pick<RecurrenceSeriesDoc, "userId">,
+  seriesId: string,
+  durationMinutes: number,
+): void {
+  const seenIndexes = new Set<number>();
+  occurrences.forEach((occurrence) => {
+    const index = occurrence.data.recurrenceIndex;
+    if (!Number.isInteger(index) || (index as number) < 0 || seenIndexes.has(index as number)) {
+      seriesChanged("invalid_occurrence_index");
+    }
+    if (occurrence.data.userId !== series.userId || occurrence.data.recurrenceSeriesId !== seriesId) {
+      seriesChanged("occurrence_owner_mismatch");
+    }
+    if (Number(occurrence.data.duration) !== durationMinutes) seriesChanged("occurrence_duration_mismatch");
+    seenIndexes.add(index as number);
+  });
 }
 
 export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
@@ -768,9 +802,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         if (series.status !== "pending") {
           throwHttps("failed-precondition", "Esta serie ya no se puede aprobar.");
         }
-        if (!series.bonoId) {
-          throwHttps("failed-precondition", "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.");
-        }
+        if (!series.bonoId) seriesChanged("series_without_bono");
         const appointmentsQuery = db.collection("appointments").where("recurrenceSeriesId", "==", seriesId);
         const appointmentsSnap = await transaction.get(appointmentsQuery);
         const allOccurrences = appointmentsSnap.docs
@@ -778,28 +810,18 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         const activeOccurrences = allOccurrences
           .filter((occurrence) => isActiveOccurrenceStatus(occurrence.data.status));
         const durationMinutes = Number(series.duration);
-        if (!validDuration(durationMinutes)
-          || activeOccurrences.length < 1
-          || activeOccurrences.length > MAX_RECURRING_OCCURRENCES
-          || activeOccurrences.length !== series.occurrenceCount
-          || series.totalMinutes !== activeOccurrences.length * durationMinutes) {
-          throwHttps("failed-precondition", "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.");
+        if (!validDuration(durationMinutes)) seriesChanged("invalid_series_duration");
+        if (activeOccurrences.length < 1 || activeOccurrences.length > MAX_RECURRING_OCCURRENCES) {
+          seriesChanged("invalid_active_count");
         }
-        const seenIndexes = new Set<number>();
+        assertSeriesOccurrencesStructure(activeOccurrences, series, seriesId, durationMinutes);
+        // The occurrences read in this transaction are the source of truth. The stored
+        // occurrenceCount/totalMinutes may be stale (individual cancellations or
+        // deletions written before they were kept in sync); they are rewritten below.
+        const derivedTotalMinutes = activeOccurrences.length * durationMinutes;
+        const metadataWasStale = series.occurrenceCount !== activeOccurrences.length
+          || series.totalMinutes !== derivedTotalMinutes;
         const nowDate = getNowDate();
-        activeOccurrences.forEach((occurrence) => {
-          const index = occurrence.data.recurrenceIndex;
-          const occurrenceDuration = Number(occurrence.data.duration);
-          if (!Number.isInteger(index)
-            || (index as number) < 0
-            || seenIndexes.has(index as number)
-            || occurrence.data.userId !== series.userId
-            || occurrence.data.recurrenceSeriesId !== seriesId
-            || occurrenceDuration !== durationMinutes) {
-            throwHttps("failed-precondition", "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.");
-          }
-          seenIndexes.add(index as number);
-        });
         const pendingOccurrences = activeOccurrences
           .filter((occurrence) => occurrence.data.status === "pending")
           .sort((left, right) => Number(left.data.recurrenceIndex) - Number(right.data.recurrenceIndex));
@@ -851,17 +873,18 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           await loadServiceAndTrainer(transaction, series.serviceType, "", false);
         }
 
+        // Every active occurrence must hold exactly its own minutes of the series bono.
         const reserved = validateReservedSeriesMinutes({
           seriesBonoId: series.bonoId,
           seriesUserId: series.userId,
-          seriesTotalMinutes: series.totalMinutes,
-          durationMinutes: Number(series.duration),
+          seriesTotalMinutes: derivedTotalMinutes,
+          durationMinutes,
           bono: bonoSnap.exists
             ? { id: bonoSnap.id, ...(bonoSnap.data() as BonoDoc) }
             : undefined,
           occurrences: activeOccurrences.map((occurrence) => occurrence.data),
         });
-        if (!reserved.ok) throwHttps("failed-precondition", reserved.message);
+        if (!reserved.ok) throwHttps("failed-precondition", reserved.message, { reason: reserved.reason });
 
         const config = siteConfigSnap.exists
           ? normalizeSiteConfig(siteConfigSnap.data() as Partial<SiteConfig>)
@@ -1003,6 +1026,10 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           affectedAppointmentIds: prepared.map((occurrence) => occurrence.id),
           occurrenceCount: metadata.occurrenceCount,
           totalMinutes: metadata.totalMinutes,
+          ...(metadataWasStale ? {
+            previousOccurrenceCount: series.occurrenceCount ?? null,
+            previousTotalMinutes: series.totalMinutes ?? null,
+          } : {}),
           createdAt: now,
           timestamp: now,
         });
@@ -1081,9 +1108,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
       if (series.status !== "pending") {
         throwHttps("failed-precondition", "Esta serie ya no se puede cancelar.");
       }
-      if (!series.bonoId) {
-        throwHttps("failed-precondition", "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.");
-      }
+      if (!series.bonoId) seriesChanged("series_without_bono");
 
       const appointmentsQuery = db.collection("appointments").where("recurrenceSeriesId", "==", input.seriesId);
       const bonoRef = db.collection("bonos").doc(series.bonoId);
@@ -1096,9 +1121,20 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         ref: docSnap.ref,
         data: docSnap.data() as SeriesAppointment,
       }));
+      // A customer rescheduling one session of an approved series leaves it pending
+      // with approved sessions: finalizing it would orphan them under a closed series.
+      if (allOccurrences.some((occurrence) => occurrence.data.status === "approved")) {
+        throwHttps(
+          "failed-precondition",
+          "Esta serie tiene sesiones ya aprobadas y no puede rechazarse ni cancelarse como conjunto.",
+          { reason: "series_has_approved_occurrences" },
+        );
+      }
       const occurrences = allOccurrences.filter((occurrence) => occurrence.data.status === "pending");
-      if (occurrences.length !== series.occurrenceCount) {
-        throwHttps("failed-precondition", "Las citas de esta serie han cambiado y no pueden aprobarse como conjunto.");
+      const durationMinutes = Number(series.duration);
+      if (!validDuration(durationMinutes)) seriesChanged("invalid_series_duration");
+      if (occurrences.length < 1 || occurrences.length > MAX_RECURRING_OCCURRENCES) {
+        seriesChanged("invalid_active_count");
       }
       if (input.requireOwner && seriesHasSameDayOccurrence(occurrences.map((occurrence) => occurrence.data), getNowDate())) {
         throwHttps("failed-precondition", SAME_DAY_CHANGE_MESSAGE, {
@@ -1106,17 +1142,19 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         });
       }
 
+      // Validated against the pending sessions actually read (stored metadata may be
+      // stale); each one gives back exactly the minutes it reserved.
       const reserved = validateReservedSeriesMinutes({
         seriesBonoId: series.bonoId,
         seriesUserId: series.userId,
-        seriesTotalMinutes: series.totalMinutes,
-        durationMinutes: Number(series.duration),
+        seriesTotalMinutes: occurrences.length * durationMinutes,
+        durationMinutes,
         bono: bonoSnap.exists
           ? { id: bonoSnap.id, ...(bonoSnap.data() as BonoDoc) }
           : undefined,
         occurrences: occurrences.map((occurrence) => occurrence.data),
       });
-      if (!reserved.ok) throwHttps("failed-precondition", reserved.message);
+      if (!reserved.ok) throwHttps("failed-precondition", reserved.message, { reason: reserved.reason });
       if (!bonoSnap.exists) {
         throwHttps("failed-precondition", "No se ha encontrado el bono reservado de la serie.");
       }

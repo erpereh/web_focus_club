@@ -508,6 +508,9 @@ assert.match(rulesSource, /match \/appointment_recurrences\/\{seriesId\}/);
 assert.match(rulesSource, /recurringAppointmentClientUpdateAllowed/);
 assert.match(rulesSource, /preferredSlots/);
 assert.match(rulesSource, /minutesDeducted/);
-assert.match(rulesSource, /resource\.data\.status != 'pending'/);
+const protectedFields = rulesSource.match(/function recurringAppointmentProtectedFieldsUnchanged\(\) \{([\s\S]*?)\n {4}\}/)[1];
+assert.match(protectedFields, /'status'/);
+assert.match(protectedFields, /'duration'/);
+assert.match(rulesSource, /allow delete: if isAdmin\(\) && !isRecurringAppointment\(\);/);
 
 console.log("recurring appointment tests passed");
