@@ -100,10 +100,27 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // CAPACITY EXCEPTIONS (aforo por fecha)
+    // One document per Madrid civil date that replaces the global capacity.
+    // Written only by Cloud Functions (validation, reduction warnings and
+    // audit in one transaction). Clients read them like the seat counters.
+    match /capacity_exceptions/{date} {
+      allow read: if isVerified() || isAdmin();
+      allow write: if false;
+    }
+
     // GLOBAL SITE CONFIG
+    // The global capacity and the per-date capacity switch change only through
+    // Cloud Functions (updateMaxCapacityFromAdmin / manual activation), which
+    // check approved seats in the same transaction. Everything else stays
+    // editable by admins from the panel.
     match /site_config/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create: if isAdmin()
+        && !request.resource.data.keys().hasAny(['maxCapacity', 'capacityExceptionsEnabled']);
+      allow update: if isAdmin()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['maxCapacity', 'capacityExceptionsEnabled']);
+      allow delete: if false;
     }
 
     // BONOS

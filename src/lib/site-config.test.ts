@@ -74,8 +74,15 @@ describe('normalizeSiteConfig maxCapacity', () => {
 });
 
 describe('sanitizeSiteConfigUpdate', () => {
-    it('writes only maxCapacity when that is the field being updated', () => {
-        expect(sanitizeSiteConfigUpdate({ maxCapacity: 5 })).toEqual({ maxCapacity: 5 });
+    it('never writes the capacity fields: they change only through Cloud Functions', () => {
+        expect(sanitizeSiteConfigUpdate({ maxCapacity: 5 })).toEqual({});
+        expect(sanitizeSiteConfigUpdate({ capacityExceptionsEnabled: true, endHour: 21 })).toEqual({ endHour: 21 });
+    });
+
+    it('treats a missing per-date capacity switch as off', () => {
+        expect(normalizeSiteConfig({}).capacityExceptionsEnabled).toBe(false);
+        expect(normalizeSiteConfig({ capacityExceptionsEnabled: 'true' as unknown as boolean }).capacityExceptionsEnabled).toBe(false);
+        expect(normalizeSiteConfig({ capacityExceptionsEnabled: true }).capacityExceptionsEnabled).toBe(true);
     });
 
     it('does not fill default schedule or bono fields into a capacity update', () => {

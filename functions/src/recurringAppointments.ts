@@ -83,6 +83,8 @@ export interface PlanRecurringAppointmentsInput {
   now: Date;
   siteConfig: Partial<SiteConfig>;
   occupancyByKey: Map<string, number>;
+  /** Effective capacity per occurrence date (capacity exceptions); missing dates use the global value. */
+  capacityByDate?: ReadonlyMap<string, number>;
   blockedKeys: Set<string>;
   userSlotKeys: Set<string>;
   activeBonos: LifecycleBono[];
@@ -391,7 +393,8 @@ export function planRecurringAppointments(input: PlanRecurringAppointmentsInput)
       return emptyFail(`La franja del ${formatDateEs(date)} esta bloqueada.`);
     }
 
-    if (occurrenceKeys.some((key) => isSlotAtCapacity(occupancyByKey.get(key) ?? 0, config.maxCapacity))) {
+    const maxCapacity = input.capacityByDate?.get(date) ?? config.maxCapacity;
+    if (occurrenceKeys.some((key) => isSlotAtCapacity(occupancyByKey.get(key) ?? 0, maxCapacity))) {
       return emptyFail(`La franja del ${formatDateEs(date)} a las ${input.startTime} esta completa.`);
     }
 

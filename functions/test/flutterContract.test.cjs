@@ -129,4 +129,11 @@ test("Firestore rules keep app reads and leave seat counters to Functions", () =
   const block = /match \/slot_occupancy\/\{slotId\} \{([\s\S]*?)\n    \}/.exec(rules)?.[1] ?? "";
   assert.match(block, /allow read: if isVerified\(\) \|\| isAdmin\(\);/);
   assert.match(block, /allow write: if false;/);
+  // Per-date capacity is read like the counters; the published apps never query it.
+  const exceptions = /match \/capacity_exceptions\/\{date\} \{([\s\S]*?)\n    \}/.exec(rules)?.[1] ?? "";
+  assert.match(exceptions, /allow read: if isVerified\(\) \|\| isAdmin\(\);/);
+  assert.match(exceptions, /allow write: if false;/);
+  // site_config stays publicly readable: every published app reads it before signing in.
+  const config = /match \/site_config\/\{docId\} \{([\s\S]*?)\n    \}/.exec(rules)?.[1] ?? "";
+  assert.match(config, /allow read: if true;/);
 });

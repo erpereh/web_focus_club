@@ -27,6 +27,7 @@ import {
 } from "./siteConfig.js";
 import { newNotificationOperation, sessionsOf, writeNotificationOutbox } from "./notifications/outbox.js";
 import { parseOccupancyCount } from "./slotOccupancy.js";
+import { loadCapacityExceptions, resolveMaxCapacity } from "./capacityExceptions.js";
 import {
   type AdminRestriction,
   authorizeAdminOverride,
@@ -336,6 +337,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           userAppointmentsSnap,
           bonosSnap,
           occupancySnaps,
+          capacityExceptions,
         ] = await Promise.all([
           transaction.get(userRef),
           transaction.get(siteConfigRef),
@@ -343,6 +345,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           transaction.get(userAppointmentsQuery),
           transaction.get(bonosQuery),
           Promise.all(occupancyRefs.map((ref) => transaction.get(ref))),
+          loadCapacityExceptions(transaction, db, occurrenceDates),
         ]);
         const { service } = await loadServiceAndTrainer(transaction, input.serviceType, input.assignedTrainer, true);
 
@@ -393,6 +396,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           now: nowDate,
           siteConfig: config,
           occupancyByKey,
+          capacityByDate: capacityExceptions,
           blockedKeys,
           userSlotKeys,
           activeBonos,
@@ -411,7 +415,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
             occupancyByTime.set(time, occupancyByKey.get(key) ?? 0);
           });
           return collectAdminSlotRestrictions(
-            { config, blockedTimes, occupancyByTime },
+            { config, maxCapacity: resolveMaxCapacity(config, capacityExceptions, date), blockedTimes, occupancyByTime },
             { slot: { date, time: input.startTime }, durationMinutes: input.durationMinutes, now: nowDate },
           ).restrictions;
         });
@@ -624,6 +628,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           userAppointmentsSnap,
           bonosSnap,
           occupancySnaps,
+          capacityExceptions,
         ] = await Promise.all([
           transaction.get(userRef),
           transaction.get(siteConfigRef),
@@ -631,6 +636,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           transaction.get(userAppointmentsQuery),
           transaction.get(bonosQuery),
           Promise.all(occupancyRefs.map((ref) => transaction.get(ref))),
+          loadCapacityExceptions(transaction, db, occurrenceDates),
         ]);
         await loadServiceAndTrainer(transaction, input.serviceType, "", false);
 
@@ -680,6 +686,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           now: getNowDate(),
           siteConfig: config,
           occupancyByKey,
+          capacityByDate: capacityExceptions,
           blockedKeys,
           userSlotKeys,
           activeBonos,
@@ -860,12 +867,14 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           siteConfigSnap,
           occupancySnaps,
           bonoSnap,
+          capacityExceptions,
         ] = await Promise.all([
           transaction.get(blockedSlotsQuery),
           transaction.get(userAppointmentsQuery),
           transaction.get(siteConfigRef),
           Promise.all(occupancyRefs.map((ref) => transaction.get(ref))),
           transaction.get(bonoRef),
+          loadCapacityExceptions(transaction, db, dates),
         ]);
         if (assignedTrainer) {
           await loadServiceAndTrainer(transaction, series.serviceType, assignedTrainer, true);
@@ -923,12 +932,13 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
             internalKeys.add(key);
             return assertOccupancyCount(occupancyByKey.get(key));
           });
-          if (counts.some((current) => current + 1 > config.maxCapacity)) {
+          const maxCapacity = resolveMaxCapacity(config, capacityExceptions, occurrence.slot.date);
+          if (counts.some((current) => current + 1 > maxCapacity)) {
             restrictions.push({
               ...occurrence.slot,
               reason: "slot_full",
               occupancy: Math.max(...counts),
-              maxCapacity: config.maxCapacity,
+              maxCapacity,
             });
           }
         });

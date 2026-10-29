@@ -137,3 +137,37 @@ test("recurring occurrences only leave their series through Cloud Functions", as
 test("backend audit records stay closed, even to admins", async () => {
   await assertFails(getDoc(doc(verified("admin"), "appointment_deletions/x")));
 });
+
+test("capacity exceptions: verified users read them, nobody writes them from a client", async () => {
+  await env.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), `capacity_exceptions/${DAY}`), { date: DAY, maxCapacity: 2 });
+  });
+  const user = verified("user-1");
+  await assertSucceeds(getDoc(doc(user, `capacity_exceptions/${DAY}`)));
+  await assertSucceeds(getDocs(query(collection(user, "capacity_exceptions"), where("date", ">=", "2026-10-01"))));
+  await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(), `capacity_exceptions/${DAY}`)));
+  const unverified = env.authenticatedContext("user-1", { email: "u1@example.com", email_verified: false }).firestore();
+  await assertFails(getDoc(doc(unverified, `capacity_exceptions/${DAY}`)));
+  await assertFails(setDoc(doc(user, "capacity_exceptions/2026-10-20"), { date: "2026-10-20", maxCapacity: 9 }));
+  const admin = verified("admin");
+  await assertFails(setDoc(doc(admin, "capacity_exceptions/2026-10-20"), { date: "2026-10-20", maxCapacity: 3 }));
+  await assertFails(updateDoc(doc(admin, `capacity_exceptions/${DAY}`), { maxCapacity: 5 }));
+  await assertFails(deleteDoc(doc(admin, `capacity_exceptions/${DAY}`)));
+});
+
+test("site config: admins edit it, but capacity only changes through Cloud Functions", async () => {
+  await env.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "site_config/main"), {
+      startHour: 8, endHour: 20, maxCapacity: 4, capacityExceptionsEnabled: false,
+    });
+  });
+  const admin = verified("admin");
+  await assertSucceeds(getDoc(doc(env.unauthenticatedContext().firestore(), "site_config/main")));
+  await assertSucceeds(setDoc(doc(admin, "site_config/main"), { endHour: 21 }, { merge: true }));
+  // Re-sending the unchanged value is not a change.
+  await assertSucceeds(setDoc(doc(admin, "site_config/main"), { maxCapacity: 4, minBookingNoticeHours: 2 }, { merge: true }));
+  await assertFails(setDoc(doc(admin, "site_config/main"), { maxCapacity: 2 }, { merge: true }));
+  await assertFails(updateDoc(doc(admin, "site_config/main"), { capacityExceptionsEnabled: true }));
+  await assertFails(deleteDoc(doc(admin, "site_config/main")));
+  await assertFails(setDoc(doc(verified("user-1"), "site_config/main"), { endHour: 22 }, { merge: true }));
+});

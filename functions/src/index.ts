@@ -48,6 +48,7 @@ import {
   type ProposalHistoryEntry,
 } from "./appointmentProposals.js";
 import { createBonoRenewalHandlers } from "./bonoRenewal.js";
+import { createCapacityAdminHandlers, loadCapacityExceptions, resolveMaxCapacity } from "./capacityExceptions.js";
 import { createAdminAppointmentStatusHandlers } from "./adminAppointmentStatus.js";
 import { createAdminAppointmentCreateHandlers } from "./adminAppointmentCreate.js";
 import { createCustomerBookingHandlers } from "./customerBooking.js";
@@ -1061,6 +1062,27 @@ const bonoRenewal = createBonoRenewalHandlers({
   getNowDate,
 });
 
+const capacityAdmin = createCapacityAdminHandlers({
+  db,
+  requireAdmin,
+  getNowDate,
+});
+
+export const upsertCapacityExceptionsFromAdmin = onCall(
+  { region: REGION },
+  capacityAdmin.upsertCapacityExceptionsFromAdmin,
+);
+
+export const deleteCapacityExceptionsFromAdmin = onCall(
+  { region: REGION },
+  capacityAdmin.deleteCapacityExceptionsFromAdmin,
+);
+
+export const updateMaxCapacityFromAdmin = onCall(
+  { region: REGION },
+  capacityAdmin.updateMaxCapacityFromAdmin,
+);
+
 export const createRecurringAppointmentsFromAdmin = onCall(
   { region: REGION },
   recurringSeries.createRecurringAppointmentsFromAdmin,
@@ -1491,11 +1513,12 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
       const userAppointmentsQuery = db.collection("appointments")
         .where("userId", "==", requestUid)
         .where("status", "in", ["pending", "approved"]);
-      const [siteConfigSnap, blockedSlotsSnap, occupancySnap, userAppointmentsSnap, ...oldOccupancySnaps] = await Promise.all([
+      const [siteConfigSnap, blockedSlotsSnap, occupancySnap, userAppointmentsSnap, capacityExceptions, ...oldOccupancySnaps] = await Promise.all([
         transaction.get(siteConfigRef),
         transaction.get(blockedSlotsQuery),
         transaction.get(occupancyQuery),
         transaction.get(userAppointmentsQuery),
+        loadCapacityExceptions(transaction, db, [preferredSlot.date]),
         ...oldOccupancyRefs.map((ref) => transaction.get(ref)),
       ]);
 
@@ -1532,10 +1555,11 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
         occupancyByTime.set(occupancy.time, occupancy.count);
       });
       const ownApprovedKeys = appointment.status === "approved" ? appointmentSlotKeys(appointment) : new Set<string>();
+      const targetMaxCapacity = resolveMaxCapacity(config, capacityExceptions, preferredSlot.date);
       if (slotBlocks.some((time) => {
         const key = `${preferredSlot.date}_${time}`;
         const current = occupancyByTime.get(time) ?? 0;
-        return !isRescheduleCapacityAvailable(current, ownApprovedKeys.has(key), config.maxCapacity);
+        return !isRescheduleCapacityAvailable(current, ownApprovedKeys.has(key), targetMaxCapacity);
       })) {
         throw toHttpsError("failed-precondition", "La franja seleccionada está llena.", {
           reason: "slot_full",

@@ -1,3 +1,4 @@
+import { resolveMaxCapacity, type CapacityByDate } from '@/lib/capacity-exceptions';
 import {
     type Appointment,
     type BlockedSlot,
@@ -65,6 +66,8 @@ export interface StatisticsInput {
     /** Bonos that ended (expired or replaced) in the current or previous period, plus every newer bono. */
     bonoHistory: readonly Bono[];
     siteConfig: SiteConfig;
+    /** Capacity exceptions of the periods (aforo por fecha); other days use siteConfig.maxCapacity. */
+    capacityByDate?: CapacityByDate;
     blockedSlots: readonly BlockedSlot[];
     /** Counters of the next days, to detect drift against approved appointments. */
     upcomingOccupancy: readonly SlotOccupancy[];
@@ -323,14 +326,23 @@ function isOverdue(bono: Bono, now: Date): boolean {
 // ------------------------------------------------------------------ occupancy
 
 interface OccupancyFrame {
+    /** Global capacity, shown as the reference value. */
     capacity: number;
+    /** Effective capacity of each day: its exception or the global value. */
+    capacityFor: (date: string) => number;
     hours: number[];
     /** Open 15-min blocks per day of the period, minus blocked ones. */
     openBlocksByDate: Map<string, Set<string>>;
 }
 
-function occupancyFrame(period: StatsPeriod, config: SiteConfig, blockedSlots: readonly BlockedSlot[]): OccupancyFrame {
+function occupancyFrame(
+    period: StatsPeriod,
+    config: SiteConfig,
+    blockedSlots: readonly BlockedSlot[],
+    capacityByDate?: CapacityByDate,
+): OccupancyFrame {
     const capacity = Math.max(0, Math.trunc(Number(config.maxCapacity) || 0));
+    const capacityFor = (date: string) => Math.max(0, Math.trunc(Number(resolveMaxCapacity({ maxCapacity: capacity }, capacityByDate, date)) || 0));
     const hours: number[] = [];
     for (let hour = config.startHour; hour < config.endHour; hour += 1) hours.push(hour);
     const blocked = new Set(blockedSlots.map((slot) => slotOccupancyKey(slot.date, slot.time)));
@@ -345,7 +357,7 @@ function occupancyFrame(period: StatsPeriod, config: SiteConfig, blockedSlots: r
         }
         openBlocksByDate.set(date, open);
     }
-    return { capacity, hours, openBlocksByDate };
+    return { capacity, capacityFor, hours, openBlocksByDate };
 }
 
 /** Seats taken per 15-min block by the given appointments (approved only). */
@@ -368,8 +380,9 @@ function occupancyRate(items: readonly Located[], frame: OccupancyFrame, dates?:
     let used = 0;
     for (const [date, open] of frame.openBlocksByDate) {
         if (dates && !dates(date)) continue;
-        available += open.size * frame.capacity;
-        for (const time of open) used += Math.min(frame.capacity, seats.get(slotOccupancyKey(date, time)) ?? 0);
+        const dayCapacity = frame.capacityFor(date);
+        available += open.size * dayCapacity;
+        for (const time of open) used += Math.min(dayCapacity, seats.get(slotOccupancyKey(date, time)) ?? 0);
     }
     return available > 0 ? used / available : null;
 }
@@ -395,8 +408,8 @@ export function calculateStatistics(input: StatisticsInput): StatisticsResult {
     const currentFiltered = current.filter((item) => matchesTrainer(item, trainerId));
     const beforeFiltered = before.filter((item) => matchesTrainer(item, trainerId));
 
-    const frame = occupancyFrame(period, input.siteConfig, input.blockedSlots);
-    const previousFrame = occupancyFrame(comparable, input.siteConfig, input.blockedSlots);
+    const frame = occupancyFrame(period, input.siteConfig, input.blockedSlots, input.capacityByDate);
+    const previousFrame = occupancyFrame(comparable, input.siteConfig, input.blockedSlots, input.capacityByDate);
 
     // ---------------- summary
     const counted = currentFiltered.filter((item) => isCounted(item, nowMs));
@@ -728,12 +741,13 @@ export function calculateStatistics(input: StatisticsInput): StatisticsResult {
     const cellTotals = new Map<string, { available: number; used: number; seats: number }>();
     for (const [date, open] of frame.openBlocksByDate) {
         const weekday = weekdayIndex(date);
+        const dayCapacity = frame.capacityFor(date);
         for (const time of open) {
             const key = `${weekday}|${Number(time.slice(0, 2))}`;
             const taken = seats.get(slotOccupancyKey(date, time)) ?? 0;
             const cell = cellTotals.get(key) ?? { available: 0, used: 0, seats: 0 };
-            cell.available += frame.capacity;
-            cell.used += Math.min(frame.capacity, taken);
+            cell.available += dayCapacity;
+            cell.used += Math.min(dayCapacity, taken);
             cell.seats += taken;
             cellTotals.set(key, cell);
         }

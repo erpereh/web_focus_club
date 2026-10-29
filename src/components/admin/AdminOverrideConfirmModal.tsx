@@ -9,14 +9,14 @@ import {
     groupAdminRestrictions,
 } from '@/lib/admin-booking-overrides';
 
-export type AdminOverrideMode = 'create' | 'reschedule' | 'approve';
+export type AdminOverrideMode = 'create' | 'reschedule' | 'approve' | 'capacity';
 
 export interface AdminOverrideConfirmModalProps {
     prompt: AdminOverridePrompt;
     /** Serie recurrente: cambia los textos y avisa de que se aplica todo o nada. */
     isSeries: boolean;
     totalSessions?: number;
-    /** Qué se confirma: crear (por defecto), modificar o aprobar. Solo cambia los textos. */
+    /** Qué se confirma: crear (por defecto), modificar, aprobar o reducir el aforo. Solo cambia los textos. */
     mode?: AdminOverrideMode;
     /** La cita modificada sigue pendiente: aún no ocupa plaza. */
     pendingNote?: boolean;
@@ -30,9 +30,13 @@ const TITLES: Record<AdminOverrideMode, [single: string, series: string]> = {
     create: ['La cita tiene restricciones', 'La serie tiene restricciones'],
     reschedule: ['La nueva franja tiene restricciones', 'La nueva programación tiene restricciones'],
     approve: ['La aprobación supera el aforo', 'La aprobación de la serie supera el aforo'],
+    capacity: ['El nuevo aforo es menor que las citas aprobadas', 'El nuevo aforo es menor que las citas aprobadas'],
 };
 
 function describeOverride(mode: AdminOverrideMode, isSeries: boolean, affected: number, total: number): string {
+    if (mode === 'capacity') {
+        return `${affected === 1 ? 'Hay 1 franja' : `Hay ${affected} franjas`} con más citas aprobadas que el nuevo aforo. Las citas existentes no se cancelan ni se modifican; solo se impedirán nuevas reservas hasta que haya plaza.`;
+    }
     if (!isSeries) {
         if (mode === 'reschedule') return 'La franja elegida no cumple las reglas normales de reserva. Puedes guardar el cambio igualmente como administrador.';
         if (mode === 'approve') return 'La franja está completa. Puedes aprobar la cita igualmente como administrador.';
@@ -111,7 +115,7 @@ export function AdminOverrideConfirmModal({
                         </p>
                     )}
 
-                    <ul className="space-y-2" aria-label="Fechas afectadas">
+                    <ul className="space-y-2" aria-label={mode === 'capacity' ? 'Franjas afectadas' : 'Fechas afectadas'}>
                         {groups.map((group) => (
                             <li
                                 key={`${group.date}T${group.time}`}
@@ -153,7 +157,9 @@ export function AdminOverrideConfirmModal({
                     )}
 
                     <p className="text-xs text-[var(--color-text-secondary)]">
-                        La excepción quedará registrada con tu usuario, la fecha y los motivos superados. {mode === 'create' ? 'Antes de crear' : 'Antes de guardar'} se vuelve a validar todo en el servidor.
+                        {mode === 'capacity'
+                            ? 'El cambio quedará registrado con tu usuario y las franjas afectadas. Antes de guardar se vuelve a comprobar la ocupación en el servidor.'
+                            : `La excepción quedará registrada con tu usuario, la fecha y los motivos superados. ${mode === 'create' ? 'Antes de crear' : 'Antes de guardar'} se vuelve a validar todo en el servidor.`}
                     </p>
                 </div>
 

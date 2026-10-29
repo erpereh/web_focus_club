@@ -254,6 +254,17 @@ describe('calculateStatistics', () => {
         expect(blocked.summary.averageOccupancy.current).toBeCloseTo(0);
     });
 
+    it('uses the capacity of each day when it has its own aforo', () => {
+        const day = customPeriod('2026-10-05', '2026-10-05')!;
+        const input = { ...fixture(), period: day, previous: previousPeriod(day), capacityByDate: { '2026-10-05': 1 } };
+        const { occupancy, summary } = calculateStatistics(input);
+        // 12 open hours × 4 blocks × 1 seat = 48; one 60-min session = 4 seats.
+        expect(summary.averageOccupancy.current).toBeCloseTo(4 / 48);
+        expect(occupancy.heatmap.find((cell) => cell.weekday === 0 && cell.hour === 10)?.rate).toBe(1);
+        // The global value stays the reference shown.
+        expect(occupancy.capacity).toBe(2);
+    });
+
     it('separates reserved and cancelled seat-hours and ranks demand', () => {
         const { occupancy } = calculateStatistics(fixture());
         const oct14 = occupancy.buckets.find((bucket) => bucket.key === '2026-10-14')!;

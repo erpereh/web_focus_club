@@ -141,6 +141,10 @@ import {
     REPAIRED_EXISTING_AUTH_NOTICE,
 } from '@/lib/admin-create-client';
 import { getAdminCreateSlotStatus } from '@/lib/admin-slot-status';
+import { capacityByDateFrom } from '@/lib/capacity-exceptions';
+import { CapacityExceptionsCard } from '@/components/admin/CapacityExceptionsCard';
+import { useCapacityChangeConfirmation } from '@/components/admin/useCapacityChangeConfirmation';
+import { addDays as addCivilDays } from '@/lib/admin-statistics-period';
 import {
   type AdminOverridePrompt,
   getCallableErrorDetails,
@@ -201,6 +205,8 @@ import {
   doesSessionFitWithinSchedule,
   rescheduleAppointmentFromAdmin as rescheduleAppointmentFromAdminFS,
   subscribeSlotOccupancyForDate,
+  subscribeCapacityExceptionsInRange,
+  updateMaxCapacityFromAdmin,
   type PendingRefund,
   replaceRecurringSeriesScheduleFromAdmin as replaceRecurringSeriesScheduleFromAdminFS,
   returnRecurringSeriesToPendingFromAdmin as returnRecurringSeriesToPendingFromAdminFS,
@@ -1134,6 +1140,7 @@ export default function AdminPage() {
   const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
   const [cancelError, setCancelError] = useState('');
   const [createDayOccupancy, setCreateDayOccupancy] = useState<Record<string, unknown> | null>(null);
+  const [createDayCapacityByDate, setCreateDayCapacityByDate] = useState<Record<string, number>>({});
   const [showSeriesReturnPendingModal, setShowSeriesReturnPendingModal] = useState(false);
   const [seriesReturnPendingId, setSeriesReturnPendingId] = useState<string | null>(null);
   const [seriesReturnPendingError, setSeriesReturnPendingError] = useState('');
@@ -1242,6 +1249,8 @@ export default function AdminPage() {
   const [editBonoConfig, setEditBonoConfig] = useState(1);
   const [savingBonoConfig, setSavingBonoConfig] = useState(false);
   const [editMaxCapacity, setEditMaxCapacity] = useState(DEFAULT_SITE_CONFIG.maxCapacity);
+  // The global capacity changes through Cloud Functions, confirming approved seats above it.
+  const maxCapacityConfirmation = useCapacityChangeConfirmation();
   const [savingMaxCapacity, setSavingMaxCapacity] = useState(false);
   const [editMinBookingNotice, setEditMinBookingNotice] = useState(DEFAULT_SITE_CONFIG.minBookingNoticeHours);
   const [savingMinBookingNotice, setSavingMinBookingNotice] = useState(false);
@@ -1596,7 +1605,7 @@ export default function AdminPage() {
       return;
     }
     setCreateDayOccupancy(null);
-    return subscribeSlotOccupancyForDate(
+    const unsubscribeOccupancy = subscribeSlotOccupancyForDate(
       date,
       (occupancy) => setCreateDayOccupancy(occupancy),
       (error) => {
@@ -1604,6 +1613,16 @@ export default function AdminPage() {
         setCreateDayOccupancy(null);
       },
     );
+    const unsubscribeCapacity = subscribeCapacityExceptionsInRange(
+      date,
+      addCivilDays(date, 1),
+      (exceptions) => setCreateDayCapacityByDate(capacityByDateFrom(exceptions)),
+      (error) => console.error('Error cargando el aforo por fecha:', error),
+    );
+    return () => {
+      unsubscribeOccupancy();
+      unsubscribeCapacity();
+    };
   }, [showCreateAppointmentModal, createAppointmentForm.date]);
 
   const createBlockedSlotKeys = useMemo(
@@ -1616,6 +1635,7 @@ export default function AdminPage() {
     time,
     durationMinutes: createAppointmentForm.durationMinutes,
     siteConfig,
+    capacityByDate: createDayCapacityByDate,
     occupancy: createDayOccupancy,
     blockedSlotKeys: createBlockedSlotKeys,
     appointments,
@@ -7209,7 +7229,7 @@ export default function AdminPage() {
 
                       <div className="mt-6 flex items-center gap-4">
                         <button
-                          disabled={savingMaxCapacity || editMaxCapacity === siteConfig.maxCapacity}
+                          disabled={savingMaxCapacity || maxCapacityConfirmation.waiting || editMaxCapacity === siteConfig.maxCapacity}
                           onClick={async () => {
                             const nextMaxCapacity = normalizeMaxCapacity(editMaxCapacity);
                             if (nextMaxCapacity !== editMaxCapacity) {
@@ -7217,19 +7237,17 @@ export default function AdminPage() {
                             }
                             setSavingMaxCapacity(true);
                             try {
-                              await updateSiteConfigFS({ maxCapacity: nextMaxCapacity });
-                              setSiteConfig((prev) => ({ ...prev, maxCapacity: nextMaxCapacity }));
-                              setEditMaxCapacity(nextMaxCapacity);
-                              await addActivityLog({
-                                action: 'max_capacity_updated',
-                                adminEmail: user?.email || 'unknown',
-                                details: `Capacidad por franja: ${nextMaxCapacity} persona(s)`,
+                              // Audited by the callable (activity_logs: max_capacity_updated).
+                              await maxCapacityConfirmation.run(async ({ requestId, acknowledgedRestrictions }) => {
+                                await updateMaxCapacityFromAdmin({ maxCapacity: nextMaxCapacity, requestId, acknowledgedRestrictions });
+                                setSiteConfig((prev) => ({ ...prev, maxCapacity: nextMaxCapacity }));
+                                setEditMaxCapacity(nextMaxCapacity);
+                                const t = toast({
+                                  title: 'Capacidad actualizada',
+                                  description: `Máximo: ${nextMaxCapacity} persona(s) por franja.`,
+                                });
+                                setTimeout(() => t.dismiss(), 3500);
                               });
-                              const t = toast({
-                                title: 'Capacidad actualizada',
-                                description: `Máximo: ${nextMaxCapacity} persona(s) por franja.`,
-                              });
-                              setTimeout(() => t.dismiss(), 3500);
                             } catch (err) {
                               console.error('Error saving max capacity:', err);
                               const t = toast({
@@ -7267,8 +7285,18 @@ export default function AdminPage() {
                         <div className="text-sm text-[var(--color-text-secondary)]">
                           Máximo: <strong className="text-[var(--color-text-primary)]">{siteConfig.maxCapacity} persona(s)</strong>
                         </div>
+                        <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
+                          Se aplica a todos los días sin aforo propio. Si lo reduces por debajo de citas ya aprobadas, se te pedirá confirmación y esas citas se mantienen.
+                        </p>
                       </div>
+                      {maxCapacityConfirmation.modal}
                     </GlassCard>
+
+                    <CapacityExceptionsCard
+                      className="lg:col-span-2"
+                      globalCapacity={siteConfig.maxCapacity}
+                      enabled={siteConfig.capacityExceptionsEnabled === true}
+                    />
 
                     <GlassCard className="p-6">
                       <div className="flex items-center gap-3 mb-4">

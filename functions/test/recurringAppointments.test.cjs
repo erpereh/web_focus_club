@@ -432,7 +432,8 @@ assert.match(indexSource, /export const rejectRecurringAppointmentSeriesFromAdmi
 assert.match(indexSource, /export const cancelOwnRecurringAppointmentSeries\s*=\s*onCall/);
 // Customer bookings require exactly one active bono (handler extracted to customerBooking.ts).
 assert.match(fs.readFileSync(path.join(__dirname, "../src/customerBooking.ts"), "utf8"), /selectExactlyOneActiveBono/);
-assert.match(indexSource, /config\.maxCapacity/);
+assert.match(indexSource, /resolveMaxCapacity\(config, capacityExceptions, preferredSlot\.date\)/);
+assert.match(seriesSource, /capacityByDate: capacityExceptions/);
 assert.doesNotMatch(indexSource, /const MAX_CAPACITY\s*=\s*2/);
 
 assert.match(seriesSource, /bonos\/\{series\.bonoId\}|collection\("bonos"\)\.doc\(series\.bonoId\)|collection\("bonos"\)\.doc\(input\.series\.bonoId\)|doc\(seriesData\.bonoId\)|bonos"\)\.doc\([^\)]*bonoId/);

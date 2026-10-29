@@ -686,13 +686,13 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
           const reason = evaluateSlot(day, input);
           if (reason === "slot_full") {
             // Capacity is the only rule an admin may override, and only once every other rule passes.
-            const relaxed = evaluateSlot({ ...day, config: { ...day.config, maxCapacity: Number.MAX_SAFE_INTEGER } }, input);
+            const relaxed = evaluateSlot({ ...day, maxCapacity: Number.MAX_SAFE_INTEGER }, input);
             if (relaxed) rejection(relaxed);
             if (!allowOverCapacity) {
               rejection("slot_full", {
                 overridable: true,
                 occupancy: peakOccupancy(day, slot, duration),
-                maxCapacity: day.config.maxCapacity,
+                maxCapacity: day.maxCapacity,
               });
             }
             overCapacity = true;
@@ -737,7 +737,7 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
             date: slot.date,
             time: slot.time,
             occupancyBefore: peakOccupancy(day, slot, duration),
-            maxCapacity: day.config.maxCapacity,
+            maxCapacity: day.maxCapacity,
           });
         }
         return { success: true, appointmentId, status: "approved", changed: true, overCapacity };

@@ -33,6 +33,7 @@ import {
   readIdempotencyMarker,
   writeIdempotencyMarker,
 } from "./adminBookingOverrides.js";
+import { loadCapacityExceptions, resolveMaxCapacity } from "./capacityExceptions.js";
 import {
   appointmentRangeKeys,
   getAppointmentType,
@@ -322,7 +323,8 @@ function collectCapacityRestrictions(input: {
   sessions: Array<{ slot: TimeSlot; keys: string[] }>;
   deltaByKey: Map<string, number>;
   currentByKey: Map<string, unknown>;
-  maxCapacity: number;
+  /** Effective capacity of a date (its capacity exception or the global value). */
+  capacityFor: (date: string) => number;
   consumesCapacity: boolean;
 }): AdminRestriction[] {
   const restrictions: AdminRestriction[] = [];
@@ -332,13 +334,14 @@ function collectCapacityRestrictions(input: {
         .filter((key) => (input.deltaByKey.get(key) ?? 0) > 0)
         .map((key) => assertOccupancyCount(input.currentByKey.get(key)) + (input.deltaByKey.get(key) ?? 0) - 1)
       : session.keys.map((key) => assertOccupancyCount(input.currentByKey.get(key)));
-    if (!counts.some((count) => count >= input.maxCapacity)) continue;
+    const maxCapacity = input.capacityFor(session.slot.date);
+    if (!counts.some((count) => count >= maxCapacity)) continue;
     restrictions.push({
       date: session.slot.date,
       time: session.slot.time,
       reason: "slot_full",
       occupancy: Math.max(...counts),
-      maxCapacity: input.maxCapacity,
+      maxCapacity,
     });
   }
   return restrictions;
@@ -523,6 +526,7 @@ async function rescheduleAppointmentFromAdmin(
       userAppointmentsSnap,
       occupancySnaps,
       trainerAppointmentsSnap,
+      targetCapacityExceptions,
     ] = await Promise.all([
       trainerRef ? transaction.get(trainerRef) : Promise.resolve(undefined),
       recurrenceSeriesRef ? transaction.get(recurrenceSeriesRef) : Promise.resolve(undefined),
@@ -532,6 +536,7 @@ async function rescheduleAppointmentFromAdmin(
       userAppointmentsQuery ? transaction.get(userAppointmentsQuery) : Promise.resolve(undefined),
       Promise.all(occupancyRefs.map((ref) => transaction.get(ref))),
       trainerAppointmentsQuery ? transaction.get(trainerAppointmentsQuery) : Promise.resolve(undefined),
+      slotChanged ? loadCapacityExceptions(transaction, deps.db, [input.slot.date]) : Promise.resolve(new Map<string, number>()),
     ]);
 
     if (recurrenceSeriesId) {
@@ -619,7 +624,7 @@ async function rescheduleAppointmentFromAdmin(
           sessions: [{ slot: input.slot, keys: targetKeys }],
           deltaByKey: occupancyDelta,
           currentByKey: occupancyByKey,
-          maxCapacity: futureTargetConfig.maxCapacity,
+          capacityFor: (date) => resolveMaxCapacity(futureTargetConfig, targetCapacityExceptions, date),
           consumesCapacity: appointment.status === "approved",
         })
         : [],
@@ -959,9 +964,10 @@ async function replaceRecurringSeriesScheduleFromAdmin(
       .where("date", "<=", generatedDates.at(-1));
 
     // Exact refs are now known. Complete every remaining read before writing anything.
-    const [occupancySnaps, blockedSnap] = await Promise.all([
+    const [occupancySnaps, blockedSnap, capacityExceptions] = await Promise.all([
       Promise.all(occupancyRefs.map((ref) => transaction.get(ref))),
       transaction.get(blockedQuery),
+      loadCapacityExceptions(transaction, deps.db, generatedDates),
     ]);
     const occupancyByKey = new Map<string, unknown>();
     occupancySnaps.forEach((snap, index) => {
@@ -1076,7 +1082,7 @@ async function replaceRecurringSeriesScheduleFromAdmin(
         sessions: desired,
         deltaByKey: occupancyDelta,
         currentByKey: occupancyByKey,
-        maxCapacity: config.maxCapacity,
+        capacityFor: (date) => resolveMaxCapacity(config, capacityExceptions, date),
         consumesCapacity: !isPendingSeries,
       }),
       request: overrideRequest,

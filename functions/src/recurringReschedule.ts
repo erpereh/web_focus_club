@@ -49,6 +49,7 @@ import {
 } from "./siteConfig.js";
 import { newNotificationOperation, sessionsOf, writeNotificationOutbox } from "./notifications/outbox.js";
 import { notChargedCancellationPatch } from "./cancellationCharge.js";
+import { loadCapacityExceptions, resolveMaxCapacity } from "./capacityExceptions.js";
 
 export type RecurringRescheduleScope = "single" | "series" | "following";
 export type RecurringRescheduleActorType = "admin" | "customer";
@@ -547,6 +548,8 @@ export function validateRecurringRescheduleAvailability(input: {
   blockedKeys: Set<string>;
   occupancyByKey: Map<string, unknown>;
   userAppointments: RecurringAppointmentRecord[];
+  /** Effective capacity per target date (capacity exceptions); missing dates use the global value. */
+  capacityByDate?: ReadonlyMap<string, number>;
 }): AvailabilityResult {
   const config = normalizeSiteConfig(input.siteConfig);
   const validTimes = new Set(generateTimeSlots(config));
@@ -613,7 +616,8 @@ export function validateRecurringRescheduleAvailability(input: {
       );
     }
     // Only added seats can exceed capacity: leaving (or staying in) a slot already over it never fails.
-    if (delta > 0 && finalCount > config.maxCapacity) {
+    const maxCapacity = input.capacityByDate?.get(key.slice(0, key.indexOf("_"))) ?? config.maxCapacity;
+    if (delta > 0 && finalCount > maxCapacity) {
       return planError(
         input.draft.scope,
         "slot_full",
@@ -800,9 +804,10 @@ async function runCustomerSingleRecurringReschedule(
     const occupancyKeys = [...occupancyDelta.keys()].sort();
     const occupancyRefs = occupancyKeys.map((key) => deps.db.collection("slot_occupancy").doc(key));
     const blockedQuery = deps.db.collection("blocked_slots").where("date", "==", parsed.preferredSlot.date);
-    const [occupancySnaps, blockedSnap] = await Promise.all([
+    const [occupancySnaps, blockedSnap, capacityExceptions] = await Promise.all([
       Promise.all(occupancyRefs.map((ref) => transaction.get(ref))),
       transaction.get(blockedQuery),
+      loadCapacityExceptions(transaction, deps.db, [parsed.preferredSlot.date]),
     ]);
 
     const config = normalizeSiteConfig(configSnap.exists ? configSnap.data() as Partial<SiteConfig> : undefined);
@@ -855,7 +860,7 @@ async function runCustomerSingleRecurringReschedule(
       if (!Number.isInteger(finalCount) || finalCount < 0) {
         throwCustomerSingleError("invalid_occupancy", "La ocupacion final no es valida.", parsed.preferredSlot, selectedRef.id);
       }
-      if (targetKeySet.has(key) && finalCount >= config.maxCapacity) {
+      if (targetKeySet.has(key) && finalCount >= resolveMaxCapacity(config, capacityExceptions, parsed.preferredSlot.date)) {
         throwCustomerSingleError("slot_full", "La franja seleccionada esta completa.", parsed.preferredSlot, selectedRef.id);
       }
       if (delta !== 0) {
@@ -1231,9 +1236,10 @@ async function runCustomerSeriesReplacement(
     const blockedQuery = deps.db.collection("blocked_slots")
       .where("date", ">=", generatedDates[0])
       .where("date", "<=", generatedDates.at(-1));
-    const [occupancySnaps, blockedSnap] = await Promise.all([
+    const [occupancySnaps, blockedSnap, capacityExceptions] = await Promise.all([
       Promise.all(occupancyRefs.map((ref) => transaction.get(ref))),
       transaction.get(blockedQuery),
+      loadCapacityExceptions(transaction, deps.db, generatedDates),
     ]);
 
     const occupancyByKey = new Map<string, number>();
@@ -1269,7 +1275,7 @@ async function runCustomerSeriesReplacement(
         if (!Number.isInteger(effective) || effective < 0) {
           throwCustomerSeriesError("invalid_occupancy", "La ocupacion final calculada no es valida.", occurrence.slot);
         }
-        if (effective >= config.maxCapacity) {
+        if (effective >= resolveMaxCapacity(config, capacityExceptions, occurrence.slot.date)) {
           throwCustomerSeriesError("slot_full", "Una franja de la nueva serie esta completa.", occurrence.slot);
         }
         const targetKeys = new Set(occurrence.keys);
@@ -1615,9 +1621,10 @@ async function runRecurringReschedule(
     const blockedQuery = deps.db.collection("blocked_slots").where("date", "in", draft.targetDates);
 
     // E. All remaining reads happen before the first write.
-    const [occupancySnaps, blockedSnap] = await Promise.all([
+    const [occupancySnaps, blockedSnap, capacityExceptions] = await Promise.all([
       Promise.all(occupancyRefs.map((ref) => transaction.get(ref))),
       transaction.get(blockedQuery),
+      loadCapacityExceptions(transaction, deps.db, draft.targetDates),
     ]);
 
     // F. Validate all destinations and final occupancy counts.
@@ -1638,6 +1645,7 @@ async function runRecurringReschedule(
       siteConfig: configSnap.exists ? configSnap.data() as Partial<SiteConfig> : normalizeSiteConfig(),
       blockedKeys,
       occupancyByKey,
+      capacityByDate: capacityExceptions,
       userAppointments: userAppointmentsSnap.docs.map((snap) => ({
         id: snap.id,
         data: snap.data() as RecurringAppointmentData,

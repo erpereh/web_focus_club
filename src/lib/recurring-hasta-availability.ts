@@ -1,4 +1,5 @@
 import type { SiteConfig } from '@/types';
+import { resolveMaxCapacity, type CapacityByDate } from '@/lib/capacity-exceptions';
 import { getCanonicalSlotBlocks, slotOccupancyKey, doesSessionFitWithinSchedule, generateTimeSlots } from '@/lib/appointment-slots';
 import { generateRecurringOccurrenceDates, type RecurringEndDateOption } from '@/lib/recurring-appointments';
 import { classifyMadridCivilSlot } from '@/lib/madrid-date';
@@ -49,13 +50,14 @@ function evaluateOccurrence(input: {
     blockedKeys: Set<string>;
     userBookedSlotKeys: Set<string>;
     siteConfig: SiteConfig;
+    capacityByDate?: CapacityByDate;
     now: Date;
     minBookingNoticeHours: number;
     blockSameDayBooking: boolean;
     allowFullCapacity: boolean;
 }): Omit<RecurringHastaOptionStatus, 'option'> | null {
     const config = normalizeSiteConfig(input.siteConfig);
-    const maxCapacity = config.maxCapacity;
+    const maxCapacity = resolveMaxCapacity(config, input.capacityByDate, input.date);
     const dateShort = formatDateShort(input.date);
     const dateEs = formatDateEs(input.date);
 
@@ -148,6 +150,8 @@ export function evaluateRecurringHastaOptions(input: {
     blockedKeys: Set<string>;
     userBookedSlotKeys: Set<string>;
     siteConfig: SiteConfig;
+    /** Capacity exceptions of the occurrence dates (aforo por fecha). */
+    capacityByDate?: CapacityByDate;
     now: Date;
     /** Customer booking notice in hours. Admin callers omit it. */
     minBookingNoticeHours?: number;
@@ -174,6 +178,7 @@ export function evaluateRecurringHastaOptions(input: {
                     blockedKeys: input.blockedKeys,
                     userBookedSlotKeys: input.userBookedSlotKeys,
                     siteConfig: input.siteConfig,
+                    capacityByDate: input.capacityByDate,
                     now: input.now,
                     minBookingNoticeHours: input.minBookingNoticeHours ?? 0,
                     blockSameDayBooking: input.blockSameDayBooking === true,

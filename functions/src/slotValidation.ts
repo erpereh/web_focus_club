@@ -11,6 +11,7 @@ import {
 } from "./appointmentLifecycle.js";
 import { doesSessionFitWithinSchedule, generateTimeSlots, normalizeSiteConfig, type SiteConfig } from "./siteConfig.js";
 import { parseOccupancyCount, sessionMinutesOf } from "./slotOccupancy.js";
+import { loadCapacityExceptions, resolveMaxCapacity } from "./capacityExceptions.js";
 
 /**
  * Appointment kinds. Documents written before nutrition existed have no
@@ -94,6 +95,8 @@ export interface TrainerSnapshot {
 /** Everything a slot decision depends on for one civil day. */
 export interface SlotDayContext {
   config: SiteConfig;
+  /** Effective capacity of the day: its capacity exception, or `config.maxCapacity`. */
+  maxCapacity: number;
   blockedTimes: Set<string>;
   occupancyByTime: Map<string, number>;
   /** Times whose stored count is not a non-negative integer (corrupt counters). */
@@ -150,6 +153,11 @@ export function rangesOverlap(target: Set<string>, other: Set<string>): boolean 
 
 const ACTIVE_STATUSES = new Set(["pending", "approved"]);
 
+/** Effective capacity of a loaded day (contexts built by hand may omit it). */
+export function dayMaxCapacity(day: Pick<SlotDayContext, "config"> & { maxCapacity?: number }): number {
+  return day.maxCapacity ?? day.config.maxCapacity;
+}
+
 /**
  * Pure availability decision shared by every booking path. Order matters:
  * it mirrors the historical checks so callers keep their messages.
@@ -175,7 +183,7 @@ export function evaluateSlot(day: SlotDayContext, input: SlotCheckInput): SlotRe
   if (blocks.some((time) => !isRescheduleCapacityAvailable(
     day.occupancyByTime.get(time) ?? 0,
     ownKeys.has(`${input.slot.date}_${time}`),
-    config.maxCapacity,
+    dayMaxCapacity(day),
   ))) {
     return "slot_full";
   }
@@ -244,9 +252,10 @@ export async function loadSlotDay(
   config: SiteConfig,
   date: string,
 ): Promise<SlotDayContext> {
-  const [blockedSnap, occupancySnap] = await Promise.all([
+  const [blockedSnap, occupancySnap, exceptions] = await Promise.all([
     reader.get(db.collection("blocked_slots").where("date", "==", date)) as Promise<QuerySnap>,
     reader.get(db.collection("slot_occupancy").where("date", "==", date)) as Promise<QuerySnap>,
+    loadCapacityExceptions(reader, db, [date]),
   ]);
   const blockedTimes = new Set<string>();
   blockedSnap.docs.forEach((docSnap) => {
@@ -262,7 +271,8 @@ export async function loadSlotDay(
     if (count === undefined) invalidOccupancyTimes.add(occupancy.time);
     occupancyByTime.set(occupancy.time, count ?? 0);
   });
-  return { config, blockedTimes, occupancyByTime, invalidOccupancyTimes };
+  const maxCapacity = resolveMaxCapacity(config, exceptions, date);
+  return { config, maxCapacity, blockedTimes, occupancyByTime, invalidOccupancyTimes };
 }
 
 export async function loadCustomerActiveAppointments(

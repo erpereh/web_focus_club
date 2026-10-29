@@ -369,6 +369,7 @@ export interface SiteConfig {
     bonoSizesMinutes: number[]; // tamaños de bono disponibles al asignar, en minutos (default: 4h/6h/8h)
     minBookingNoticeHours: number; // antelación mínima (horas) para reservas de clientes; 0 = sin límite
     blockSameDayBooking: boolean; // impide a los clientes reservar para hoy (Europe/Madrid); ausente = false
+    capacityExceptionsEnabled?: boolean; // permite crear aforos por fecha (capacity_exceptions); ausente = false
     maintenanceMode?: boolean; // modo mantenimiento para web pública y portal cliente
     // Legacy (compatibilidad hacia atrás)
     sessionDuration?: number;

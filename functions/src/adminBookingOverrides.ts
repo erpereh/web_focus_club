@@ -8,7 +8,7 @@ import {
   madridCivilSlotToInstant,
 } from "./appointmentLifecycle.js";
 import { doesSessionFitWithinSchedule, generateTimeSlots } from "./siteConfig.js";
-import type { SlotDayContext, SlotTimeSlot } from "./slotValidation.js";
+import { dayMaxCapacity, type SlotDayContext, type SlotTimeSlot } from "./slotValidation.js";
 
 /**
  * Availability rules an admin may knowingly skip when creating appointments.
@@ -88,12 +88,22 @@ export function collectAdminSlotRestrictions(
   if (blocks.some((time) => day.invalidOccupancyTimes?.has(time))) return { restrictions, hard: "invalid_occupancy" };
 
   const occupancy = Math.max(0, ...blocks.map((time) => day.occupancyByTime.get(time) ?? 0));
-  if (occupancy >= config.maxCapacity) add("slot_full", { occupancy, maxCapacity: config.maxCapacity });
+  const maxCapacity = dayMaxCapacity(day);
+  if (occupancy >= maxCapacity) add("slot_full", { occupancy, maxCapacity });
   return { restrictions };
 }
 
+/** Anything confirmed by an admin: booking overrides and capacity reductions. */
+export interface FingerprintedRestriction {
+  date: string;
+  time: string;
+  reason: string;
+  occupancy?: number;
+  maxCapacity?: number;
+}
+
 /** Stable identity of a restriction list: changes whenever the conditions change. */
-export function restrictionsFingerprint(restrictions: AdminRestriction[]): string {
+export function restrictionsFingerprint(restrictions: FingerprintedRestriction[]): string {
   return restrictions
     .map((item) => [item.date, item.time, item.reason, item.occupancy ?? "", item.maxCapacity ?? ""].join("|"))
     .sort()
@@ -222,7 +232,14 @@ export function bookingPayloadHash(payload: unknown): string {
 }
 
 /** One kind per admin operation, so an id can never be replayed as another operation. */
-export type AdminRequestKind = "single" | "series" | "reschedule_single" | "reschedule_series";
+export type AdminRequestKind =
+  | "single"
+  | "series"
+  | "reschedule_single"
+  | "reschedule_series"
+  | "capacity_exceptions"
+  | "capacity_exceptions_delete"
+  | "max_capacity";
 
 /** Optional `requestId`: older clients that do not send one keep working without idempotency. */
 export function parseOptionalRequestId(value: unknown): string | undefined {

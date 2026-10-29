@@ -16,6 +16,12 @@ export interface SiteConfig {
   minBookingNoticeHours: number;
   /** When true, customers cannot book any slot dated today in Europe/Madrid. */
   blockSameDayBooking: boolean;
+  /**
+   * Enables creating per-date capacity exceptions (capacity_exceptions). Set
+   * manually once the mobile versions that understand them are in the stores.
+   * Existing exceptions are always honoured, whatever this flag says.
+   */
+  capacityExceptionsEnabled: boolean;
   maintenanceMode?: boolean;
   sessionDuration?: number;
 }
@@ -62,6 +68,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
   bonoSizesMinutes: [...DEFAULT_BONO_SIZES_MINUTES],
   minBookingNoticeHours: 0,
   blockSameDayBooking: false,
+  capacityExceptionsEnabled: false,
 };
 
 export function normalizeSlotInterval(value: unknown): SlotInterval {
@@ -113,6 +120,7 @@ export function normalizeSiteConfig(config: Partial<SiteConfig> = {}): SiteConfi
     minBookingNoticeHours: normalizeMinBookingNoticeHours(config.minBookingNoticeHours),
     // Only an explicit `true` enables it: legacy configs keep same-day booking.
     blockSameDayBooking: config.blockSameDayBooking === true,
+    capacityExceptionsEnabled: config.capacityExceptionsEnabled === true,
   };
 }
 

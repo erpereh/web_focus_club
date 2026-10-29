@@ -26,6 +26,12 @@ import {
 } from './bono-adjustments';
 import { isBonoOverdue, planBonoExpirationRecalculation } from './bono-expiration';
 import type { AdminRestriction } from './admin-booking-overrides';
+import {
+    CAPACITY_EXCEPTIONS_COLLECTION,
+    capacityByDateFrom,
+    parseCapacityException,
+    type CapacityException,
+} from './capacity-exceptions';
 import { v4 as uuidv4 } from 'uuid';
 import type {
     UserProfile,
@@ -1612,31 +1618,48 @@ export function subscribeSlotOccupancyForDate(
  * - occupancy: mapa de franjas con cantidad de personas aprobadas
  * - blockedSlots: lista de franjas bloqueadas por la admin
  */
-export async function getMonthAvailability(year: number, month: number): Promise<{
-    occupancy: Record<string, number>;
-    blockedSlots: BlockedSlot[];
-}> {
-    const [occupancy, blockedSlots] = await Promise.all([
+export async function getMonthAvailability(year: number, month: number): Promise<MonthAvailability> {
+    const { start, end } = monthDateRange(year, month);
+    const [occupancy, blockedSlots, exceptions] = await Promise.all([
         getSlotOccupancyForMonth(year, month),
         getBlockedSlotsForMonth(year, month),
+        getCapacityExceptionsInRange(start, end),
     ]);
-    return { occupancy, blockedSlots };
+    return { occupancy, blockedSlots, capacityByDate: capacityByDateFrom(exceptions) };
+}
+
+function monthDateRange(year: number, month: number): { start: string; end: string } {
+    const endMonth = month === 12 ? 1 : month + 1;
+    const endYear = month === 12 ? year + 1 : year;
+    return {
+        start: `${year}-${String(month).padStart(2, '0')}-01`,
+        end: `${endYear}-${String(endMonth).padStart(2, '0')}-01`,
+    };
+}
+
+export interface MonthAvailability {
+    occupancy: Record<string, number>;
+    blockedSlots: BlockedSlot[];
+    /** Capacity exceptions of the month (aforo por fecha); other dates use site_config.maxCapacity. */
+    capacityByDate: Record<string, number>;
 }
 
 export function subscribeMonthAvailability(
     year: number,
     month: number,
-    callback: (availability: { occupancy: Record<string, number>; blockedSlots: BlockedSlot[] }) => void,
+    callback: (availability: MonthAvailability) => void,
     onError?: (error: Error) => void
 ): () => void {
     let latestOccupancy: Record<string, number> = {};
     let latestBlockedSlots: BlockedSlot[] = [];
+    let latestCapacityByDate: Record<string, number> = {};
     let hasOccupancy = false;
     let hasBlockedSlots = false;
+    let hasCapacity = false;
 
     const emitIfReady = () => {
-        if (hasOccupancy && hasBlockedSlots) {
-            callback({ occupancy: latestOccupancy, blockedSlots: latestBlockedSlots });
+        if (hasOccupancy && hasBlockedSlots && hasCapacity) {
+            callback({ occupancy: latestOccupancy, blockedSlots: latestBlockedSlots, capacityByDate: latestCapacityByDate });
         }
     };
 
@@ -1660,11 +1683,99 @@ export function subscribeMonthAvailability(
         },
         onError
     );
+    const { start, end } = monthDateRange(year, month);
+    const unsubscribeCapacity = subscribeCapacityExceptionsInRange(
+        start,
+        end,
+        (exceptions) => {
+            latestCapacityByDate = capacityByDateFrom(exceptions);
+            hasCapacity = true;
+            emitIfReady();
+        },
+        onError
+    );
 
     return () => {
         unsubscribeOccupancy();
         unsubscribeBlocked();
+        unsubscribeCapacity();
     };
+}
+
+// ============================================
+// AFORO POR FECHA (capacity_exceptions)
+// ============================================
+
+function capacityExceptionsQuery(start: string, end?: string) {
+    return end
+        ? query(collection(db, CAPACITY_EXCEPTIONS_COLLECTION), where('date', '>=', start), where('date', '<', end))
+        : query(collection(db, CAPACITY_EXCEPTIONS_COLLECTION), where('date', '>=', start));
+}
+
+function capacityExceptionsFromDocs(docs: Array<{ id: string; data(): unknown }>): CapacityException[] {
+    return docs
+        .map((d) => parseCapacityException(d.id, d.data()))
+        .filter((item): item is CapacityException => Boolean(item))
+        .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** Exceptions from `start` (inclusive) to `end` (exclusive); without `end`, every later date. */
+export async function getCapacityExceptionsInRange(start: string, end?: string): Promise<CapacityException[]> {
+    const snap = await getDocs(capacityExceptionsQuery(start, end));
+    return capacityExceptionsFromDocs(snap.docs);
+}
+
+export function subscribeCapacityExceptionsInRange(
+    start: string,
+    end: string | undefined,
+    callback: (exceptions: CapacityException[]) => void,
+    onError?: (error: Error) => void
+): () => void {
+    return onSnapshot(
+        capacityExceptionsQuery(start, end),
+        (snap) => callback(capacityExceptionsFromDocs(snap.docs)),
+        onError
+    );
+}
+
+export interface CapacityChangeInput {
+    requestId: string;
+    /** Fingerprint of the reduction warning the admin confirmed. */
+    acknowledgedRestrictions?: string;
+}
+
+export interface CapacityChangeResult {
+    success: boolean;
+    replayed?: boolean;
+    dates?: string[];
+    maxCapacity?: number;
+    previousMaxCapacity?: number;
+    changed?: boolean;
+    acknowledgedRestrictions?: AdminRestriction[];
+}
+
+/** Same capacity for several dates. Existing appointments are never modified. */
+export async function upsertCapacityExceptionsFromAdmin(
+    input: CapacityChangeInput & { dates: string[]; maxCapacity: number },
+): Promise<CapacityChangeResult> {
+    const callable = httpsCallable<typeof input, CapacityChangeResult>(firebaseFunctions, 'upsertCapacityExceptionsFromAdmin');
+    return (await callable(input)).data;
+}
+
+/** The dates go back to the global capacity. */
+export async function deleteCapacityExceptionsFromAdmin(
+    input: CapacityChangeInput & { dates: string[] },
+): Promise<CapacityChangeResult> {
+    const callable = httpsCallable<typeof input, CapacityChangeResult>(firebaseFunctions, 'deleteCapacityExceptionsFromAdmin');
+    return (await callable(input)).data;
+}
+
+/** Global capacity: validated against approved seats in the same transaction. */
+export async function updateMaxCapacityFromAdmin(
+    input: CapacityChangeInput & { maxCapacity: number },
+): Promise<CapacityChangeResult> {
+    const callable = httpsCallable<typeof input, CapacityChangeResult>(firebaseFunctions, 'updateMaxCapacityFromAdmin');
+    return (await callable(input)).data;
 }
 
 const FIRESTORE_IN_QUERY_LIMIT = 30;
@@ -1681,23 +1792,23 @@ function chunkValues<T>(values: T[], size: number): T[][] {
  * One-shot occupancy + blocked_slots for a bounded set of dates (max 20 recurring occurrences).
  * Client helper only — not a Cloud Function.
  */
-export async function getAvailabilityForDates(dates: string[]): Promise<{
-    occupancy: Record<string, number>;
-    blockedSlots: BlockedSlot[];
-}> {
+export async function getAvailabilityForDates(dates: string[]): Promise<MonthAvailability> {
     const uniqueDates = [...new Set(dates.filter(Boolean))];
     if (uniqueDates.length === 0) {
-        return { occupancy: {}, blockedSlots: [] };
+        return { occupancy: {}, blockedSlots: [], capacityByDate: {} };
     }
 
     const occupancy: Record<string, number> = {};
     const blockedSlots: BlockedSlot[] = [];
+    const exceptions: CapacityException[] = [];
 
     await Promise.all(chunkValues(uniqueDates, FIRESTORE_IN_QUERY_LIMIT).map(async (dateChunk) => {
-        const [occupancySnap, blockedSnap] = await Promise.all([
+        const [occupancySnap, blockedSnap, capacitySnap] = await Promise.all([
             getDocs(query(collection(db, 'slot_occupancy'), where('date', 'in', dateChunk))),
             getDocs(query(collection(db, 'blocked_slots'), where('date', 'in', dateChunk))),
+            getDocs(query(collection(db, CAPACITY_EXCEPTIONS_COLLECTION), where('date', 'in', dateChunk))),
         ]);
+        exceptions.push(...capacityExceptionsFromDocs(capacitySnap.docs));
         occupancySnap.docs.forEach((d) => {
             const data = d.data() as SlotOccupancy;
             occupancy[`${data.date}_${data.time}`] = data.count;
@@ -1707,7 +1818,7 @@ export async function getAvailabilityForDates(dates: string[]): Promise<{
         });
     }));
 
-    return { occupancy, blockedSlots };
+    return { occupancy, blockedSlots, capacityByDate: capacityByDateFrom(exceptions) };
 }
 
 // ============================================
@@ -2591,6 +2702,8 @@ export interface StatisticsData {
     activeBonos: Bono[];
     bonoHistory: Bono[];
     siteConfig: SiteConfig;
+    /** Capacity exceptions of both periods (aforo por fecha). */
+    capacityByDate?: Record<string, number>;
     blockedSlots: BlockedSlot[];
     upcomingOccupancy: SlotOccupancy[];
     pendingApprovalCount: number;
@@ -2619,7 +2732,7 @@ export async function getStatisticsData(request: StatisticsDataRequest): Promise
     const bonoTo = addDays(request.period.endKey, 2);
     const occupancyTo = addDays(request.todayKey, request.occupancyCheckDays);
 
-    const [datedSnaps, undatedSnap, pendingSnap, clientsSnap, trainers, activeBonos, expiredSnap, replacedSnap, siteConfig, blockedSnap, occupancySnap] = await Promise.all([
+    const [datedSnaps, undatedSnap, pendingSnap, clientsSnap, trainers, activeBonos, expiredSnap, replacedSnap, siteConfig, blockedSnap, occupancySnap, capacityExceptions] = await Promise.all([
         Promise.all(dateRanges.map((range) => getDocs(query(appointmentsRef, where('date', '>=', range.from), where('date', '<=', range.to))))),
         getDocs(query(appointmentsRef, where('createdAt', '>=', undatedFrom), where('createdAt', '<', undatedTo))),
         getDocs(query(appointmentsRef, where('status', '==', 'pending'))),
@@ -2631,6 +2744,7 @@ export async function getStatisticsData(request: StatisticsDataRequest): Promise
         getSiteConfig(),
         getDocs(query(collection(db, 'blocked_slots'), where('date', '>=', request.previous.startKey), where('date', '<=', request.period.endKey))),
         getDocs(query(collection(db, 'slot_occupancy'), where('date', '>=', request.todayKey), where('date', '<=', occupancyTo))),
+        getCapacityExceptionsInRange(request.previous.startKey, addDays(request.period.endKey, 1)),
     ]);
 
     const appointments = new Map<string, Appointment>();
@@ -2661,6 +2775,7 @@ export async function getStatisticsData(request: StatisticsDataRequest): Promise
         activeBonos,
         bonoHistory: [...bonoHistory.values()],
         siteConfig,
+        capacityByDate: capacityByDateFrom(capacityExceptions),
         blockedSlots: blockedSnap.docs.map((d) => ({ id: d.id, ...d.data() } as BlockedSlot)),
         upcomingOccupancy: occupancySnap.docs.map((d) => d.data() as SlotOccupancy),
         pendingApprovalCount: pendingSnap.size,

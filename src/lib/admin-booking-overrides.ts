@@ -3,6 +3,8 @@
  * The server lists every restriction of a booking in a `failed-precondition`
  * error with `details.reason === 'admin_override_required'`; the admin then
  * confirms them and the request is sent again with the same `requestId`.
+ * Capacity changes (functions/src/capacityExceptions.ts) use the same shape
+ * with `capacity_reduction_confirmation_required`.
  */
 
 export type AdminOverridableReason =
@@ -11,7 +13,9 @@ export type AdminOverridableReason =
     | 'booking_notice_too_short'
     | 'outside_schedule'
     | 'slot_blocked'
-    | 'slot_full';
+    | 'slot_full'
+    /** Capacity change: more approved seats than the new capacity (nothing is cancelled). */
+    | 'capacity_below_occupancy';
 
 export interface AdminRestriction {
     date: string;
@@ -42,7 +46,11 @@ export const ADMIN_RESTRICTION_LABELS: Record<AdminOverridableReason, string> = 
     outside_schedule: 'Fuera del horario configurado',
     slot_blocked: 'Franja bloqueada',
     slot_full: 'Aforo completo',
+    capacity_below_occupancy: 'Más citas aprobadas que el nuevo aforo',
 };
+
+/** Callable reasons that ask the admin to confirm a list of restrictions. */
+const CONFIRMATION_REASONS = new Set(['admin_override_required', 'capacity_reduction_confirmation_required']);
 
 const REASONS = new Set<string>(Object.keys(ADMIN_RESTRICTION_LABELS));
 
@@ -63,7 +71,7 @@ export function getCallableErrorDetails(error: unknown): Record<string, unknown>
 
 /** Reads the confirmation request from a callable error's `details`, if it is one. */
 export function parseAdminOverridePrompt(details: Record<string, unknown> | undefined): AdminOverridePrompt | undefined {
-    if (details?.reason !== 'admin_override_required') return undefined;
+    if (typeof details?.reason !== 'string' || !CONFIRMATION_REASONS.has(details.reason)) return undefined;
     if (typeof details.fingerprint !== 'string' || !Array.isArray(details.restrictions)) return undefined;
     const restrictions = details.restrictions.filter(isRestriction);
     if (restrictions.length === 0) return undefined;
@@ -79,6 +87,9 @@ export function describeAdminRestriction(restriction: AdminRestriction): string 
     const label = ADMIN_RESTRICTION_LABELS[restriction.reason];
     if (restriction.reason === 'slot_full' && typeof restriction.occupancy === 'number' && typeof restriction.maxCapacity === 'number') {
         return `${label}: ${restriction.occupancy}/${restriction.maxCapacity} personas (quedaría en ${restriction.occupancy + 1}/${restriction.maxCapacity})`;
+    }
+    if (restriction.reason === 'capacity_below_occupancy' && typeof restriction.occupancy === 'number' && typeof restriction.maxCapacity === 'number') {
+        return `${label}: ${restriction.occupancy} aprobadas con aforo ${restriction.maxCapacity}. Las citas se mantienen.`;
     }
     return label;
 }

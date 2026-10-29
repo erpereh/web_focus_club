@@ -702,3 +702,174 @@ test("stale series: an old browser deletion, a customer single reschedule, then 
   const approval = logs.find((log) => log.action === "recurring_appointments_approved");
   assert.equal(approval.previousOccurrenceCount, 3);
 });
+
+// ------------------------------------------------------------ per-date capacity (aforo por fecha)
+
+const { createCapacityAdminHandlers } = require("../../lib/capacityExceptions.js");
+const { createAppointmentProposalHandlers } = require("../../lib/appointmentProposals.js");
+const capacity = createCapacityAdminHandlers({ db, requireAdmin: async () => undefined, getNowDate });
+const proposals = createAppointmentProposalHandlers({ db, requireAdmin: async () => undefined, getNowDate });
+let capacityRequest = 0;
+const capacityRequestId = () => `emulator-capacity-${Date.now()}-${++capacityRequest}`;
+
+function pendingAt(userId, date, time, extra = {}) {
+  const slot = { date, time };
+  return {
+    userId, name: userId, email: `${userId}@example.com`, phone: "", serviceType: "Bono", status: "pending",
+    duration: "60", preferredSlots: [slot], date, time, reason: "", bonoId: userId === "user-1" ? "bono-1" : "bono-2",
+    minutesDeducted: true, minutesDeductedAmount: 60, minutesDeductedAt: new Date().toISOString(), minutesRefundedAt: null,
+    createdAt: new Date().toISOString(), ...extra,
+  };
+}
+
+/** Global capacity 4; DAY has an exception of `dayCapacity` unless it is null. */
+function capacityDocuments(extra = {}, dayCapacity = 2) {
+  return baseDocuments({
+    "site_config/main": {
+      startHour: 7, endHour: 22, slotInterval: 15, maxCapacity: 4, minBookingNoticeHours: 0,
+      blockSameDayBooking: false, capacityExceptionsEnabled: true,
+    },
+    ...(dayCapacity === null ? {} : { [`capacity_exceptions/${DAY}`]: { date: DAY, maxCapacity: dayCapacity } }),
+    ...extra,
+  });
+}
+
+const approveRequest = (appointmentId) => callable("admin", { appointmentId, status: "approved", expectedStatus: "pending" });
+
+test("per-date capacity: customer bookings see 2 on the exception day and 4 elsewhere", async () => {
+  await seed(capacityDocuments(hourOccupancy(DAY, "10", 2)));
+  const full = await settle(booking.createAppointment(callable("user-1", {
+    duration: "60", preferredSlot: { date: DAY, time: "10:00" }, reason: "", appointmentType: "training",
+  })));
+  assert.equal(full.reason, "slot_full");
+  await seed(hourOccupancy(addDays(DAY, 1), "10", 2));
+  const other = await settle(booking.createAppointment(callable("user-1", {
+    duration: "60", preferredSlot: { date: addDays(DAY, 1), time: "10:00" }, reason: "", appointmentType: "training",
+  })));
+  assert.equal(other.ok, true);
+});
+
+test("per-date capacity, concurrency: two approvals for the last seat of a capacity-2 day", async () => {
+  await seed(capacityDocuments({
+    ...hourOccupancy(DAY, "10", 1),
+    "appointments/p1": pendingAt("user-1", DAY, "10:00"),
+    "appointments/p2": pendingAt("user-2", DAY, "10:00"),
+  }));
+  const results = await Promise.all(["p1", "p2"].map((id) => settle(admin.updateAppointmentStatusFromAdmin(approveRequest(id)))));
+  assert.deepEqual(results.map((result) => (result.ok ? "ok" : result.reason)).sort(), ["ok", "slot_full"]);
+  assert.deepEqual(await hourCounts(DAY, "10"), [2, 2, 2, 2]);
+});
+
+test("per-date capacity, concurrency: approval racing a reschedule into the last seat", async () => {
+  await seed(capacityDocuments({
+    ...hourOccupancy(DAY, "10", 1),
+    ...hourOccupancy(DAY, "15", 1),
+    "appointments/p1": pendingAt("user-1", DAY, "10:00"),
+    "appointments/a2": approvedAt("user-2", DAY, "15:00"),
+  }));
+  const [approval, move] = await Promise.all([
+    settle(admin.updateAppointmentStatusFromAdmin(approveRequest("p1"))),
+    settle(reschedule.rescheduleAppointmentFromAdmin(callable("admin", {
+      appointmentId: "a2", slot: { date: DAY, time: "10:00" }, assignedTrainer: null,
+    }))),
+  ]);
+  assert.equal([approval, move].filter((result) => result.ok).length, 1, JSON.stringify([approval, move]));
+  assert.ok(["slot_full", "admin_override_required"].includes((approval.ok ? move : approval).reason));
+  assert.deepEqual(await hourCounts(DAY, "10"), [2, 2, 2, 2], "never over the day's capacity without consent");
+});
+
+test("per-date capacity, concurrency: accepting a proposal racing an approval for the last seat", async () => {
+  await seed(capacityDocuments({
+    ...hourOccupancy(DAY, "11", 1),
+    "appointments/p1": pendingAt("user-1", addDays(DAY, 1), "10:00"),
+    "appointments/p2": pendingAt("user-2", DAY, "11:00"),
+  }));
+  await proposals.proposeAppointmentSlotFromAdmin(callable("admin", { appointmentId: "p1", slot: { date: DAY, time: "11:00" } }));
+  const [accept, approval] = await Promise.all([
+    settle(proposals.respondToAppointmentConfirmation(callable("user-1", { appointmentId: "p1", action: "accept" }))),
+    settle(admin.updateAppointmentStatusFromAdmin(approveRequest("p2"))),
+  ]);
+  assert.equal([accept, approval].filter((result) => result.ok).length, 1, JSON.stringify([accept, approval]));
+  assert.equal((accept.ok ? approval : accept).reason, "slot_full");
+  assert.deepEqual(await hourCounts(DAY, "11"), [2, 2, 2, 2]);
+});
+
+test("per-date capacity, concurrency: a series approval racing a single approval on the reduced day", async () => {
+  const week = addDays(DAY, 7);
+  const occurrence = (index, date) => ({
+    ...pendingAt("user-1", date, "18:00"), serviceType: "Entrenamiento personal", sessionType: "Entrenamiento personal",
+    assignedTrainer: null, recurrenceSeriesId: "series-1", recurrenceIndex: index,
+    minutesRefunded: false, minutesRefundedAmount: null, minutesRefundReason: null,
+  });
+  await seed(capacityDocuments({
+    ...hourOccupancy(DAY, "18", 1),
+    "bonos/bono-1": {
+      userId: "user-1", tamano: 480, minutosTotales: 480, minutosRestantes: 360, estado: "activo",
+      fechaExpiracion: "2099-12-31T22:59:59.000Z", historial: [],
+    },
+    "services/service-1": { title: "Entrenamiento personal", active: true },
+    "appointment_recurrences/series-1": {
+      userId: "user-1", serviceType: "Entrenamiento personal", duration: "60", assignedTrainer: null,
+      startDate: DAY, startTime: "18:00", intervalDays: 7, endDate: week, occurrenceCount: 2, totalMinutes: 120,
+      bonoId: "bono-1", status: "pending", origin: "customer",
+    },
+    "appointments/occ-0": occurrence(0, DAY),
+    "appointments/occ-1": occurrence(1, week),
+    "appointments/single": pendingAt("user-2", DAY, "18:00"),
+  }));
+  const [seriesResult, single] = await Promise.all([
+    settle(series.approveRecurringAppointmentSeriesFromAdmin(callable("admin", { seriesId: "series-1" }))),
+    settle(admin.updateAppointmentStatusFromAdmin(approveRequest("single"))),
+  ]);
+  assert.equal([seriesResult, single].filter((result) => result.ok).length, 1, JSON.stringify([seriesResult, single]));
+  assert.ok(["slot_full", "admin_override_required"].includes((seriesResult.ok ? single : seriesResult).reason));
+  assert.deepEqual(await hourCounts(DAY, "18"), [2, 2, 2, 2]);
+});
+
+test("per-date capacity, concurrency: reducing the day while an approval runs never passes unconfirmed", async () => {
+  for (let iteration = 0; iteration < 6; iteration += 1) {
+    await resetDatabase();
+    await seed(capacityDocuments({
+      ...hourOccupancy(DAY, "10", 2),
+      "appointments/p1": pendingAt("user-1", DAY, "10:00"),
+    }, 3));
+    const [reduce, approval] = await Promise.all([
+      settle(capacity.upsertCapacityExceptionsFromAdmin(callable("admin", { dates: [DAY], maxCapacity: 2, requestId: capacityRequestId() }))),
+      settle(admin.updateAppointmentStatusFromAdmin(approveRequest("p1"))),
+    ]);
+    const stored = (await docData(`capacity_exceptions/${DAY}`)).maxCapacity;
+    const [seats] = await hourCounts(DAY, "10");
+    if (approval.ok) {
+      // The approval committed first: the reduction then saw 3 approved seats and needs a confirmation.
+      assert.equal(seats, 3);
+      assert.equal(reduce.reason, "capacity_reduction_confirmation_required");
+      assert.equal(stored, 3);
+    } else {
+      assert.equal(approval.reason, "slot_full");
+      assert.equal(stored, 2);
+      assert.equal(seats, 2);
+    }
+  }
+});
+
+test("per-date capacity, concurrency: lowering the global value while an approval runs", async () => {
+  await seed(capacityDocuments({
+    ...hourOccupancy(DAY, "10", 3),
+    "appointments/p1": pendingAt("user-1", DAY, "10:00"),
+  }, null));
+  const [lower, approval] = await Promise.all([
+    settle(capacity.updateMaxCapacityFromAdmin(callable("admin", { maxCapacity: 3, requestId: capacityRequestId() }))),
+    settle(admin.updateAppointmentStatusFromAdmin(approveRequest("p1"))),
+  ]);
+  const config = await docData("site_config/main");
+  const [seats] = await hourCounts(DAY, "10");
+  if (approval.ok) {
+    assert.equal(seats, 4);
+    assert.equal(lower.reason, "capacity_reduction_confirmation_required");
+    assert.equal(config.maxCapacity, 4);
+  } else {
+    assert.equal(approval.reason, "slot_full");
+    assert.equal(config.maxCapacity, 3);
+    assert.equal(seats, 3);
+  }
+});

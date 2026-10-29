@@ -16,6 +16,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
     bonoSizesMinutes: [...DEFAULT_BONO_SIZES_MINUTES],
     minBookingNoticeHours: 0,
     blockSameDayBooking: false,
+    capacityExceptionsEnabled: false,
 };
 
 export const ALLOWED_SLOT_INTERVALS = [15, 30, 45, 60] as const satisfies readonly SlotInterval[];
@@ -67,6 +68,8 @@ export function normalizeSiteConfig(config: Partial<SiteConfig> = {}): SiteConfi
         minBookingNoticeHours: normalizeMinBookingNoticeHours(config.minBookingNoticeHours),
         // Only an explicit `true` enables it: legacy configs keep same-day booking.
         blockSameDayBooking: config.blockSameDayBooking === true,
+        // Switched on manually once the mobile versions that read capacity_exceptions are published.
+        capacityExceptionsEnabled: config.capacityExceptionsEnabled === true,
     };
 }
 
@@ -96,9 +99,9 @@ export function sanitizeSiteConfigUpdate(data: Partial<SiteConfig>): Partial<Sit
         sanitized.maintenanceMode = Boolean(data.maintenanceMode);
     }
 
-    if ('maxCapacity' in data) {
-        sanitized.maxCapacity = normalizeMaxCapacity(data.maxCapacity);
-    }
+    // maxCapacity and capacityExceptionsEnabled are never written from here: the
+    // global capacity goes through updateMaxCapacityFromAdmin (Firestore rules
+    // reject both fields from clients) and the switch is turned on manually.
 
     if ('bonoSizesMinutes' in data) {
         sanitized.bonoSizesMinutes = normalizeBonoSizesMinutes(data.bonoSizesMinutes);

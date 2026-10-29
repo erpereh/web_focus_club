@@ -405,6 +405,7 @@ export function AppointmentRescheduleModal({
           blockedKeys,
           userBookedSlotKeys: calendarContext.userBookedSlotKeys,
           siteConfig: config,
+          capacityByDate: availability.capacityByDate,
           now: new Date(),
           // Full sessions are confirmed by the admin when saving (server prompt).
           allowFullCapacity: true,

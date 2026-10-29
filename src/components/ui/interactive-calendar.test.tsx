@@ -136,6 +136,38 @@ describe('InteractiveCalendar', () => {
     expect(screen.getByRole('button', { name: /18:00, Libre/i })).toBeEnabled();
   });
 
+  it('uses each day\'s own capacity (aforo por fecha) for labels and full slots', async () => {
+    const twoSeats = (date: string) => Object.fromEntries(
+      ['10:00', '10:15', '10:30', '10:45'].map((time) => [`${date}_${time}`, 2]),
+    );
+    subscribeMonthAvailability.mockImplementation((
+      _year: number,
+      _month: number,
+      callback: (data: { occupancy: Record<string, number>; blockedSlots: unknown[]; capacityByDate: Record<string, number> }) => void,
+    ) => {
+      callback({
+        occupancy: { ...twoSeats('2026-09-17'), ...twoSeats('2026-09-18'), ...twoSeats('2026-09-21') },
+        blockedSlots: [],
+        capacityByDate: { '2026-09-17': 2, '2026-09-21': 6 },
+      });
+      return vi.fn();
+    });
+
+    render(
+      <InteractiveCalendar selectedSlot={null} onSelectSlot={vi.fn()} onClearSlot={vi.fn()} selectedDuration={60} />,
+    );
+    await waitFor(() => expect(screen.queryByText('Cargando disponibilidad...')).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /17 de Septiembre/i }));
+    expect(screen.getByRole('button', { name: /10:00, Completa/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /18 de Septiembre/i }));
+    expect(screen.getByRole('button', { name: /10:00, 2 plazas/i })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: /21 de Septiembre/i }));
+    expect(screen.getByRole('button', { name: /10:00, 4 plazas/i })).toBeEnabled();
+  });
+
   it('shows partial occupancy and disables full, blocked and customer-conflict slots', async () => {
     subscribeMonthAvailability.mockImplementation((
       _year: number,

@@ -1,4 +1,5 @@
 import type { Appointment, SiteConfig } from '@/types';
+import { resolveMaxCapacity, type CapacityByDate } from '@/lib/capacity-exceptions';
 import { doesSessionFitWithinSchedule, getCanonicalSlotBlocks, slotOccupancyKey } from '@/lib/appointment-slots';
 import { classifyMadridCivilSlot, getAppointmentEffectiveSlot } from '@/lib/madrid-date';
 
@@ -33,6 +34,8 @@ export interface AdminSlotStatusInput {
     time: string;
     durationMinutes: number;
     siteConfig: SiteConfig;
+    /** Capacity exceptions (aforo por fecha); dates without one use siteConfig.maxCapacity. */
+    capacityByDate?: CapacityByDate;
     /** `slot_occupancy` counts keyed `date_time`; null while loading or on error. */
     occupancy: Record<string, unknown> | null;
     blockedSlotKeys: Set<string>;
@@ -97,7 +100,7 @@ function getBaseStatus(input: AdminSlotStatusInput): AdminSlotStatus {
         : undefined;
     const withMismatch = (status: AdminSlotStatus): AdminSlotStatus => (mismatch ? { ...status, mismatch } : status);
 
-    const maxCapacity = input.siteConfig.maxCapacity;
+    const maxCapacity = resolveMaxCapacity(input.siteConfig, input.capacityByDate, input.date);
     if (input.userId) {
         const target = new Set(keys);
         const duplicated = input.appointments

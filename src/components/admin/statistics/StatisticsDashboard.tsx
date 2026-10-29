@@ -200,6 +200,7 @@ export function StatisticsDashboard({
         activeBonos: data.activeBonos,
         bonoHistory: data.bonoHistory,
         siteConfig: data.siteConfig,
+        capacityByDate: data.capacityByDate,
         blockedSlots: data.blockedSlots,
         upcomingOccupancy: data.upcomingOccupancy,
         pendingApprovalCount: data.pendingApprovalCount,

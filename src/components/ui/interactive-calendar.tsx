@@ -18,6 +18,7 @@ import {
   subscribeSiteConfig,
 } from '@/lib/firestore';
 import { DEFAULT_SITE_CONFIG } from '@/lib/site-config';
+import { resolveMaxCapacity } from '@/lib/capacity-exceptions';
 import { cn } from '@/lib/utils';
 import type { BlockedSlot, SiteConfig, TimeSlot } from '@/types';
 
@@ -116,8 +117,9 @@ export function InteractiveCalendar({
     monthKey: string;
     occupancy: Record<string, number>;
     blockedSlots: BlockedSlot[];
+    capacityByDate: Record<string, number>;
     error: boolean;
-  }>({ monthKey: '', occupancy: {}, blockedSlots: [], error: false });
+  }>({ monthKey: '', occupancy: {}, blockedSlots: [], capacityByDate: {}, error: false });
   const [configLoading, setConfigLoading] = useState(true);
   const [configError, setConfigError] = useState(false);
   const [siteConfig, setSiteConfig] = useState<SiteConfig>(DEFAULT_SITE_CONFIG);
@@ -125,6 +127,13 @@ export function InteractiveCalendar({
   const monthError = !monthLoading && monthAvailability.error;
   const occupancy = monthLoading ? {} : monthAvailability.occupancy;
   const blockedSlots = monthLoading ? [] : monthAvailability.blockedSlots;
+  const capacityByDate = monthLoading ? {} : monthAvailability.capacityByDate;
+  /** Aforo of the day: its capacity exception, or the global value. */
+  const capacityOf = (day: number): number => resolveMaxCapacity(
+    siteConfig,
+    capacityByDate,
+    formatDateKey(currentYear, currentMonth, day),
+  );
 
   const availabilityState: CalendarAvailabilityState = monthError || configError
     ? { status: 'error', message: AVAILABILITY_ERROR }
@@ -154,6 +163,7 @@ export function InteractiveCalendar({
           monthKey: `${currentYear}-${String(currentMonth).padStart(2, '0')}`,
           occupancy: data.occupancy,
           blockedSlots: data.blockedSlots,
+          capacityByDate: data.capacityByDate ?? {},
           error: false,
         });
       },
@@ -163,6 +173,7 @@ export function InteractiveCalendar({
           monthKey: `${currentYear}-${String(currentMonth).padStart(2, '0')}`,
           occupancy: {},
           blockedSlots: [],
+          capacityByDate: {},
           error: true,
         });
         clearSlotRef.current();
@@ -226,7 +237,7 @@ export function InteractiveCalendar({
     blockedSlotKeys,
     userBookedSlotKeys,
     occupancyCreditsByKey,
-    maxCapacity: siteConfig.maxCapacity,
+    maxCapacity: capacityOf(day),
   });
 
   const isHistoricalSlot = (day: number, time: string): boolean => !classifyMadridCivilSlot({
@@ -449,17 +460,18 @@ export function InteractiveCalendar({
                 const isFull = availability.reason === 'slot_full';
                 const isPartial = !isFull && !availability.disabled && availability.occupancy > 0;
                 const unavailable = disabled || (!allowPastDates && past) || availability.disabled;
-                const remaining = Math.max(0, siteConfig.maxCapacity - availability.occupancy);
+                const dayCapacity = capacityOf(selectedDay);
+                const remaining = Math.max(0, dayCapacity - availability.occupancy);
                 const availabilityLabel = (!allowPastDates && past) || isConflict
                   ? 'No disponible'
                   : isBlocked
                     ? 'Bloqueada'
                     : isFull
-                      ? allowFullSlots ? `Completa ${availability.occupancy}/${siteConfig.maxCapacity}` : 'Completa'
+                      ? allowFullSlots ? `Completa ${availability.occupancy}/${dayCapacity}` : 'Completa'
                       : availability.occupancy === 0
                         ? 'Libre'
                         : availabilityLabelMode === 'occupancy'
-                          ? `${availability.occupancy}/${siteConfig.maxCapacity} plazas`
+                          ? `${availability.occupancy}/${dayCapacity} plazas`
                           : remaining === 1 ? '1 plaza' : `${remaining} plazas`;
 
                 return (

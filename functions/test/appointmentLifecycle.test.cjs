@@ -365,8 +365,10 @@ const slotValidationSource = fs.readFileSync(path.join(__dirname, "../src/slotVa
 assert.match(adminCreateModuleSource, /collectAdminSlotRestrictions\(day, \{/);
 assert.match(adminCreateModuleSource, /evaluateSlotConflicts\(\{/);
 assert.match(slotValidationSource, /isRescheduleCapacityAvailable/);
-assert.match(slotValidationSource, /config\.maxCapacity/);
-assert.match(indexSource, /config\.maxCapacity/);
+// Capacity is the effective one of the date (capacity exception or global), never the raw global value.
+assert.match(slotValidationSource, /dayMaxCapacity\(day\)/);
+assert.match(slotValidationSource, /loadCapacityExceptions\(reader, db, \[date\]\)/);
+assert.match(indexSource, /resolveMaxCapacity\(config, capacityExceptions, preferredSlot\.date\)/);
 assert.doesNotMatch(indexSource, /const MAX_CAPACITY\s*=\s*2/);
 assert.match(indexSource, /shouldReconcileAppointmentTransition\(expectedStatus, appointment\.status\)/);
 assert.match(indexSource, /const expectedStatus = changedToApproved \? "approved" : changedToRejected \? "rejected" : "cancelled"/);

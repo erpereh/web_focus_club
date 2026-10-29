@@ -432,6 +432,7 @@ export default function PortalPage() {
           blockedKeys,
           userBookedSlotKeys: bookedKeys,
           siteConfig: config,
+          capacityByDate: availability.capacityByDate,
           now: new Date(),
           minBookingNoticeHours: config.minBookingNoticeHours,
           blockSameDayBooking: config.blockSameDayBooking,
