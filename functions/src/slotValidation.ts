@@ -85,6 +85,11 @@ export interface IdentifiedAppointment {
   data: SlotAppointmentLike;
 }
 
+/** Preserve every effective-slot shape, including pre-mobile legacy records. */
+export const SLOT_CONFLICT_FIELDS = [
+  "status", "duration", "approvedSlot", "preferredSlots", "date", "time", "assignedTrainer", "appointmentType",
+] as const;
+
 export interface TrainerSnapshot {
   id: string;
   exists: boolean;
@@ -279,10 +284,12 @@ export async function loadCustomerActiveAppointments(
   reader: SnapshotReader,
   db: Firestore,
   userId: string,
+  projectFields = false,
 ): Promise<IdentifiedAppointment[]> {
-  const snap = await reader.get(db.collection("appointments")
+  const query = db.collection("appointments")
     .where("userId", "==", userId)
-    .where("status", "in", ["pending", "approved"])) as QuerySnap;
+    .where("status", "in", ["pending", "approved"]);
+  const snap = await reader.get(projectFields ? query.select(...SLOT_CONFLICT_FIELDS) : query) as QuerySnap;
   return snap.docs.map((docSnap) => ({ id: docSnap.id, data: docSnap.data() as SlotAppointmentLike }));
 }
 
@@ -305,9 +312,11 @@ export async function loadTrainerActiveAppointments(
   reader: SnapshotReader,
   db: Firestore,
   trainerId: string,
+  projectFields = false,
 ): Promise<IdentifiedAppointment[]> {
-  const snap = await reader.get(db.collection("appointments")
+  const query = db.collection("appointments")
     .where("assignedTrainer", "==", trainerId)
-    .where("status", "in", ["pending", "approved"])) as QuerySnap;
+    .where("status", "in", ["pending", "approved"]);
+  const snap = await reader.get(projectFields ? query.select(...SLOT_CONFLICT_FIELDS) : query) as QuerySnap;
   return snap.docs.map((docSnap) => ({ id: docSnap.id, data: docSnap.data() as SlotAppointmentLike }));
 }

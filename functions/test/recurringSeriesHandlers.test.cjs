@@ -15,17 +15,19 @@ class FakeDocumentReference {
 }
 
 class FakeQuery {
-  constructor(db, collectionName, filters = [], maximum) {
+  constructor(db, collectionName, filters = [], maximum, fields) {
     this.db = db;
     this.collectionName = collectionName;
     this.filters = filters;
     this.maximum = maximum;
+    this.fields = fields;
     this.kind = "query";
   }
   where(field, operator, value) {
-    return new FakeQuery(this.db, this.collectionName, [...this.filters, { field, operator, value }], this.maximum);
+    return new FakeQuery(this.db, this.collectionName, [...this.filters, { field, operator, value }], this.maximum, this.fields);
   }
-  limit(maximum) { return new FakeQuery(this.db, this.collectionName, this.filters, maximum); }
+  limit(maximum) { return new FakeQuery(this.db, this.collectionName, this.filters, maximum, this.fields); }
+  select(...fields) { return new FakeQuery(this.db, this.collectionName, this.filters, this.maximum, fields); }
 }
 
 class FakeCollection extends FakeQuery {
@@ -74,7 +76,11 @@ class FakeFirestore {
             data: () => clone(data),
           }))
           .filter((snap) => target.filters.every((filter) => matches(snap.data()[filter.field], filter)));
-        return { docs: target.maximum === undefined ? docs : docs.slice(0, target.maximum), empty: docs.length === 0 };
+        const selected = (target.maximum === undefined ? docs : docs.slice(0, target.maximum)).map((snap) => ({
+          ...snap,
+          data: () => target.fields ? Object.fromEntries(target.fields.filter((field) => Object.hasOwn(snap.data(), field)).map((field) => [field, snap.data()[field]])) : snap.data(),
+        }));
+        return { docs: selected, empty: selected.length === 0, size: selected.length };
       },
       set: (ref, value, options) => {
         wrote = true;

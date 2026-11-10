@@ -510,3 +510,123 @@ npx tsc --noEmit
 - **Hosting:** restaurar la versión anterior. La web antigua cancela sin enviar modalidad, y el servidor lo trata como «sin cargo».
 - **Functions:** redesplegar el commit anterior. Si se ha usado el popup, los cargos ya registrados quedan como datos. Ojo: el borrado antiguo devolvería sus minutos si alguien elimina una de esas citas, así que mientras dure el rollback no hay que borrar citas canceladas con cargo.
 - **Reglas:** se pueden mantener; solo afectan a los campos nuevos.
+
+## 7. Memoria y concurrencia de las operaciones administrativas de citas
+
+Esta corrección se prepara sin desplegar. Actualiza únicamente:
+`updateAppointmentStatusFromAdmin`, `deleteAppointmentsFromAdmin`,
+`rescheduleAppointmentFromAdmin` y `replaceRecurringSeriesScheduleFromAdmin`.
+Cada una declara 512 MiB, 1 CPU, concurrencia 5 y timeout de 60 segundos.
+No requiere migraciones, índices ni cambios de reglas o de las apps móviles publicadas.
+
+### 7.1 Causa y garantías de integridad
+
+- El punto de entrada cargaba todo `googleapis` en cada arranque, incluso para
+  Functions que no usan Calendar. Calendar ahora se carga de forma diferida
+  desde su submódulo, conservando el getter síncrono y sus llamadas existentes.
+- La lectura financiera nueva se usa solo en cambio de estado y borrado. Su
+  caché vive dentro de cada intento de transacción. Un reintento reconstruye la
+  caché, consulta los saldos actuales y vuelve a aplicar el ledger de trabajo.
+- Para 40 citas del mismo cliente/bono se hace una lectura del bono original y
+  una consulta de bonos activos por intento, en lugar de 40 de cada una. Se
+  proyectan todos los campos usados en las decisiones financieras; el historial
+  se conserva mediante `arrayUnion`. El reemplazo de serie sigue leyendo y
+  conservando el historial completo, porque allí se reescribe.
+- Las proyecciones de conflictos conservan estado, duración y todas las formas
+  de franja antiguas. No se truncan resultados ni se excluyen citas por tener
+  campos `date/time` incompletos o desactualizados. Los bloqueos de serie se consultan
+  por sus fechas generadas; la generación está acotada al máximo vigente de 20.
+- Se mantienen las transacciones y sus reintentos del SDK, cargos y devoluciones,
+  contadores absolutos, metadatos de serie, `requestId`, códigos y motivos de
+  negocio. No hay reintentos automáticos adicionales ni cambios parciales.
+
+### 7.2 Verificación reproducible
+
+Usar Node 22, como en producción, desde la raíz del repositorio:
+
+```powershell
+npm --prefix functions test
+npm --prefix functions run test:emulator
+npm --prefix functions run test:load
+npm test -- --run src/lib/admin-callable-errors.test.ts src/lib/recurring-reschedule.test.ts src/lib/admin-appointment-reschedule.test.ts src/components/admin/AppointmentRescheduleModal.test.tsx src/components/admin/CancelAppointmentModal.test.tsx
+```
+
+Las pruebas de emulador y carga solo permiten un proyecto `demo-*` y no acceden
+a producción. La carga compara procesos aislados con la importación/lecturas
+anteriores y optimizadas: tres ciclos, cinco solicitudes simultáneas, borrados
+de 40 citas por solicitud, reemplazos de 20 sesiones e historiales de 1.000
+entradas. Comprueba saldos, historiales, ocupación y series después de cada lote.
+El límite V8 de 384 MiB es de heap; no equivale a un contenedor de 512 MiB. Se
+mide además RSS del proceso y se exige un pico inferior a 410 MiB, estabilización
+de memoria y lotes inferiores a 45 segundos, manteniendo el timeout en 60.
+
+Resultados del 10 de noviembre de 2026, con Node 22.23.4 y el SDK real contra
+el emulador local de Firestore:
+
+| Variante | Historial por bono | RSS al arrancar | RSS máximo | Máximo lote de borrado | Máximo lote de reemplazo |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Importación y lecturas anteriores | 1.000 | 166 MiB | 418 MiB | 40,279 s | 27,689 s |
+| Optimizada | 1.000 | 92 MiB | 169 MiB | 8,879 s | 9,735 s |
+| Optimizada, historial grande | 5.000 | 92 MiB | 221 MiB | 14,915 s | 15,864 s |
+
+La referencia reproduce la importación completa y las lecturas financieras
+duplicadas, manteniendo el resto del código actual. Las lecturas totales del
+borrado pasan de 124 a 46 documentos por intento (40 citas, 2 lecturas
+financieras y 4 contadores). Se observaron reintentos reales: los totales por
+solicitud pueden ser mayores. Cada variante completó tres ciclos conservando
+todos los saldos, historiales, contadores y metadatos comprobados. Con 5.000
+entradas, el heap después de GC fue 42/43/44 MiB y el RSS 206/215/212 MiB.
+
+También pasan las 475 pruebas backend, 33 pruebas de emulador/concurrencia y
+76 pruebas web afectadas, la compilación de Functions, TypeScript y ESLint de
+los archivos modificados. La comprobación CRLF existente se normaliza sin
+retirar sus aserciones. Los contratos Flutter siguen cubiertos en la suite.
+
+Para reproducir solo el caso optimizado grande con Node 22:
+
+```powershell
+$env:APPOINTMENT_BENCHMARK_HISTORY_ENTRIES = '5000'
+firebase emulators:exec --only firestore --project demo-focus-club "node --expose-gc --max-old-space-size=384 functions/scripts/appointment-runtime-benchmark.cjs --worker=optimized"
+Remove-Item Env:APPOINTMENT_BENCHMARK_HISTORY_ENTRIES
+```
+
+Son mediciones del proceso local en Windows, sin límites de CPU/memoria de un
+contenedor Cloud Run. Respaldan 512 MiB y concurrencia 5 para esta carga; los
+logs de la sección 7.4 permiten verificar el comportamiento real cuando el
+responsable publique manualmente la actualización. No justifican aumentar el
+timeout de 60 segundos.
+
+### 7.3 Despliegue manual, en dos tandas
+
+Los comandos siguientes son instrucciones para el responsable del despliegue;
+no se han ejecutado como parte de esta corrección. El build es obligatorio:
+`firebase.json` no declara un predeploy que lo haga automáticamente.
+
+```powershell
+npm --prefix functions run build
+firebase deploy --project focus-club-f73b8 --only "functions:updateAppointmentStatusFromAdmin,functions:deleteAppointmentsFromAdmin"
+firebase deploy --project focus-club-f73b8 --only "functions:rescheduleAppointmentFromAdmin,functions:replaceRecurringSeriesScheduleFromAdmin"
+```
+
+El filtro excluye reglas, índices, hosting y las demás Functions. Los mensajes
+amigables y la actualización del estado ante errores de transporte del panel
+web quedan preparados en el código; publicarlos requiere un despliegue web
+independiente. Flutter conserva sus nombres, payloads, respuestas y motivos de
+negocio, sin requerir actualización de las apps publicadas.
+
+### 7.4 Lectura de los nuevos logs tras el despliegue manual
+
+Buscar `admin_appointment_operation`. Cada entrada contiene `operationId`,
+operación, resultado, duración, fases, intentos y documentos leídos, sin payloads
+ni historiales de clientes. `stagedWrites` cuenta escrituras preparadas en todos
+los intentos, no escrituras confirmadas. `readRpcTotal` suma RPC que pueden
+solaparse; no es tiempo de pared. `transaction` incluye commit y reintentos.
+
+Los campos RSS/heap pertenecen al proceso compartido entre solicitudes;
+`processLifetimeMaxRssMiB` es su máximo durante toda la vida del proceso.
+Se genera aviso a partir de 10 segundos o 384 MiB de RSS al finalizar. Revisar
+estos logs junto con los reinicios por memoria y HTTP 500/504 de Cloud Run antes
+de cambiar de nuevo los recursos. Las terminaciones de plataforma pueden
+impedir que se escriba la entrada final: los logs del sistema siguen siendo
+necesarios. Los errores de transporte indican comprobar el estado antes de
+repetir y no afirman que una operación con respuesta perdida se haya revertido.

@@ -873,3 +873,69 @@ test("per-date capacity, concurrency: lowering the global value while an approva
     assert.equal(seats, 3);
   }
 });
+
+test("five simultaneous approvals of one request charge and occupy exactly once", async () => {
+  await seed(baseDocuments());
+  const booked = await booking.createAppointment(callable("user-1", { duration: "60", preferredSlot: { date: DAY, time: "16:00" }, reason: "", appointmentType: "training" }));
+  const id = booked.appointmentId ?? booked.id;
+  const results = await Promise.all(Array.from({ length: 5 }, () => admin.updateAppointmentStatusFromAdmin(callable("admin", { appointmentId: id, status: "approved", expectedStatus: "pending" }))));
+  assert.equal(results.filter((result) => result.changed).length, 1);
+  const bono = await docData("bonos/bono-1");
+  assert.equal(bono.minutosRestantes, 420);
+  assert.equal(bono.historial.filter((entry) => entry.accion === "descuento_cita").length, 1);
+  for (const time of ["16:00", "16:15", "16:30", "16:45"]) assert.equal((await docData(`slot_occupancy/${DAY}_${time}`)).count, 1);
+});
+
+test("five simultaneous cancel/delete/move requests preserve the shared bono and every counter", async () => {
+  const documents = baseDocuments({ "bonos/bono-1": { userId: "user-1", estado: "activo", minutosTotales: 600, tamano: 600, minutosRestantes: 300, fechaExpiracion: "2099-12-31T00:00:00Z", historial: [] } });
+  for (let i = 0; i < 5; i += 1) {
+    const time = `${10 + i}:00`;
+    documents[`appointments/mix${i}`] = {
+      userId: "user-1", bonoId: "bono-1", status: "approved", duration: "60", approvedSlot: { date: DAY, time },
+      minutesDeducted: true, minutesDeductedAt: "2026-01-01T10:00:00Z", minutesDeductedAmount: 60,
+    };
+    for (const minute of ["00", "15", "30", "45"]) documents[`slot_occupancy/${DAY}_${10 + i}:${minute}`] = { date: DAY, time: `${10 + i}:${minute}`, count: 1 };
+  }
+  await seed(documents);
+  const results = await Promise.all([
+    settle(cancelAs("mix0", "not_charged")),
+    settle(admin.deleteAppointmentsFromAdmin(callable("admin", { appointmentIds: ["mix0"] }))),
+    settle(admin.deleteAppointmentsFromAdmin(callable("admin", { appointmentIds: ["mix1"] }))),
+    settle(cancelAs("mix2", "not_charged")),
+    settle(reschedule.rescheduleAppointmentFromAdmin(callable("admin", { appointmentId: "mix3", slot: { date: DAY, time: "17:00" }, assignedTrainer: null, requestId: "mixed_race_move_1" }))),
+  ]);
+  assert.ok(results[0].ok || results[0].reason === "appointment_not_found", JSON.stringify(results));
+  assert.ok(results.slice(1).every((result) => result.ok), JSON.stringify(results));
+  const bono = await docData("bonos/bono-1");
+  assert.equal(bono.minutosRestantes, 480);
+  assert.equal(bono.historial.filter((entry) => entry.accion === "devolucion_cita").length, 3);
+  assert.equal(new Set(bono.historial.map((entry) => entry.appointmentId)).size, 3);
+  assert.equal(await docData("appointments/mix0"), undefined);
+  assert.equal(await docData("appointments/mix1"), undefined);
+  assert.equal((await docData("appointments/mix2")).status, "cancelled");
+  for (const hour of [10, 11, 12, 13, 14, 17]) for (const minute of ["00", "15", "30", "45"]) {
+    assert.equal((await docData(`slot_occupancy/${DAY}_${hour}:${minute}`)).count, hour === 14 || hour === 17 ? 1 : 0);
+  }
+});
+
+test("five simultaneous recurring replacements replay one request without duplicate finance or outbox", async () => {
+  const dateAt = (days) => new Date(`${DAY}T12:00:00Z`).getTime() + days * 86400000;
+  const dayAt = (days) => new Date(dateAt(days)).toISOString().slice(0, 10);
+  const documents = baseDocuments({
+    "bonos/bono-1": { userId: "user-1", estado: "activo", tamano: 480, minutosTotales: 480, minutosRestantes: 360, fechaExpiracion: "2099-12-31T00:00:00Z", historial: [] },
+    "appointment_recurrences/race-series": { userId: "user-1", bonoId: "bono-1", status: "pending", duration: "60", intervalDays: 7, startDate: DAY, startTime: "10:00", endDate: dayAt(7), occurrenceCount: 2, totalMinutes: 120, origin: "admin" },
+  });
+  for (let i = 0; i < 2; i += 1) documents[`appointments/series-race-${i}`] = {
+    userId: "user-1", bonoId: "bono-1", status: "pending", duration: "60", recurrenceSeriesId: "race-series", recurrenceIndex: i,
+    preferredSlots: [{ date: dayAt(i * 7), time: "10:00" }], minutesDeducted: true, minutesDeductedAt: "2026-01-01T10:00:00Z", minutesDeductedAmount: 60,
+  };
+  await seed(documents);
+  const request = callable("admin", { appointmentId: "series-race-0", startSlot: { date: dayAt(1), time: "11:00" }, endDate: dayAt(8), assignedTrainer: null, requestId: "five_series_race_1" });
+  const results = await Promise.all(Array.from({ length: 5 }, () => reschedule.replaceRecurringSeriesScheduleFromAdmin(request)));
+  assert.equal(results.filter((result) => result.replayed).length, 4);
+  assert.equal((await docData("bonos/bono-1")).minutosRestantes, 360);
+  assert.deepEqual((await docData("bonos/bono-1")).historial, []);
+  assert.equal((await docData("appointment_recurrences/race-series")).occurrenceCount, 2);
+  assert.equal((await db.collection("notification_outbox").get()).size, 1);
+  assert.equal((await db.collection("slot_occupancy").get()).size, 0);
+});

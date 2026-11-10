@@ -98,7 +98,9 @@ assert.equal(hashA, hashB);
 assert.notEqual(hashA, hashC);
 
 const indexSource = fs.readFileSync(path.join(__dirname, "../src/index.ts"), "utf8");
-assert.match(indexSource, /new google\.auth\.GoogleAuth/);
+assert.match(indexSource, /new calendarAuth\.GoogleAuth/);
+assert.match(indexSource, /requireCalendar\("googleapis\/build\/src\/apis\/calendar\/index\.js"\)/);
+assert.doesNotMatch(indexSource, /import \{[^}]*google[^}]*\} from "googleapis"/);
 assert.match(indexSource, /secrets:\s*\[GOOGLE_CALENDAR_ID\]/);
 assert.equal(indexSource.includes("serviceAccount:"), false);
 

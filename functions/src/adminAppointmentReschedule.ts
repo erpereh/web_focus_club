@@ -14,7 +14,6 @@ import {
 } from "./appointmentLifecycle.js";
 import {
   civilDateFromExpiration,
-  generateRecurringOccurrenceDates,
   MAX_RECURRING_OCCURRENCES,
 } from "./recurringAppointments.js";
 import {
@@ -40,7 +39,9 @@ import {
   rangesOverlap,
   SLOT_REJECTION_MESSAGES,
   slotRangeKeys,
+  SLOT_CONFLICT_FIELDS,
 } from "./slotValidation.js";
+import { measureAdminPhase, runAdminAppointmentTransaction } from "./adminAppointmentRuntime.js";
 import {
   copyDefinedFields,
   firstReplacementIntersection,
@@ -240,7 +241,7 @@ async function requireAdminForRequest(
     throwHttps("permission-denied", "Debes iniciar sesion como admin.", "unauthenticated");
   }
   try {
-    await deps.requireAdmin(auth.uid);
+    await measureAdminPhase("authorization", () => deps.requireAdmin(auth.uid));
   } catch (error: unknown) {
     if (isRecord(error) && error.code === "permission-denied") {
       throwHttps("permission-denied", "Permisos insuficientes.", "admin_required");
@@ -439,7 +440,7 @@ async function rescheduleAppointmentFromAdmin(
   const payloadHash = bookingPayloadHash({ ...input, kind: "reschedule_single" });
 
   const selectedRef = deps.db.collection("appointments").doc(input.appointmentId);
-  return deps.db.runTransaction(async (transaction: Transaction) => {
+  return runAdminAppointmentTransaction(deps.db, async (transaction: Transaction) => {
     const marker = requestId
       ? await readIdempotencyMarker(transaction, deps.db, { requestId, adminUid, kind: "reschedule_single", payloadHash })
       : undefined;
@@ -504,7 +505,7 @@ async function rescheduleAppointmentFromAdmin(
     const userAppointmentsQuery = slotChanged
       ? deps.db.collection("appointments")
         .where("userId", "==", appointment.userId)
-        .where("status", "in", ["pending", "approved"])
+        .where("status", "in", ["pending", "approved"]).select(...SLOT_CONFLICT_FIELDS)
       : undefined;
     const occupancyRefs = occupancyKeysToRead.map((key) => deps.db.collection("slot_occupancy").doc(key));
     // Nutrition professionals cannot be double-booked (confirmed business rule).
@@ -515,7 +516,7 @@ async function rescheduleAppointmentFromAdmin(
     const trainerAppointmentsQuery = checkProfessional && input.assignedTrainer
       ? deps.db.collection("appointments")
         .where("assignedTrainer", "==", input.assignedTrainer)
-        .where("status", "in", ["pending", "approved"])
+        .where("status", "in", ["pending", "approved"]).select(...SLOT_CONFLICT_FIELDS)
       : undefined;
     const [
       trainerSnap,
@@ -745,7 +746,7 @@ async function replaceRecurringSeriesScheduleFromAdmin(
   const payloadHash = bookingPayloadHash({ ...input, kind: "reschedule_series" });
 
   const selectedRef = deps.db.collection("appointments").doc(input.appointmentId);
-  return deps.db.runTransaction(async (transaction: Transaction) => {
+  return runAdminAppointmentTransaction(deps.db, async (transaction: Transaction) => {
     // A repeat of an applied request returns its result: no second outbox, logs or finance.
     const marker = requestId
       ? await readIdempotencyMarker(transaction, deps.db, { requestId, adminUid, kind: "reschedule_series", payloadHash })
@@ -792,7 +793,7 @@ async function replaceRecurringSeriesScheduleFromAdmin(
     const trainerRef = input.assignedTrainer ? deps.db.collection("trainers").doc(input.assignedTrainer) : undefined;
     const userAppointmentsQuery = deps.db.collection("appointments")
       .where("userId", "==", series.userId)
-      .where("status", "in", ["pending", "approved"]);
+      .where("status", "in", ["pending", "approved"]).select(...SLOT_CONFLICT_FIELDS);
     const [occurrencesSnap, userSnap, trainerSnap, configSnap, userAppointmentsSnap] = await Promise.all([
       transaction.get(occurrencesQuery),
       transaction.get(userRef),
@@ -815,7 +816,7 @@ async function replaceRecurringSeriesScheduleFromAdmin(
 
     // The exact series bono cannot be known until the series has been read.
     const bonoRef = deps.db.collection("bonos").doc(series.bonoId);
-    const bonoSnap = await transaction.get(bonoRef);
+    const bonoSnap = await measureAdminPhase("finance", () => transaction.get(bonoRef));
     if (!bonoSnap.exists) {
       throwHttps("failed-precondition", "No se ha encontrado el bono reservado de la serie.", "invalid_bono");
     }
@@ -917,10 +918,17 @@ async function replaceRecurringSeriesScheduleFromAdmin(
       );
     }
 
-    const generatedDates = generateRecurringOccurrenceDates(input.startSlot.date, series.intervalDays, input.endDate);
-    if (generatedDates.length < 2 || generatedDates.length > MAX_RECURRING_OCCURRENCES) {
+    // Validate the existing length rule before allocating dates (e.g. year 9999).
+    const startUtc = Date.parse(`${input.startSlot.date}T00:00:00Z`);
+    const daySpan = (Date.parse(`${input.endDate}T00:00:00Z`) - startUtc) / 86400000;
+    const requestedCount = Math.floor(daySpan / series.intervalDays) + 1;
+    if (requestedCount < 2 || requestedCount > MAX_RECURRING_OCCURRENCES) {
       throwHttps("failed-precondition", "La serie debe contener entre dos y el maximo de sesiones permitido.", "invalid_series_length");
     }
+    // Generate only the validated count, without stepping past the last date
+    // (ISO years above 9999 change their format and break lexical comparisons).
+    const generatedDates = Array.from({ length: requestedCount }, (_, index) =>
+      new Date(startUtc + index * series.intervalDays * 86400000).toISOString().slice(0, 10));
     if (generatedDates.at(-1) !== input.endDate) {
       throwHttps("failed-precondition", "La fecha final debe coincidir con la cadencia de la serie.", "invalid_end_date");
     }
@@ -959,9 +967,7 @@ async function replaceRecurringSeriesScheduleFromAdmin(
     }));
     const occupancyKeysToRead = [...occupancyDelta.keys()].sort();
     const occupancyRefs = occupancyKeysToRead.map((key) => deps.db.collection("slot_occupancy").doc(key));
-    const blockedQuery = deps.db.collection("blocked_slots")
-      .where("date", ">=", generatedDates[0])
-      .where("date", "<=", generatedDates.at(-1));
+    const blockedQuery = deps.db.collection("blocked_slots").where("date", "in", generatedDates);
 
     // Exact refs are now known. Complete every remaining read before writing anything.
     const [occupancySnaps, blockedSnap, capacityExceptions] = await Promise.all([

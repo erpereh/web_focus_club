@@ -19,6 +19,11 @@ function getPath(data, fieldPath) {
   return fieldPath.split(".").reduce((value, key) => (value == null ? undefined : value[key]), data);
 }
 
+function project(data, fields) {
+  if (!data || !fields) return clone(data);
+  return Object.fromEntries(fields.filter((field) => Object.hasOwn(data, field)).map((field) => [field, clone(data[field])]));
+}
+
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value && typeof value === "object") {
@@ -81,17 +86,19 @@ class FakeDocumentReference {
 }
 
 class FakeQuery {
-  constructor(db, collectionName, filters = [], maximum) {
+  constructor(db, collectionName, filters = [], maximum, fields) {
     this.db = db;
     this.collectionName = collectionName;
     this.filters = filters;
     this.maximum = maximum;
+    this.fields = fields;
     this.kind = "query";
   }
   where(field, operator, value) {
-    return new FakeQuery(this.db, this.collectionName, [...this.filters, { field, operator, value }], this.maximum);
+    return new FakeQuery(this.db, this.collectionName, [...this.filters, { field, operator, value }], this.maximum, this.fields);
   }
-  limit(maximum) { return new FakeQuery(this.db, this.collectionName, this.filters, maximum); }
+  limit(maximum) { return new FakeQuery(this.db, this.collectionName, this.filters, maximum, this.fields); }
+  select(...fields) { return new FakeQuery(this.db, this.collectionName, this.filters, this.maximum, fields); }
   async get() { return this.db.runQuery(this); }
 }
 
@@ -109,6 +116,8 @@ class FakeFirestore {
     this.versions = new Map();
     this.collectionVersions = new Map();
     this.conflicts = 0;
+    this.reads = [];
+    this.attempts = 0;
     /** Optional hook run after the transaction callback, before committing (race simulation). */
     this.beforeCommit = undefined;
   }
@@ -117,13 +126,13 @@ class FakeFirestore {
 
   doc(path) { return this.documents.get(path); }
 
-  snapshot(path) {
+  snapshot(path, fields) {
     const data = this.documents.get(path);
     return {
       id: path.split("/").at(-1),
       ref: new FakeDocumentReference(this, path),
       exists: data !== undefined,
-      data: () => clone(data),
+      data: () => project(data, fields),
     };
   }
 
@@ -134,7 +143,7 @@ class FakeFirestore {
       .map((path) => this.snapshot(path))
       .filter((snap) => query.filters.every((filter) => matches(snap.data(), filter)));
     const limited = query.maximum === undefined ? docs : docs.slice(0, query.maximum);
-    return { docs: limited, empty: limited.length === 0, size: limited.length };
+    return { docs: limited.map((snap) => this.snapshot(snap.ref.path, query.fields)), empty: limited.length === 0, size: limited.length };
   }
 
   apply(staged) {
@@ -165,6 +174,7 @@ class FakeFirestore {
    */
   async runTransaction(callback, { maxAttempts = 5 } = {}) {
     for (let attempt = 1; ; attempt += 1) {
+      this.attempts += 1;
       const staged = [];
       const readDocs = new Map();
       const readCollections = new Map();
@@ -172,12 +182,22 @@ class FakeFirestore {
       const transaction = {
         get: async (target) => {
           if (wrote) throw new Error("read after write");
+          this.reads.push({ target: target.path ?? target.collectionName, fields: target.fields, attempt: this.attempts });
           if (target.kind === "doc") {
             readDocs.set(target.path, this.versions.get(target.path) ?? 0);
             return this.snapshot(target.path);
           }
           readCollections.set(target.collectionName, this.collectionVersions.get(target.collectionName) ?? 0);
           return this.runQuery(target);
+        },
+        getAll: async (...args) => {
+          if (wrote) throw new Error("read after write");
+          const options = args.at(-1)?.kind === "doc" ? {} : args.pop();
+          return args.map((ref) => {
+            this.reads.push({ target: ref.path, fields: options.fieldMask, attempt: this.attempts });
+            readDocs.set(ref.path, this.versions.get(ref.path) ?? 0);
+            return this.snapshot(ref.path, options.fieldMask);
+          });
         },
         set: (ref, value, options) => {
           wrote = true;

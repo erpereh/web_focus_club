@@ -324,7 +324,7 @@ test("customer and automatic cancellations are recorded as without charge", () =
   const rejected = buildPendingSeriesOccurrencePatch({ status: "rejected", now: "2026-10-14T08:00:00.000Z", refundPatch: {} });
   assert.equal(rejected.cancellationCharge, undefined, "a rejection is not a cancellation");
 
-  const source = (file) => fs.readFileSync(path.join(__dirname, "..", "src", file), "utf8");
+  const source = (file) => fs.readFileSync(path.join(__dirname, "..", "src", file), "utf8").replaceAll("\r\n", "\n");
   const cancelOwn = source("index.ts").match(/export const cancelOwnAppointment[\s\S]*?\n\);/)[0];
   assert.match(cancelOwn, /notChargedCancellationPatch\("customer", now, requestUid\)/);
   assert.match(source("recurringReschedule.ts"), /customer_series_schedule_reduction",\n\s*\.\.\.notChargedCancellationPatch\("customer"/);

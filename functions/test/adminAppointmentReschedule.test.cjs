@@ -20,11 +20,12 @@ class FakeDocumentReference {
 }
 
 class FakeQuery {
-  constructor(db, collectionName, filters = [], maximum) {
+  constructor(db, collectionName, filters = [], maximum, fields) {
     this.db = db;
     this.collectionName = collectionName;
     this.filters = filters;
     this.maximum = maximum;
+    this.fields = fields;
     this.kind = "query";
   }
 
@@ -32,12 +33,14 @@ class FakeQuery {
     return new FakeQuery(this.db, this.collectionName, [
       ...this.filters,
       { field, operator, value },
-    ], this.maximum);
+    ], this.maximum, this.fields);
   }
 
   limit(maximum) {
-    return new FakeQuery(this.db, this.collectionName, this.filters, maximum);
+    return new FakeQuery(this.db, this.collectionName, this.filters, maximum, this.fields);
   }
+
+  select(...fields) { return new FakeQuery(this.db, this.collectionName, this.filters, this.maximum, fields); }
 }
 
 class FakeCollection extends FakeQuery {
@@ -80,7 +83,7 @@ class FakeFirestore {
     const transaction = {
       get: async (target) => {
         if (firstWriteSeen) throw new Error("read after write");
-        this.operations.push({ type: "read", target: target.path ?? target.collectionName });
+        this.operations.push({ type: "read", target: target.path ?? target.collectionName, fields: target.fields, filters: target.filters });
         if (target.kind === "doc") {
           const data = this.documents.get(target.path);
           return {
@@ -101,7 +104,11 @@ class FakeFirestore {
             data: () => clone(data),
           }))
           .filter((snap) => target.filters.every((filter) => matchesFilter(snap.data()[filter.field], filter)));
-        return { docs: target.maximum === undefined ? docs : docs.slice(0, target.maximum), empty: docs.length === 0 };
+        const selected = (target.maximum === undefined ? docs : docs.slice(0, target.maximum)).map((snap) => ({
+          ...snap,
+          data: () => target.fields ? Object.fromEntries(target.fields.filter((field) => Object.hasOwn(snap.data(), field)).map((field) => [field, snap.data()[field]])) : snap.data(),
+        }));
+        return { docs: selected, empty: selected.length === 0, size: selected.length };
       },
       set: (ref, value, options) => {
         firstWriteSeen = true;
@@ -1104,6 +1111,41 @@ test("recurring pending trainer-only bypasses full and blocked availability with
   assert.equal(db.operations.some((operation) => operation.type === "write" && operation.target.startsWith("slot_occupancy/")), false);
   assert.equal(db.operations.some((operation) => operation.target === "blocked_slots"), false);
   assert.equal(db.operations.some((operation) => operation.target === "site_config/main"), false);
+});
+
+test("admin series rejects an extreme end date before reading availability or allocating unbounded dates", async () => {
+  const db = new FakeFirestore(pendingRecurringSeriesFixture());
+  await assert.rejects(createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+    auth: { uid: "admin-1", token: {} },
+    data: { appointmentId: "pending-1", startSlot: { date: "2026-09-08", time: "11:00" }, endDate: "9999-12-31", assignedTrainer: "trainer-2" },
+  }), (error) => error.details.reason === "invalid_series_length");
+  assert.equal(db.operations.some((operation) => operation.type === "write" || operation.target === "blocked_slots"), false);
+});
+
+test("series block reads include only generated dates and exclude unrelated intervening days", async () => {
+  const db = new FakeFirestore({
+    ...pendingRecurringSeriesFixture(),
+    "blocked_slots/unrelated": { date: "2026-09-10", time: "11:00" },
+  });
+  await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+    auth: { uid: "admin-1", token: {} },
+    data: { appointmentId: "pending-1", startSlot: { date: "2026-09-08", time: "11:00" }, endDate: "2026-09-15", assignedTrainer: "trainer-2" },
+  });
+  const blocked = db.operations.find((operation) => operation.target === "blocked_slots");
+  assert.deepEqual(blocked.filters, [{ field: "date", operator: "in", value: ["2026-09-08", "2026-09-15"] }]);
+  const conflict = db.operations.find((operation) => operation.target === "appointments" && operation.fields);
+  for (const field of ["approvedSlot", "preferredSlots", "date", "time", "duration", "status"]) assert.ok(conflict.fields.includes(field));
+});
+
+test("a valid short series near ISO year 9999 generates exactly its requested dates", async () => {
+  const db = new FakeFirestore(pendingRecurringSeriesFixture({ bono: { estado: "expirado", fechaExpiracion: "2026-01-01T00:00:00Z" } }));
+  const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+    auth: { uid: "admin-1", token: {} },
+    data: { appointmentId: "pending-1", startSlot: { date: "9999-12-20", time: "11:00" }, endDate: "9999-12-27", assignedTrainer: null },
+  });
+  assert.equal(result.newFutureCount, 2);
+  assert.equal(result.minutesDelta, -60);
+  assert.equal(db.documents.get("appointment_recurrences/series-1").endDate, "9999-12-27");
 });
 
 test("admin pending series replacement reuses records and applies only the financial delta without occupancy", async () => {

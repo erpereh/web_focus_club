@@ -1,4 +1,5 @@
 import type { Appointment, TimeSlot } from '@/types';
+import { getAdminTransportErrorMessage } from './admin-callable-errors';
 import { classifyMadridCivilSlot, getAppointmentEffectiveSlot } from './madrid-date';
 import { getCanonicalSlotBlocks, getSlotAvailability, slotOccupancyKey } from './appointment-slots';
 
@@ -233,5 +234,7 @@ export function getRecurringRescheduleErrorMessage(error: unknown, fallback: str
         recurring_occurrence_unavailable: `${multiAppointmentPrefix}una sesión futura de la serie ya no está disponible.`,
     };
     if (messages[reason]) return messages[reason];
+    const transportMessage = getAdminTransportErrorMessage(error);
+    if (transportMessage) return transportMessage;
     return error instanceof Error && error.message ? error.message : fallback;
 }

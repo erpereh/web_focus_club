@@ -8,6 +8,7 @@ import {
 } from "./appointmentLifecycle.js";
 import {
   applyApprovalDeductionInTransaction,
+  createFinanceContextReader,
   type FinanceAppointment,
   type FinanceContext,
   type FinanceSnapshot,
@@ -47,6 +48,7 @@ import {
   type SlotDayContext,
   type SlotRejectionReason,
 } from "./slotValidation.js";
+import { measureAdminPhase, runAdminAppointmentTransaction } from "./adminAppointmentRuntime.js";
 
 /**
  * Admin booking operations that used to run as several independent writes in
@@ -119,7 +121,8 @@ function fail(code: "invalid-argument" | "failed-precondition" | "permission-den
 
 async function requireAdminRequest(deps: AdminAppointmentStatusDeps, request: CallableRequest): Promise<{ uid: string; email: string }> {
   if (!request.auth) fail("permission-denied", "Debes iniciar sesión como admin.", "unauthenticated");
-  await deps.requireAdmin(request.auth.uid);
+  const uid = request.auth.uid;
+  await measureAdminPhase("authorization", () => deps.requireAdmin(uid));
   return { uid: request.auth.uid, email: request.auth.token?.email ?? "" };
 }
 
@@ -268,7 +271,10 @@ interface DeletionReadResult {
   series: Map<string, SeriesReadResult>;
 }
 
-async function readDeletions(transaction: Transaction, db: Firestore, ids: string[]): Promise<DeletionReadResult> {
+async function readDeletions(
+  transaction: Transaction, db: Firestore, ids: string[],
+  readFinance = (appointment: AdminAppointmentData) => readFinanceContext(transaction, db, appointment),
+): Promise<DeletionReadResult> {
   const refs = ids.map((id) => db.collection("appointments").doc(id));
   const snaps = await Promise.all(refs.map((ref) => transaction.get(ref)));
   const existing = snaps
@@ -286,7 +292,7 @@ async function readDeletions(transaction: Transaction, db: Firestore, ids: strin
     .filter((id): id is string => typeof id === "string" && id.length > 0))];
 
   const [finances, seriesResults, occupancyRaw] = await Promise.all([
-    Promise.all(existing.map(({ snap }) => readFinanceContext(transaction, db, snap.data() as AdminAppointmentData))),
+    measureAdminPhase("finance", () => Promise.all(existing.map(({ snap }) => readFinance(snap.data() as AdminAppointmentData)))),
     Promise.all(seriesIds.map((seriesId) => readSeriesForOccurrence(transaction, db, seriesId))),
     readOccupancyRaw(transaction, db, occupancyDelta.keys()),
   ]);
@@ -591,7 +597,9 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
       : parseId(data.assignedTrainer, "El profesional");
     const appointmentRef = db.collection("appointments").doc(appointmentId);
 
-    return db.runTransaction(async (transaction) => {
+    return runAdminAppointmentTransaction(db, async (transaction) => {
+      const financeReader = createFinanceContextReader(transaction, db);
+      const readFinance = (appointment: AdminAppointmentData) => measureAdminPhase("finance", () => financeReader(appointment));
       const snap = await transaction.get(appointmentRef);
       if (!snap.exists) fail("failed-precondition", "No se ha encontrado la cita indicada.", "appointment_not_found");
       const appointment = snap.data() as AdminAppointmentData;
@@ -653,14 +661,14 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
 
         const [config, customerAppointments, trainer, trainerAppointments, finance] = await Promise.all([
           loadSiteConfig(transaction, db),
-          loadCustomerActiveAppointments(transaction, db, appointment.userId),
+          loadCustomerActiveAppointments(transaction, db, appointment.userId, true),
           trainerId ? loadTrainer(transaction, db, trainerId) : Promise.resolve(undefined),
           trainerId && appointmentType === "nutrition"
-            ? loadTrainerActiveAppointments(transaction, db, trainerId)
+            ? loadTrainerActiveAppointments(transaction, db, trainerId, true)
             : Promise.resolve([]),
-          readFinanceContext(transaction, db, appointment),
+          readFinance(appointment),
         ]);
-        const day = await loadSlotDay(transaction, db, config, slot.date);
+        const day = await measureAdminPhase("availability", () => loadSlotDay(transaction, db, config, slot.date));
         const start = madridCivilSlotToInstant(slot);
         const isPast = !start || start.getTime() <= nowDate.getTime();
         const blocks = getCanonicalSlotBlocks(slot.time, duration);
@@ -744,7 +752,7 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
       }
 
       if (target === "rejected") {
-        const finance = await readFinanceContext(transaction, db, appointment);
+        const finance = await readFinance(appointment);
         refundAppointmentMinutesInTransaction(transaction, appointmentRef, appointment, finance, now);
         transaction.set(appointmentRef, { status: "rejected", updatedAt: now }, { merge: true });
         transaction.create(db.collection("activity_logs").doc(), { ...logBase, action: "appointment_rejected" });
@@ -754,7 +762,7 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
       const releaseKeys = current === "approved" ? appointmentOccupancyKeys(appointment) : [];
       const [occupancyRaw, finance, series] = await Promise.all([
         readOccupancyRaw(transaction, db, releaseKeys),
-        target === "cancelled" ? readFinanceContext(transaction, db, appointment) : Promise.resolve(undefined),
+        target === "cancelled" ? readFinance(appointment) : Promise.resolve(undefined),
         target === "cancelled" && appointment.recurrenceSeriesId
           ? readSeriesForOccurrence(transaction, db, appointment.recurrenceSeriesId)
           : Promise.resolve(undefined),
@@ -810,8 +818,8 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
     const actor = await requireAdminRequest(deps, request);
     const data = isRecord(request.data) ? request.data : {};
     const ids = parseIdList(data.appointmentIds);
-    return db.runTransaction(async (transaction) => {
-      const read = await readDeletions(transaction, db, ids);
+    return runAdminAppointmentTransaction(db, async (transaction) => {
+      const read = await readDeletions(transaction, db, ids, createFinanceContextReader(transaction, db));
       const result = commitDeletions(transaction, db, read, actor, deps.getNowDate(), "appointment_deleted");
       return { success: true, ...result, alreadyDeletedIds: read.missing };
     });

@@ -96,6 +96,7 @@ import { parseAdminDeepLink } from '@/lib/admin-deep-link';
 import { type CancellationCharge, getCancellationCategory, withCancellationVisual } from '@/lib/appointment-cancellation';
 import { AppointmentRescheduleModal } from '@/components/admin/AppointmentRescheduleModal';
 import { getRecurringRescheduleErrorMessage } from '@/lib/recurring-reschedule';
+import { getAdminCallableErrorMessage, getAdminTransportErrorMessage } from '@/lib/admin-callable-errors';
 import { getCanonicalSlotBlocks } from '@/lib/appointment-slots';
 import {
   getBlockedSelectionKeys,
@@ -1890,16 +1891,6 @@ export default function AdminPage() {
     setDeletingClient(false);
   };
 
-  const getAdminCallableErrorMessage = (error: unknown, fallback: string) => {
-    const code = (error as { code?: string })?.code;
-    const message = error instanceof Error ? error.message : '';
-    if (code === 'functions/already-exists') return 'Ya existe un usuario con este email.';
-    if (code === 'functions/permission-denied') return message || 'Permisos insuficientes.';
-    if (code === 'functions/invalid-argument') return message || 'Revisa los campos obligatorios.';
-    if (code === 'functions/failed-precondition') return message || fallback;
-    return message || fallback;
-  };
-
   const validateCreateClientForm = () => {
     const email = createClientForm.email.trim();
     if (!createClientForm.name.trim()) return 'El nombre completo es obligatorio.';
@@ -2165,6 +2156,7 @@ export default function AdminPage() {
     } catch (error) {
       console.error('Error deleting appointment:', error);
       alert(getAdminCallableErrorMessage(error, 'No se pudo eliminar la cita.'));
+      if (getAdminTransportErrorMessage(error)) await refreshData().catch(() => undefined);
     } finally {
       setStatusActionBusyId(null);
     }
@@ -9177,22 +9169,27 @@ export default function AdminPage() {
                       // Same requestId across retries; the fingerprint only after the admin confirmed full slots.
                       const confirmationFields = { requestId, ...(acknowledgedRestrictions ? { acknowledgedRestrictions } : {}) };
                       let result: { overriddenRestrictions?: unknown[] };
-                      if (scope === 'series') {
-                        if (!endDate) throw new Error('Elige una fecha final disponible para la serie.');
-                        result = await replaceRecurringSeriesScheduleFromAdminFS({
-                          appointmentId: selectedAppointmentId,
-                          startSlot: slot,
-                          endDate,
-                          assignedTrainer,
-                          ...confirmationFields,
-                        });
-                      } else {
-                        result = await rescheduleAppointmentFromAdminFS({
-                          appointmentId: selectedAppointmentId,
-                          slot,
-                          assignedTrainer,
-                          ...confirmationFields,
-                        });
+                      try {
+                        if (scope === 'series') {
+                          if (!endDate) throw new Error('Elige una fecha final disponible para la serie.');
+                          result = await replaceRecurringSeriesScheduleFromAdminFS({
+                            appointmentId: selectedAppointmentId,
+                            startSlot: slot,
+                            endDate,
+                            assignedTrainer,
+                            ...confirmationFields,
+                          });
+                        } else {
+                          result = await rescheduleAppointmentFromAdminFS({
+                            appointmentId: selectedAppointmentId,
+                            slot,
+                            assignedTrainer,
+                            ...confirmationFields,
+                          });
+                        }
+                      } catch (error) {
+                        if (getAdminTransportErrorMessage(error)) await refreshData().catch(() => undefined);
+                        throw error;
                       }
                       setShowEditSlotModal(false);
                       setSelectedAppointmentId(null);

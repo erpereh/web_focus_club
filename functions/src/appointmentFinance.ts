@@ -37,6 +37,38 @@ export interface FinanceContext {
   activeBonos: FinanceSnapshot[];
 }
 
+// Only financial decisions use these snapshots. History is appended with
+// arrayUnion, never replaced. Do not use this projection in series replacement,
+// which still reads and preserves the complete history.
+export const FINANCE_FIELDS = [
+  "userId", "estado", "tamano", "minutosTotales", "minutosRestantes",
+  "sesionesTotales", "sesionesRestantes", "modalidad", "fechaExpiracion", "replacedByBonoId",
+] as const;
+
+/** Create INSIDE the transaction callback: retries must read fresh balances. */
+export function createFinanceContextReader(transaction: Transaction, db: Firestore) {
+  const originals = new Map<string, Promise<FinanceSnapshot>>();
+  const activeByUser = new Map<string, Promise<FinanceSnapshot[]>>();
+  return async (appointment: { userId: string; bonoId?: string }): Promise<FinanceContext> => {
+    let original = appointment.bonoId ? originals.get(appointment.bonoId) : undefined;
+    if (appointment.bonoId && !original) {
+      original = transaction.getAll(db.collection("bonos").doc(appointment.bonoId), {
+        fieldMask: [...FINANCE_FIELDS],
+      }).then(([snap]) => snap);
+      originals.set(appointment.bonoId, original);
+    }
+    let active = activeByUser.get(appointment.userId);
+    if (!active) {
+      active = transaction.get(db.collection("bonos")
+        .where("userId", "==", appointment.userId).where("estado", "==", "activo")
+        .select(...FINANCE_FIELDS)).then((snap) => snap.docs);
+      activeByUser.set(appointment.userId, active);
+    }
+    const [originalBono, activeBonos] = await Promise.all([original, active]);
+    return { originalBono, activeBonos };
+  };
+}
+
 export const REFUND_ORIGINAL_MISSING = "No se ha encontrado el bono original para devolver los minutos.";
 export const REFUND_NO_ACTIVE_BONO = "El bono original fue sustituido y el cliente no tiene un único bono activo al que devolver los minutos.";
 

@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase-admin/app";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { getAuth } from "firebase-admin/auth";
 import { DocumentReference, DocumentSnapshot, FieldValue, getFirestore, Transaction } from "firebase-admin/firestore";
 import { getMessaging } from "firebase-admin/messaging";
@@ -7,7 +8,8 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import { onDocumentCreated, onDocumentDeleted, onDocumentUpdated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { calendar_v3, google } from "googleapis";
+import type { calendar_v3 } from "googleapis/build/src/apis/calendar/v3.js";
+import { ADMIN_APPOINTMENT_RUNTIME, observeAdminAppointmentOperation } from "./adminAppointmentRuntime.js";
 import {
   buildCalendarEventPayload,
   buildCalendarSyncHash,
@@ -579,12 +581,18 @@ function shortGoogleCalendarError(error: unknown): string {
   return message.replace(/\s+/g, " ").trim().slice(0, 300);
 }
 
+const requireCalendar = createRequire(__filename);
+
 function getGoogleCalendarService(): calendar_v3.Calendar {
-  const auth = new google.auth.GoogleAuth({
+  // Node caches this module. Appointment callables never load Calendar or the
+  // roughly one thousand unrelated modules from the googleapis root barrel.
+  const { auth: calendarAuth, calendar }: typeof import("googleapis/build/src/apis/calendar/index.js") =
+    requireCalendar("googleapis/build/src/apis/calendar/index.js");
+  const auth = new calendarAuth.GoogleAuth({
     scopes: ["https://www.googleapis.com/auth/calendar"],
   });
 
-  return google.calendar({ version: "v3", auth });
+  return calendar({ version: "v3", auth });
 }
 
 function getGoogleCalendarId(): string {
@@ -1134,13 +1142,13 @@ export const replaceOwnRecurringSeriesSchedule = onCall(
 );
 
 export const rescheduleAppointmentFromAdmin = onCall(
-  { region: REGION },
-  adminAppointmentReschedule.rescheduleAppointmentFromAdmin,
+  { region: REGION, ...ADMIN_APPOINTMENT_RUNTIME },
+  observeAdminAppointmentOperation("rescheduleAppointmentFromAdmin", adminAppointmentReschedule.rescheduleAppointmentFromAdmin),
 );
 
 export const replaceRecurringSeriesScheduleFromAdmin = onCall(
-  { region: REGION },
-  adminAppointmentReschedule.replaceRecurringSeriesScheduleFromAdmin,
+  { region: REGION, ...ADMIN_APPOINTMENT_RUNTIME },
+  observeAdminAppointmentOperation("replaceRecurringSeriesScheduleFromAdmin", adminAppointmentReschedule.replaceRecurringSeriesScheduleFromAdmin),
 );
 
 export const returnRecurringSeriesToPendingFromAdmin = onCall(
@@ -1169,13 +1177,13 @@ export const commitBonoAppointmentRenewalFromAdmin = onCall(
 );
 
 export const updateAppointmentStatusFromAdmin = onCall(
-  { region: REGION },
-  adminAppointmentStatus.updateAppointmentStatusFromAdmin,
+  { region: REGION, ...ADMIN_APPOINTMENT_RUNTIME },
+  observeAdminAppointmentOperation("updateAppointmentStatusFromAdmin", adminAppointmentStatus.updateAppointmentStatusFromAdmin),
 );
 
 export const deleteAppointmentsFromAdmin = onCall(
-  { region: REGION },
-  adminAppointmentStatus.deleteAppointmentsFromAdmin,
+  { region: REGION, ...ADMIN_APPOINTMENT_RUNTIME },
+  observeAdminAppointmentOperation("deleteAppointmentsFromAdmin", adminAppointmentStatus.deleteAppointmentsFromAdmin),
 );
 
 export const blockSlotsFromAdmin = onCall(
