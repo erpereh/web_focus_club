@@ -74,12 +74,7 @@ describe('calculateManualBonoAdjustment', () => {
         expect(calculateManualBonoAdjustment(bono(), -999, now)).toEqual({ ok: false, reason: 'invalid-argument' });
     });
 
-    it('can raise minutosTotales when adding above the current max', () => {
-        expect(calculateManualBonoAdjustment(bono({ minutosTotales: 30, minutosRestantes: 30 }), 45, now)).toMatchObject({
-            ok: true,
-            minutosRestantes: 75,
-            minutosTotales: 75,
-            estado: 'activo',
-        });
+    it('refuses manual additions above effective capacity', () => {
+        expect(calculateManualBonoAdjustment(bono({ minutosTotales: 30, minutosRestantes: 30 }), 45, now)).toEqual({ ok: false, reason: 'capacity-exceeded' });
     });
 });

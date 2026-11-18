@@ -335,8 +335,8 @@ test("customer and automatic cancellations are recorded as without charge", () =
 test("only Cloud Functions can write the charge fields (rules)", () => {
   const rules = fs.readFileSync(path.join(__dirname, "..", "..", "firestore.rules"), "utf8");
   const block = rules.match(/match \/appointments\/\{appointmentId\} \{([\s\S]*?)\n {4}\}/)[1];
-  assert.match(block, /allow create: if isAdmin\(\)\s*&& !request\.resource\.data\.keys\(\)\.hasAny\(cancellationChargeFields\(\)\)/);
-  assert.match(block, /isAdmin\(\) && recurringAppointmentClientUpdateAllowed\(\) && cancellationChargeUnchanged\(\)/);
+  assert.match(block, /allow create: if false;/);
+  assert.match(block, /isAdmin\(\) && appointmentFinanceUnchanged\(\) && recurringAppointmentClientUpdateAllowed\(\) && cancellationChargeUnchanged\(\)/);
   for (const field of ["cancellationCharge", "cancellationChargedMinutes", "cancellationChargeDecidedBy", "cancellationChargeDecidedByUid", "cancellationChargeDecidedAt"]) {
     assert.match(rules, new RegExp(`'${field}'`));
   }

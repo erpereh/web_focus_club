@@ -56,6 +56,13 @@ export function bonoExpiryInstant(value: string | undefined): Date | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
+export function bonoStartInstant(value: string | undefined): Date | undefined {
+  if (!value) return undefined;
+  if (DATE_ONLY_RE.test(value)) return madridCivilSlotToInstant({ date: value, time: "00:00" }) ?? undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
 export function bonoRemainingMinutes(bono: NotifiableBono): number {
   return getBonoRemainingMinutes({ id: "", estado: "activo", ...bono } as LifecycleBono);
 }

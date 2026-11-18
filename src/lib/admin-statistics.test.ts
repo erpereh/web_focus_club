@@ -312,3 +312,17 @@ describe('helpers', () => {
         expect(cancellationsCsv([{ ...cancellations.records[0], clientName: 'Ana; "la jefa"' }])).toContain('"Ana; ""la jefa"""');
     });
 });
+
+describe('canonical refund statistics', () => {
+    it('includes debts of deleted appointments without requiring an appointment in the period', () => {
+        const result = calculateStatistics({ ...fixture(), appointments: [], refundSummary: { count: 1, minutes: 60, blocked: 0, waiting: 1, enabled: true } });
+        expect(result.review.find((row) => row.id === 'waiting-refunds')).toMatchObject({ count: 1, severity: 'info', href: '/admin/devoluciones' });
+        expect(result.review.find((row) => row.id === 'pending-refunds')).toBeUndefined();
+    });
+    it('a settled canonical debt disappears even if a legacy appointment still has its old review flag', () => {
+        const input = fixture();
+        input.appointments = [appt({ minutesRefundPendingReview: true })];
+        const result = calculateStatistics({ ...input, refundSummary: { count: 0, minutes: 0, blocked: 0, waiting: 0, enabled: true } });
+        expect(result.review.some((row) => ['pending-refunds', 'waiting-refunds'].includes(row.id))).toBe(false);
+    });
+});

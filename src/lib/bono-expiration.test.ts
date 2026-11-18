@@ -2,12 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
     getDocs: vi.fn(),
+    mutate: vi.fn(async (_input: Record<string, unknown>) => ({ data: { success: true } })),
     update: vi.fn(),
     commit: vi.fn(async () => undefined),
 }));
 
 vi.mock('@/lib/firebase', () => ({ db: {}, storage: {}, functions: 'firebase-functions' }));
-vi.mock('firebase/functions', () => ({ httpsCallable: vi.fn() }));
+vi.mock('firebase/functions', () => ({ httpsCallable: vi.fn(() => mocks.mutate) }));
 vi.mock('firebase/storage', () => ({}));
 vi.mock('firebase/firestore', () => ({
     collection: vi.fn(() => 'bonos'),
@@ -71,11 +72,11 @@ describe('administrative bulk recalculation', () => {
 
         await expect(recalculateAllBonoExpirations(3)).resolves.toBe(2);
 
-        expect(mocks.update).toHaveBeenCalledTimes(2);
-        const ids = mocks.update.mock.calls.map(([, update]) => update.notificationBulkOperationId);
+        expect(mocks.mutate).toHaveBeenCalledTimes(2);
+        const ids = mocks.mutate.mock.calls.map(([update]) => update.notificationBulkOperationId);
         expect(ids[0]).toMatch(/^bulk-expiration-/);
         expect(ids[1]).toBe(ids[0]);
-        expect(mocks.commit).toHaveBeenCalledTimes(1);
+        expect(mocks.commit).not.toHaveBeenCalled();
     });
 
     it('client-side expiry keeps date-only bonos valid for the whole day', async () => {

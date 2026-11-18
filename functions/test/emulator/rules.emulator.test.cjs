@@ -131,7 +131,7 @@ test("recurring occurrences only leave their series through Cloud Functions", as
   // Notes and non-recurring appointments keep working as before.
   await assertSucceeds(updateDoc(doc(admin, "appointments/r-approved"), { approvalNotes: "ok" }));
   await assertSucceeds(updateDoc(doc(verified("coach"), "appointments/a1"), { trainerNotes: "bien", updatedAt: "x" }));
-  await assertSucceeds(deleteDoc(doc(admin, "appointments/a2")));
+  await assertFails(deleteDoc(doc(admin, "appointments/a2")));
 });
 
 test("backend audit records stay closed, even to admins", async () => {
@@ -170,4 +170,20 @@ test("site config: admins edit it, but capacity only changes through Cloud Funct
   await assertFails(updateDoc(doc(admin, "site_config/main"), { capacityExceptionsEnabled: true }));
   await assertFails(deleteDoc(doc(admin, "site_config/main")));
   await assertFails(setDoc(doc(verified("user-1"), "site_config/main"), { endHour: 22 }, { merge: true }));
+});
+
+test("financial receipts, bono balances and the automatic-refund switch stay server-owned", async () => {
+  const admin = verified("admin");
+  const user = verified("user-1");
+  for (const client of [admin, user]) {
+    for (const field of ["minutosRestantes", "minutosTotales", "minutosExtraRecuperados", "estado"]) {
+      await assertFails(updateDoc(doc(client, "bonos/b1"), { [field]: field === "estado" ? "activo" : 999 }));
+    }
+    for (const field of ["minutesRefundedAmount", "minutesRefundPendingAmount", "minuteRefundId", "minutesRefundRequestedAt", "minutesRefundStatus"]) {
+      await assertFails(updateDoc(doc(client, "appointments/a1"), { [field]: 999 }));
+    }
+    await assertFails(setDoc(doc(client, "minute_refunds/forged"), { pendingMinutes: 60 }));
+    await assertFails(setDoc(doc(client, "minute_refund_accounts/user-1"), { pendingMinutes: 60 }));
+    await assertFails(updateDoc(doc(client, "site_config/main"), { automaticMinuteRefundsEnabled: true }));
+  }
 });

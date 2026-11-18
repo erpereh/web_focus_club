@@ -79,6 +79,7 @@ assert.deepEqual(refunded, {
   remainingMinutes: 45,
   bonoStatus: "expirado",
   minutesRefunded: true,
+  minutesRefundRequestedAmount: 45,
   minutesRefundedAmount: 45,
   minutesRefundedAt: "2026-07-14T10:00:00.000Z",
   cappedMinutes: 0,

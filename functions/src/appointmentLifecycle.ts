@@ -1,3 +1,4 @@
+import { bonoEffectiveMinutes } from "./bonoMinutes.js";
 export type BonoStatus = "activo" | "agotado" | "expirado" | "eliminado";
 
 export interface LifecycleBono {
@@ -6,10 +7,13 @@ export interface LifecycleBono {
   tamano?: number;
   minutosTotales?: number;
   minutosRestantes?: number;
+  minutosCapacidadBase?: number;
+  minutosExtraRecuperados?: number;
   sesionesTotales?: number;
   sesionesRestantes?: number;
   modalidad?: string;
   fechaExpiracion?: string;
+  fechaAsignacion?: string;
   /** Set when an admin assigned a newer bono; a replaced bono is never reactivated. */
   replacedByBonoId?: string | null;
 }
@@ -25,6 +29,13 @@ export interface LifecycleAppointment {
   minutesRefundedAmount?: number | null;
   minutesRefundedAt?: string | null;
   minutesRefundReason?: string | null;
+  minuteRefundId?: string | null;
+  minutesRefundRequestedAt?: string | null;
+  minutesRefundRequestedAmount?: number;
+  minutesRefundPendingAmount?: number;
+  minutesRefundPendingReview?: boolean;
+  minutesRefundCappedAmount?: number;
+  minutesRefundedToBonoId?: string | null;
 }
 
 export interface LifecycleTransactionAdapter {
@@ -42,12 +53,7 @@ export interface ReconcileAppointmentMinutesInput {
 }
 
 export function getBonoTotalMinutes(bono: LifecycleBono): number {
-  if (typeof bono.tamano === "number" && typeof bono.minutosTotales === "number") {
-    return Math.max(bono.tamano, bono.minutosTotales);
-  }
-  if (typeof bono.minutosTotales === "number") return bono.minutosTotales;
-  if (typeof bono.tamano === "number") return bono.tamano;
-  return (bono.sesionesTotales ?? 0) * (bono.modalidad === "30min" ? 30 : 60);
+  return bonoEffectiveMinutes(bono);
 }
 
 export function getBonoRemainingMinutes(bono: LifecycleBono): number {
@@ -57,7 +63,10 @@ export function getBonoRemainingMinutes(bono: LifecycleBono): number {
 }
 
 export function isBonoExpiredAt(bono: LifecycleBono, now: Date): boolean {
-  return Boolean(bono.fechaExpiracion && new Date(bono.fechaExpiracion) < now);
+  if (!bono.fechaExpiracion) return false;
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(bono.fechaExpiracion);
+  const end = dateOnly ? madridCivilSlotToInstant({ date: bono.fechaExpiracion, time: "23:59" })?.getTime() : Date.parse(bono.fechaExpiracion);
+  return end === undefined || !Number.isFinite(end) || end + (dateOnly ? 59_999 : 0) < now.getTime();
 }
 
 export function selectExactlyOneActiveBono<T extends { estado: string }>(bonos: T[]): T | undefined {
@@ -86,7 +95,7 @@ export function calculateAppointmentDeduction(bono: LifecycleBono, amount: numbe
 export function calculateAppointmentRefund(bono: LifecycleBono, appointment: LifecycleAppointment, now: string) {
   const amount = appointment.minutesDeductedAmount ?? 0;
   if (appointment.minutesDeducted !== true || !appointment.minutesDeductedAt
-    || appointment.minutesRefundedAt || !Number.isFinite(amount) || amount <= 0) {
+    || appointment.minutesRefundedAt || appointment.minutesRefundRequestedAt || !Number.isSafeInteger(amount) || amount <= 0) {
     return { ok: false as const, reason: "not-refundable" };
   }
 
@@ -98,9 +107,10 @@ export function calculateAppointmentRefund(bono: LifecycleBono, appointment: Lif
     bonoStatus: bono.estado === "agotado" && !isBonoReplaced(bono) && !isBonoExpiredAt(bono, new Date(now))
       ? "activo" as const
       : bono.estado,
-    minutesRefunded: true as const,
-    minutesRefundedAmount: amount,
-    minutesRefundedAt: now,
+    minutesRefunded: remainingMinutes - currentMinutes === amount,
+    minutesRefundRequestedAmount: amount,
+    minutesRefundedAmount: remainingMinutes - currentMinutes,
+    minutesRefundedAt: remainingMinutes > currentMinutes ? now : null,
     /** Minutes that did not fit under the bono maximum (never silently invented). */
     cappedMinutes: Math.max(0, currentMinutes + amount - remainingMinutes),
   };
@@ -123,7 +133,8 @@ export function reconcileAppointmentMinutes(input: ReconcileAppointmentMinutesIn
   }
   if (input.action === "deduct") {
     if ((input.appointment.minutesDeducted === true || Boolean(input.appointment.minutesDeductedAt))
-      && !input.appointment.minutesRefundedAt) {
+      && !input.appointment.minutesRefundedAt && !input.appointment.minutesRefundRequestedAt
+      && (input.appointment.minutesRefundPendingAmount ?? input.appointment.minutesRefundCappedAmount ?? 0) <= 0) {
       return { ok: false, reason: "already-deducted" };
     }
     const deduction = calculateAppointmentDeduction(input.bono, input.amount ?? 0, input.now);
@@ -140,6 +151,13 @@ export function reconcileAppointmentMinutes(input: ReconcileAppointmentMinutesIn
       minutesRefundedAmount: null,
       minutesRefundedAt: null,
       minutesRefundReason: null,
+      minuteRefundId: null,
+      minutesRefundRequestedAt: null,
+      minutesRefundRequestedAmount: 0,
+      minutesRefundPendingAmount: 0,
+      minutesRefundCappedAmount: 0,
+      minutesRefundPendingReview: false,
+      minutesRefundStatus: null,
     };
     input.transaction.setBono(deduction.bonoId, {
       minutosRestantes: deduction.remainingMinutes,
@@ -156,6 +174,9 @@ export function reconcileAppointmentMinutes(input: ReconcileAppointmentMinutesIn
     minutesRefundedAmount: refund.minutesRefundedAmount,
     minutesRefundedAt: refund.minutesRefundedAt,
     minutesRefundReason: null,
+    minutesRefundRequestedAt: input.now,
+    minutesRefundRequestedAmount: refund.minutesRefundRequestedAmount,
+    minutesRefundPendingAmount: refund.cappedMinutes,
     ...(refund.cappedMinutes > 0 ? { minutesRefundCappedAmount: refund.cappedMinutes } : {}),
   };
   input.transaction.setBono(input.bono.id, {

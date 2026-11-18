@@ -11,8 +11,8 @@ import {
   createFinanceContextReader,
   type FinanceAppointment,
   type FinanceContext,
-  type FinanceSnapshot,
   pendingRefundMinutes,
+  BonoLedger,
   readFinanceContext,
   refundAppointmentMinutesInTransaction,
   type RefundOutcome,
@@ -205,55 +205,6 @@ async function readOccupancyRaw(transaction: Transaction, db: Firestore, keys: I
  * Several refunds in one transaction may hit the same bono. Snapshots share a
  * working copy so each refund sees the minutes left by the previous one.
  */
-class BonoLedger {
-  private readonly working = new Map<string, Record<string, unknown>>();
-  private readonly refs = new Map<string, DocumentReference>();
-
-  wrap(snap: FinanceSnapshot | undefined): FinanceSnapshot | undefined {
-    if (!snap) return undefined;
-    if (snap.exists && !this.working.has(snap.id)) {
-      this.working.set(snap.id, { ...(snap.data() as Record<string, unknown>) });
-      this.refs.set(snap.id, snap.ref);
-    }
-    return {
-      exists: snap.exists,
-      id: snap.id,
-      ref: snap.ref,
-      data: () => (snap.exists ? { ...this.working.get(snap.id) } : undefined),
-    };
-  }
-
-  context(context: FinanceContext): FinanceContext {
-    return {
-      originalBono: this.wrap(context.originalBono),
-      activeBonos: context.activeBonos.map((snap) => this.wrap(snap) as FinanceSnapshot),
-    };
-  }
-
-  /** Transaction proxy that keeps the working copy in sync with bono writes. */
-  transaction(transaction: Transaction): Transaction {
-    return new Proxy(transaction, {
-      get: (target, property) => {
-        if (property !== "set") {
-          const value = Reflect.get(target, property, target);
-          return typeof value === "function" ? value.bind(target) : value;
-        }
-        return (ref: DocumentReference, value: Record<string, unknown>, options?: unknown) => {
-          const id = ref.id;
-          if (this.refs.has(id) && this.refs.get(id)?.path === ref.path) {
-            const next = { ...this.working.get(id) };
-            for (const [field, fieldValue] of Object.entries(value)) {
-              if (field !== "historial") next[field] = fieldValue;
-            }
-            this.working.set(id, next);
-          }
-          return (target.set as (...args: unknown[]) => unknown).call(target, ref, value, options);
-        };
-      },
-    }) as Transaction;
-  }
-}
-
 // --------------------------------------------------------------- deletion core
 
 interface PreparedDeletion {
@@ -308,7 +259,7 @@ async function readDeletions(
 /** Months a resolved deletion record is kept (Firestore TTL on `expiresAt`). */
 export const DELETION_RECORD_RETENTION_MONTHS = 24;
 
-type RefundStatus = "refunded" | "refunded_capped" | "not_refundable" | "pending_manual";
+type RefundStatus = "refunded" | "refunded_capped" | "not_refundable" | "pending_manual" | "pending_automatic";
 
 function refundStatusOf(outcome: RefundOutcome): RefundStatus {
   if (outcome.kind === "unavailable") return "pending_manual";
@@ -337,7 +288,7 @@ export function buildDeletionRecord(input: {
   now: Date;
 }): Record<string, unknown> {
   const { appointment, outcome } = input;
-  const pending = pendingRefundMinutes(outcome);
+  const pending = Math.max(pendingRefundMinutes(outcome), Number(appointment.minutesRefundPendingAmount ?? appointment.minutesRefundCappedAmount ?? 0));
   const slot = getAppointmentEffectiveSlot(appointment) ?? null;
   return {
     appointmentId: input.appointmentId,
@@ -355,14 +306,18 @@ export function buildDeletionRecord(input: {
       createdAt: typeof appointment.createdAt === "string" ? appointment.createdAt : null,
     },
     finance: {
+      minuteRefundId: appointment.minuteRefundId ?? null,
       bonoId: appointment.bonoId ?? null,
       minutesDeducted: appointment.minutesDeducted === true,
       minutesDeductedAmount: appointment.minutesDeductedAmount ?? null,
       minutesDeductedAt: appointment.minutesDeductedAt ?? null,
       previousRefundAt: appointment.minutesRefundedAt ?? null,
-      refundStatus: refundStatusOf(outcome),
-      refundedAmount: outcome.kind === "refunded" ? outcome.amount - outcome.cappedMinutes : 0,
-      refundedToBonoId: outcome.kind === "refunded" ? outcome.targetBonoId : null,
+      refundStatus: pending > 0 && !appointment.minutesRefundPendingReview ? "pending_automatic" : refundStatusOf(outcome),
+      requestedRefundAmount: appointment.minutesRefundRequestedAmount ?? appointment.minutesDeductedAmount ?? 0,
+      refundedAmount: Math.max(outcome.kind === "refunded" ? outcome.amount - outcome.cappedMinutes : 0,
+        appointment.minutesRefundRequestedAt ? Number(appointment.minutesRefundedAmount ?? 0)
+          : Math.max(0, Number(appointment.minutesRefundedAmount ?? 0) - Number(appointment.minutesRefundCappedAmount ?? 0))),
+      refundedToBonoId: outcome.kind === "refunded" ? outcome.targetBonoId : appointment.minutesRefundedToBonoId ?? null,
       cappedMinutes: outcome.kind === "refunded" ? outcome.cappedMinutes : 0,
       pendingRefundMinutes: pending,
       refundReason: outcome.kind === "unavailable"
@@ -373,7 +328,7 @@ export function buildDeletionRecord(input: {
       cancellationCharge: isCancellationCharge(appointment.cancellationCharge) ? appointment.cancellationCharge : null,
       cancellationChargedMinutes: outcome.kind === "charged" ? outcome.amount : 0,
     },
-    manualReview: pending > 0 ? { status: "pending", since: input.now.toISOString() } : null,
+    manualReview: pending > 0 && appointment.minutesRefundPendingReview ? { status: "pending", since: input.now.toISOString() } : null,
     ...(pending > 0
       ? {}
       : { expiresAt: Timestamp.fromDate(addMonths(input.now, DELETION_RECORD_RETENTION_MONTHS)) }),
@@ -399,6 +354,7 @@ function commitDeletions(
   const tx = ledger.transaction(transaction);
   const refundedIds: string[] = [];
   const outcomes = new Map<string, RefundOutcome>();
+  const financePatches = new Map<string, Record<string, unknown>>();
 
   writeOccupancy(transaction, db, read.occupancyDelta, read.occupancyRaw);
   for (const item of read.prepared) {
@@ -406,6 +362,7 @@ function commitDeletions(
       persistAppointment: false,
     });
     outcomes.set(item.id, refund.outcome);
+    financePatches.set(item.id, refund.appointmentPatch);
     if (refund.refunded) refundedIds.push(item.id);
   }
   for (const [seriesId, series] of read.series) {
@@ -420,7 +377,7 @@ function commitDeletions(
   const context = logAction === "appointment_deleted_on_block" ? "block" : "admin_delete";
   for (const item of read.prepared) {
     const outcome = outcomes.get(item.id) ?? { kind: "not_applicable" as const };
-    const record = buildDeletionRecord({ appointmentId: item.id, appointment: item.data, outcome, context, actorUid: actor.uid, now });
+    const record = buildDeletionRecord({ appointmentId: item.id, appointment: { ...item.data, ...financePatches.get(item.id) }, outcome, context, actorUid: actor.uid, now });
     const finance = record.finance as { refundStatus: RefundStatus; pendingRefundMinutes: number; refundReason: string | null };
     if (finance.pendingRefundMinutes > 0) {
       pendingRefunds.push({ appointmentId: item.id, minutes: finance.pendingRefundMinutes, reason: finance.refundReason ?? "" });
@@ -919,6 +876,8 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
         transaction.get(db.collection("users").doc(userId)),
         transaction.get(db.collection("bonos").where("userId", "==", userId).where("estado", "==", "activo")),
       ]);
+      const financeAccountRef = db.collection("minute_refund_accounts").doc(userId);
+      const financeAccount = await transaction.get(financeAccountRef);
       if (existing.exists) {
         // Same request repeated (double click / retry): return the bono already created.
         if ((existing.data() as { userId?: string }).userId !== userId) {
@@ -933,8 +892,11 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
       activeSnap.docs.forEach((snap) => {
         transaction.set(snap.ref, { estado: "agotado", replacedByBonoId: requestId, replacedAt: now }, { merge: true });
       });
+      transaction.set(financeAccountRef, { userId, revision: Number(financeAccount.data()?.revision ?? 0) + 1 }, { merge: true });
       transaction.create(bonoRef, {
         userId,
+        minutosCapacidadBase: tamano,
+        minutosExtraRecuperados: 0,
         tamano,
         minutosTotales: tamano,
         minutosRestantes: tamano,

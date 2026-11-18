@@ -1,3 +1,4 @@
+import { hasFullMinuteRefund, type RefundEvidence } from "../../refundAccounting.js";
 import type { RenderedEmail } from "../types.js";
 import {
   type DetailRow,
@@ -11,7 +12,7 @@ import { renderLayout, renderTextLayout } from "./layout.js";
 export type AppointmentEmailAction = "confirmed" | "deleted";
 export type AppointmentEmailStatus = "pending" | "approved" | "rejected" | "cancelled" | "deleted";
 
-export interface AppointmentEmailData {
+export interface AppointmentEmailData extends RefundEvidence {
   action: AppointmentEmailAction;
   status: AppointmentEmailStatus;
   appointmentId: string;
@@ -72,7 +73,7 @@ export type CustomerAppointmentEvent =
   | "appointment_proposal_declined";
 
 function refundNote(data: AppointmentEmailData): string {
-  return data.minutesRefunded ? " Los minutos reservados se han devuelto a tu bono." : "";
+  return hasFullMinuteRefund(data) ? " Los minutos reservados se han devuelto a tu bono." : "";
 }
 
 function customerEventCopy(event: CustomerAppointmentEvent, data: AppointmentEmailData): Copy {

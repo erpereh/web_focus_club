@@ -128,7 +128,7 @@ import { useMediaLibrary } from '@/hooks/useMediaLibrary';
 import { defaultCMS } from '@/hooks/useFirestore';
 import { toast } from '@/hooks/use-toast';
 import type { TimeSlot, Service, Testimonial, Appointment, CMSContent, GaleriaContent, ContactoConfig, ContactoCard, BlockedSlot, Trainer, SiteConfig, Bono, BrandingConfig, HeroStat, SandraAchievement, SandraValue, CentroConfig, GaleriaTrainingItem, GaleriaResultado, GaleriaStat } from '@/types';
-import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos, getAppointmentType, NUTRITION_DURATION_MINUTES, type AppointmentType } from '@/types';
+import { getBonoMinutosRestantes, getBonoMinutosTotales, bonoCapacityLabel, formatMinutos, getAppointmentType, NUTRITION_DURATION_MINUTES, type AppointmentType } from '@/types';
 import {
   formatRecurringSeriesPreview,
   generateRecurringOccurrenceDates,
@@ -218,7 +218,6 @@ import {
   deleteBono,
   addBonoMinutes,
   manualDeductBonoMinutes,
-  normalizeActiveBonoLimits,
   recalculateAllBonoExpirations,
   expireOverdueBonos,
   getBrandingConfig,
@@ -466,11 +465,14 @@ function formatBonoDate(value: string): string {
 
 /** Notice for minutes that could not be returned automatically (manual review). */
 function pendingRefundsNotice(pending: PendingRefund[] | undefined): string | null {
-  if (!pending?.length) return null;
-  const total = pending.reduce((sum, item) => sum + item.minutes, 0);
-  return `Atención: ${total} min de ${pending.length} cita(s) no se han podido devolver automáticamente `
-    + 'y quedan pendientes de revisión manual (registro de auditoría de borrados).\n\n'
-    + pending.map((item) => `- ${item.appointmentId}: ${item.minutes} min. ${item.reason}`).join('\n');
+  const review = pending?.filter((item) => [
+    'multiple_active_bonos', 'bono_owner_mismatch', 'missing_source_bono', 'invalid_bono_dates',
+    'invalid_bono_accounting', 'historical_review_required', 'ambiguous_latest_bono',
+  ].includes(item.reason)) ?? [];
+  if (!review.length) return null;
+  const total = review.reduce((sum, item) => sum + item.minutes, 0);
+  return `${total} min conservados requieren revisar una incidencia en Administración → Devoluciones.\n\n`
+    + review.map((item) => `${item.appointmentId}: ${item.minutes} min`).join('\n');
 }
 
 function getAppointmentPrimarySlot(appointment: Appointment): TimeSlot | undefined {
@@ -1334,7 +1336,6 @@ export default function AdminPage() {
 
     // Bonos: expirar vencidos y cargar mapa de bonos activos por cliente
     await expireOverdueBonos();
-    await normalizeActiveBonoLimits();
     const activeBonos = await getAllActiveBonos();
     const bonoMap: Record<string, Bono | null> = {};
     for (const bono of activeBonos) {
@@ -3236,6 +3237,9 @@ export default function AdminPage() {
               )}
             </button>
 
+            <Link href="/admin/devoluciones" className="flex items-center gap-3 rounded-lg px-4 py-3 text-sm text-[var(--color-text-secondary)] hover:bg-white/5">
+              <Clock className="h-5 w-5" /> Devoluciones
+            </Link>
             <Link
               href="/admin/estadisticas"
               onClick={() => setSidebarOpen(false)}
@@ -4218,7 +4222,7 @@ export default function AdminPage() {
                               <div className="flex flex-wrap items-center gap-3">
                                 <span className="px-2.5 py-1 rounded-lg bg-[var(--color-accent-dim)] text-[var(--color-accent-val)] text-xs font-medium border border-[var(--color-accent-border)]">
                                   <Ticket className="w-3 h-3 inline mr-1" />
-                                  Bono {getBonoMinutosTotales(clientBonos[client.uid]!) / 60}h
+                                  {bonoCapacityLabel(clientBonos[client.uid]!)}
                                 </span>
                                 <span className="text-sm text-[var(--color-text-primary)]">
                                   {formatMinutos(getBonoMinutosRestantes(clientBonos[client.uid]!))} / {formatMinutos(getBonoMinutosTotales(clientBonos[client.uid]!))}
@@ -8725,7 +8729,7 @@ export default function AdminPage() {
                                 </span>
                               </div>
                               <div className="text-sm text-[var(--color-text-primary)] mb-1">
-                                Bono Mensual {getBonoMinutosTotales(bono) / 60}h
+                                {bonoCapacityLabel(bono)}
                               </div>
                               <div className="text-xs text-[var(--color-text-secondary)] mb-2">
                                 {formatMinutos(getBonoMinutosRestantes(bono))} restantes de {formatMinutos(getBonoMinutosTotales(bono))} · Expira: {new Date(bono.fechaExpiracion).toLocaleDateString('es-ES')}
@@ -8735,7 +8739,7 @@ export default function AdminPage() {
                                   {bono.historial.map((h, i) => (
                                     <div key={i} className="flex justify-between text-xs text-[var(--color-text-secondary)]">
                                       <span>{new Date(h.fecha).toLocaleDateString('es-ES')}</span>
-                                      <span>{h.tipo}{h.duracion && h.duracion !== '-' ? ` · ${h.duracion}min` : ''}</span>
+                                      <span>{h.tipo}{h.duracion && h.duracion !== '-' ? ` · ${h.minutosAbonados ?? h.duracion}min` : ''}</span>
                                     </div>
                                   ))}
                                 </div>

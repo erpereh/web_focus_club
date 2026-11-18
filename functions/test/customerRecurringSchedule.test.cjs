@@ -21,6 +21,7 @@ class FakeQuery {
     this.filters = filters;
     this.kind = "query";
   }
+  select(..._fields) { return this; }
   where(field, operator, value) {
     return new FakeQuery(this.db, this.collectionName, [...this.filters, { field, operator, value }]);
   }
@@ -35,7 +36,9 @@ class FakeCollection extends FakeQuery {
 }
 
 function clone(value) {
-  return structuredClone(value);
+  if (!value || typeof value !== 'object' || /Transform$/.test(value.constructor?.name ?? '')) return value;
+  if (Array.isArray(value)) return value.map(clone);
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clone(item)]));
 }
 
 function matches(actual, filter) {
@@ -57,6 +60,7 @@ class FakeFirestore {
     const staged = [];
     let writeStarted = false;
     const transaction = {
+      getAll: async (...args) => Promise.all(args.filter((arg) => arg.kind === "doc").map((ref) => transaction.get(ref))),
       get: async (target) => {
         if (writeStarted) throw new Error("read after write");
         this.operations.push({ type: "read", target: target.path ?? target.collectionName });
@@ -99,6 +103,13 @@ class FakeFirestore {
     staged.forEach(({ ref, value, merge, deleteFields }) => {
       const previous = this.documents.get(ref.path) ?? {};
       const next = merge ? { ...previous, ...value } : value;
+      for (const [field, item] of Object.entries(value)) {
+        if (item?.constructor?.name === 'ArrayUnionTransform') {
+          const previous = this.documents.get(ref.path)?.[field] ?? [];
+          next[field] = [...previous, ...item.elements.filter((entry) => !previous.some((p) => JSON.stringify(p) === JSON.stringify(entry)))];
+        }
+        if (item?.constructor?.name === 'NumericIncrementTransform') next[field] = (this.documents.get(ref.path)?.[field] ?? 0) + item.operand;
+      }
       deleteFields.forEach((field) => delete next[field]);
       this.documents.set(ref.path, next);
     });

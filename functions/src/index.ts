@@ -1,3 +1,6 @@
+import { FieldPath, type QueryDocumentSnapshot } from "firebase-admin/firestore";
+import { createMinuteRefundAdminHandlers } from "./minuteRefundAdmin.js";
+import { REFUND_ACCOUNTS, REFUND_FLAG, drainMinuteRefunds, recoverDueMinuteRefunds, wakeMinuteRefunds } from "./minuteRefunds.js";
 import { initializeApp } from "firebase-admin/app";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
@@ -1191,6 +1194,54 @@ export const blockSlotsFromAdmin = onCall(
   adminAppointmentStatus.blockSlotsFromAdmin,
 );
 
+const minuteRefundAdmin = createMinuteRefundAdminHandlers({ db, requireAdmin });
+export const auditMinuteRefundsFromAdmin = onCall({ region: REGION }, minuteRefundAdmin.auditMinuteRefundsFromAdmin);
+export const getMinuteRefundsFromAdmin = onCall({ region: REGION }, minuteRefundAdmin.getMinuteRefundsFromAdmin);
+export const getMinuteRefundSummaryFromAdmin = onCall({ region: REGION }, minuteRefundAdmin.getMinuteRefundSummaryFromAdmin);
+export const getMinuteRefundDetailFromAdmin = onCall({ region: REGION }, minuteRefundAdmin.getMinuteRefundDetailFromAdmin);
+export const retryMinuteRefundFromAdmin = onCall({ region: REGION }, minuteRefundAdmin.retryMinuteRefundFromAdmin);
+export const mutateBonoFromAdmin = onCall({ region: REGION }, minuteRefundAdmin.mutateBonoFromAdmin);
+
+export const onMinuteRefundAccountWritten = onDocumentWritten(
+  { document: "minute_refund_accounts/{userId}", region: REGION, retry: true },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!after || Number(after.pendingMinutes ?? 0) <= 0 || before?.generation === after.generation) return;
+    const credited = await drainMinuteRefunds(db, String(event.params.userId), undefined, Number(after.generation));
+    if (credited > 0) console.log("[MinuteRefund] Automatic credit", { credited });
+  },
+);
+
+export const onBonoRefundDestinationChanged = onDocumentWritten(
+  { document: "bonos/{bonoId}", region: REGION, retry: true },
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    const fields = ["userId", "estado", "fechaAsignacion", "fechaExpiracion", "replacedByBonoId"];
+    // A debit can exhaust a bono but cannot make a destination available.
+    if (after?.estado === "agotado" && before?.estado === "activo") return;
+    if (before && after && fields.every((key) => before[key] === after[key])) return;
+    const users = new Set([before?.userId, after?.userId].filter((value): value is string => typeof value === "string"));
+    for (const uid of users) await wakeMinuteRefunds(db, uid);
+  },
+);
+
+export const onMinuteRefundActivation = onDocumentUpdated(
+  { document: "site_config/main", region: REGION, retry: true },
+  async (event) => {
+    if (event.data?.before.data()?.[REFUND_FLAG] === true || event.data?.after.data()?.[REFUND_FLAG] !== true) return;
+    let cursor: QueryDocumentSnapshot | undefined;
+    do {
+      let query = db.collection(REFUND_ACCOUNTS).where("pendingMinutes", ">", 0).orderBy("pendingMinutes").orderBy(FieldPath.documentId());
+      if (cursor) query = query.startAfter(cursor);
+      const page = await query.limit(50).get();
+      for (const account of page.docs) await wakeMinuteRefunds(db, account.id);
+      cursor = page.size === 50 ? page.docs.at(-1)! : undefined;
+    } while (cursor);
+  },
+);
+
 export const assignBonoFromAdmin = onCall(
   { region: REGION },
   adminAppointmentStatus.assignBonoFromAdmin,
@@ -1902,6 +1953,10 @@ export const expireOverdueBonosScheduled = onSchedule(
   async () => {
     const count = await notifications.runExpireOverdueBonos();
     console.log("[Notify] Overdue bonos expired", { count });
+    try {
+      const credited = await recoverDueMinuteRefunds(db);
+      if (credited > 0) console.log("[MinuteRefund] Recovered credits", { credited });
+    } catch (error) { console.error("[MinuteRefund] Recovery deferred", { error: String(error) }); }
   },
 );
 

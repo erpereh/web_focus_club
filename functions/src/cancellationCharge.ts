@@ -36,7 +36,8 @@ export function isChargedCancellation(appointment: ChargeableAppointment): boole
  */
 export function chargeableMinutesOf(appointment: ChargeableAppointment): number {
   if (appointment.appointmentType === "nutrition") return 0;
-  if (appointment.minutesRefundedAt) return 0;
+  if (appointment.minutesRefundedAt || appointment.minutesRefundRequestedAt
+    || (appointment.minutesRefundPendingAmount ?? appointment.minutesRefundCappedAmount ?? 0) > 0) return 0;
   if (appointment.minutesDeducted !== true || !appointment.minutesDeductedAt) return 0;
   const amount = Number(appointment.minutesDeductedAmount ?? 0);
   return Number.isFinite(amount) && amount > 0 ? Math.trunc(amount) : 0;

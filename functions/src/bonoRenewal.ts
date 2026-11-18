@@ -426,6 +426,8 @@ export function createBonoRenewalHandlers(deps: BonoRenewalDeps) {
           minutesRefunded: false,
           minutesRefundedAmount: null,
           minutesRefundedAt: null,
+          minuteRefundId: null, minutesRefundRequestedAt: null, minutesRefundRequestedAmount: 0,
+          minutesRefundPendingAmount: 0, minutesRefundCappedAmount: 0, minutesRefundPendingReview: false,
           minutesRefundReason: null,
           customerConfirmation: confirmation,
           renewalId,

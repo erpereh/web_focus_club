@@ -29,6 +29,7 @@ export interface ReplacementAppointmentData {
   minutesDeductedAt?: string;
   minutesRefunded?: boolean;
   minutesRefundedAt?: string | null;
+  minutesRefundRequestedAt?: string | null;
 }
 
 export interface ReplacementBonoData {
@@ -158,7 +159,7 @@ export function hasValidFutureReservation(
     && typeof appointment.minutesDeductedAt === "string"
     && appointment.minutesDeductedAt.length > 0
     && appointment.minutesRefunded !== true
-    && !appointment.minutesRefundedAt;
+    && !appointment.minutesRefundedAt && !appointment.minutesRefundRequestedAt;
 }
 
 export function replacementHistoryEntries(value: unknown): unknown[] {

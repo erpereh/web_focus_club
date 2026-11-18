@@ -1,15 +1,14 @@
+import { createFinanceContextReader, refundAppointmentMinutesInTransaction, BonoLedger } from "./appointmentFinance.js";
 import { FieldValue, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import {
   calculateAppointmentDeduction,
-  calculateAppointmentRefund,
   classifyMadridCivilSlot,
   getBonoTotalMinutes,
   getAppointmentEffectiveSlot,
   getMadridDateKey,
   isBonoExpiredAt,
   slotOccupancyDocId,
-  type LifecycleAppointment,
   type LifecycleBono,
 } from "./appointmentLifecycle.js";
 import {
@@ -1033,53 +1032,15 @@ async function replaceRecurringSeriesScheduleFromAdmin(
         ],
       };
     } else if (minutesDelta < 0) {
-      const exactRefundRemainingMinutes = usableRemainingMinutes - minutesDelta;
-      if (!isNonNegativeInteger(exactRefundRemainingMinutes) || exactRefundRemainingMinutes > totalBonoMinutes) {
-        throwHttps(
-          "failed-precondition",
-          "La devolucion de la serie no puede aplicarse con exactitud.",
-          "invalid_financial_reservation",
-        );
-      }
-      let workingBono: LifecycleBono = { ...bono, minutosRestantes: usableRemainingMinutes };
+      const readFinance = createFinanceContextReader(transaction, deps.db);
+      const finance = await readFinance(cancelled[0].occurrence.data);
+      const ledger = new BonoLedger();
+      const financeTx = ledger.transaction(transaction);
       cancelled.forEach((occurrence) => {
-        const refund = calculateAppointmentRefund(workingBono, occurrence.occurrence.data as LifecycleAppointment, now);
-        if (!refund.ok) {
-          throwHttps("failed-precondition", "Las reservas financieras de la serie no son validas.", "invalid_financial_reservation");
-        }
-        workingBono = {
-          ...workingBono,
-          minutosRestantes: refund.remainingMinutes,
-          estado: refund.bonoStatus,
-        };
-        refundPatches.set(occurrence.occurrence.id, {
-          minutesRefunded: refund.minutesRefunded,
-          minutesRefundedAmount: refund.minutesRefundedAmount,
-          minutesRefundedAt: refund.minutesRefundedAt,
-          minutesRefundReason: "admin_series_schedule_reduction",
-        });
+        const refund = refundAppointmentMinutesInTransaction(financeTx, occurrence.occurrence.ref, occurrence.occurrence.data,
+          ledger.context(finance), now, { reason: "admin_series_schedule_reduction" });
+        refundPatches.set(occurrence.occurrence.id, refund.appointmentPatch);
       });
-      if (workingBono.minutosRestantes !== exactRefundRemainingMinutes) {
-        throwHttps(
-          "failed-precondition",
-          "La devolucion de la serie no puede aplicarse con exactitud.",
-          "invalid_financial_reservation",
-        );
-      }
-      bonoPatch = {
-        minutosRestantes: workingBono.minutosRestantes,
-        estado: workingBono.estado,
-        historial: [
-          ...histories,
-          ...cancelled.map((occurrence) => ({
-            fecha: now,
-            tipo: series.serviceType ?? "",
-            duracion: String(seriesDuration),
-            appointmentId: occurrence.occurrence.id,
-            accion: "devolucion_cita",
-          })),
-        ],
-      };
     }
 
     // Every hard rule passed: full sessions are only accepted with the admin's explicit confirmation.
@@ -1162,6 +1123,8 @@ async function replaceRecurringSeriesScheduleFromAdmin(
         minutesRefunded: false,
         minutesRefundedAmount: null,
         minutesRefundedAt: null,
+          minuteRefundId: null, minutesRefundRequestedAt: null, minutesRefundRequestedAmount: 0,
+          minutesRefundPendingAmount: 0, minutesRefundCappedAmount: 0, minutesRefundPendingReview: false,
         minutesRefundReason: null,
         notificationOperationId: operation.operationId,
         createdAt: now,

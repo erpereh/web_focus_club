@@ -55,7 +55,9 @@ class FakeCollection extends FakeQuery {
 }
 
 function clone(value) {
-  return structuredClone(value);
+  if (!value || typeof value !== 'object' || /Transform$/.test(value.constructor?.name ?? '')) return value;
+  if (Array.isArray(value)) return value.map(clone);
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clone(item)]));
 }
 
 function matchesFilter(actual, { operator, value }) {
@@ -81,6 +83,7 @@ class FakeFirestore {
     const staged = [];
     let firstWriteSeen = false;
     const transaction = {
+      getAll: async (...args) => Promise.all(args.filter((arg) => arg.kind === "doc").map((ref) => transaction.get(ref))),
       get: async (target) => {
         if (firstWriteSeen) throw new Error("read after write");
         this.operations.push({ type: "read", target: target.path ?? target.collectionName, fields: target.fields, filters: target.filters });
@@ -131,6 +134,13 @@ class FakeFirestore {
     staged.forEach(({ ref, value, merge, deleteFields = [] }) => {
       const previous = this.documents.get(ref.path) ?? {};
       const next = merge ? { ...previous, ...value } : value;
+      for (const [field, item] of Object.entries(value)) {
+        if (item?.constructor?.name === 'ArrayUnionTransform') {
+          const previous = this.documents.get(ref.path)?.[field] ?? [];
+          next[field] = [...previous, ...item.elements.filter((entry) => !previous.some((p) => JSON.stringify(p) === JSON.stringify(entry)))];
+        }
+        if (item?.constructor?.name === 'NumericIncrementTransform') next[field] = (this.documents.get(ref.path)?.[field] ?? 0) + item.operand;
+      }
       deleteFields.forEach((field) => delete next[field]);
       this.documents.set(ref.path, next);
     });
@@ -1738,23 +1748,16 @@ test("admin series replacement rejects missing and over-total usable bono balanc
   }
 });
 
-test("admin series reduction rejects a refund that cannot be applied exactly", async () => {
+test("admin series reduction preserves excess refund minutes as a durable debt", async () => {
   const db = new FakeFirestore(recurringSeriesFixture({ bono: { minutosRestantes: 980 } }));
-  const before = snapshotDocuments(db);
-
-  await assert.rejects(
-    createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
-      auth: { uid: "admin-1", token: {} },
-      data: {
-        appointmentId: "future-1",
-        startSlot: { date: "2026-09-08", time: "11:00" },
-        endDate: "2026-09-15",
-        assignedTrainer: null,
-      },
-    }),
-    (error) => error.code === "failed-precondition" && error.details.reason === "invalid_financial_reservation",
-  );
-  assertNoWrites(db, before);
+  await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
+    auth: { uid: "admin-1", token: {} },
+    data: { appointmentId: "future-1", startSlot: { date: "2026-09-08", time: "11:00" }, endDate: "2026-09-15", assignedTrainer: null },
+  });
+  assert.equal(db.documents.get("bonos/bono-1").minutosRestantes, 1000);
+  const debts = [...db.documents.entries()].filter(([path]) => /^minute_refunds\/[^/]+$/.test(path)).map(([, row]) => row);
+  assert.equal(debts.length, 1);
+  assert.deepEqual([debts[0].requestedMinutes, debts[0].creditedMinutes, debts[0].pendingMinutes], [60, 20, 40]);
 });
 
 test("admin series expansion creates a new high unique index with copied identity and correct reservation metadata", async () => {

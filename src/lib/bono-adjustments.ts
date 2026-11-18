@@ -1,3 +1,4 @@
+import { bonoEffectiveMinutes } from "./bono-minutes";
 export const ALLOWED_BONO_ADJUSTMENTS = new Set([-45, -30, 30, 45]);
 
 export type ManualBonoStatus = 'activo' | 'agotado' | 'expirado' | 'eliminado';
@@ -6,6 +7,8 @@ export interface ManualBonoInput {
     tamano?: number;
     minutosTotales?: number;
     minutosRestantes?: number;
+    minutosCapacidadBase?: number;
+    minutosExtraRecuperados?: number;
     sesionesTotales?: number;
     sesionesRestantes?: number;
     modalidad?: string;
@@ -20,7 +23,7 @@ export interface ManualBonoHistorialEntry {
 }
 
 export type ManualBonoAdjustmentResult =
-    | { ok: false; reason: 'invalid-argument' | 'insufficient-minutes' }
+    | { ok: false; reason: 'invalid-argument' | 'insufficient-minutes' | 'capacity-exceeded' }
     | {
         ok: true;
         delta: number;
@@ -31,13 +34,7 @@ export type ManualBonoAdjustmentResult =
     };
 
 function getBonoMaxMinutes(bono: ManualBonoInput): number {
-    if (typeof bono.tamano === 'number' && typeof bono.minutosTotales === 'number') {
-        return Math.max(bono.tamano, bono.minutosTotales);
-    }
-    if (typeof bono.minutosTotales === 'number') return bono.minutosTotales;
-    if (typeof bono.tamano === 'number') return bono.tamano;
-    const minPerSession = bono.modalidad === '30min' ? 30 : 60;
-    return (bono.sesionesTotales ?? 0) * minPerSession;
+    return bonoEffectiveMinutes(bono);
 }
 
 function getBonoRemainingMinutes(bono: ManualBonoInput): number {
@@ -50,7 +47,7 @@ function getBonoRemainingMinutes(bono: ManualBonoInput): number {
 
 /**
  * Pure admin ±30/±45 adjustment. Preserves current add/deduct semantics:
- * add can raise minutosTotales and reactivate agotado; deduct never goes negative
+ * add respects the effective capacity and can reactivate agotado; deduct never goes negative
  * and writes a "Deducción manual" historial entry.
  */
 export function calculateManualBonoAdjustment(
@@ -86,17 +83,19 @@ export function calculateManualBonoAdjustment(
         };
     }
 
-    const minutosRestantes = Math.max(0, currentRemaining + delta);
+    const minutosRestantes = currentRemaining + delta;
+    if (minutosRestantes > maxMinutes) return { ok: false, reason: 'capacity-exceeded' };
     return {
         ok: true,
         delta,
         minutosRestantes,
-        minutosTotales: Math.max(maxMinutes, minutosRestantes),
+        minutosTotales: maxMinutes,
         estado: minutosRestantes > 0 ? 'activo' : bono.estado,
     };
 }
 
-export function manualBonoAdjustmentErrorMessage(reason: 'invalid-argument' | 'insufficient-minutes'): string {
+export function manualBonoAdjustmentErrorMessage(reason: 'invalid-argument' | 'insufficient-minutes' | 'capacity-exceeded'): string {
+    if (reason === 'capacity-exceeded') return 'El ajuste supera la capacidad efectiva del bono.';
     if (reason === 'insufficient-minutes') return 'Minutos insuficientes en el bono';
     return 'El ajuste de minutos no es válido.';
 }

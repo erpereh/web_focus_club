@@ -124,6 +124,7 @@ export interface ReservedOccurrenceMinutes {
   minutesDeductedAmount?: number;
   minutesRefunded?: boolean;
   minutesRefundedAt?: string | null;
+  minutesRefundRequestedAt?: string | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -512,7 +513,7 @@ export function validateReservedSeriesMinutes(input: {
       || occurrence.minutesDeducted !== true
       || occurrence.minutesDeductedAmount !== input.durationMinutes
       || occurrence.minutesRefunded === true
-      || occurrence.minutesRefundedAt) {
+      || occurrence.minutesRefundedAt || occurrence.minutesRefundRequestedAt) {
       return changed("reservation_mismatch");
     }
     deductedTotal += occurrence.minutesDeductedAmount ?? 0;
@@ -545,6 +546,9 @@ export function planSeriesMinutesRefund(input: {
       minutesRefundedAmount: refund.minutesRefundedAmount,
       minutesRefundedAt: refund.minutesRefundedAt,
       minutesRefundReason: null,
+      minutesRefundRequestedAt: input.now,
+      minutesRefundRequestedAmount: refund.minutesRefundRequestedAmount,
+      minutesRefundPendingAmount: refund.cappedMinutes,
       ...(refund.cappedMinutes > 0
         ? {
           minutesRefundCappedAmount: refund.cappedMinutes,

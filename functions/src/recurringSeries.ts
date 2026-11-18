@@ -1,3 +1,4 @@
+import { createFinanceContextReader, refundAppointmentMinutesInTransaction, BonoLedger } from "./appointmentFinance.js";
 import { FieldValue, Firestore, Transaction } from "firebase-admin/firestore";
 import { CallableRequest, HttpsError } from "firebase-functions/v2/https";
 import {
@@ -15,7 +16,6 @@ import {
   parseClientRecurringAppointmentsData,
   parseRecurringAppointmentsData,
   planRecurringAppointments,
-  planSeriesMinutesRefund,
   validateReservedSeriesMinutes,
   buildPendingSeriesOccurrencePatch,
   SERIES_CHANGED_MESSAGE,
@@ -1170,20 +1170,13 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
       }
 
       const now = new Date().toISOString();
-      const refundPlan = planSeriesMinutesRefund({
-        bono: { id: bonoSnap.id, ...(bonoSnap.data() as BonoDoc) },
-        occurrences: occurrences.map((occurrence) => occurrence.data),
-        now,
-      });
-      if (!refundPlan.ok) throwHttps("failed-precondition", refundPlan.message);
-
-      const historialEntries = occurrences.map((occurrence) => ({
-        fecha: now,
-        tipo: series.serviceType,
-        duracion: series.duration,
-        appointmentId: occurrence.id,
-        accion: "devolucion_cita",
-      }));
+      const readFinance = createFinanceContextReader(transaction, db);
+      const finance = await readFinance(occurrences[0].data);
+      const ledger = new BonoLedger();
+      const financeTx = ledger.transaction(transaction);
+      const refundPatches = occurrences.map((occurrence) => refundAppointmentMinutesInTransaction(
+        financeTx, occurrence.ref, occurrence.data, ledger.context(finance), now,
+      ).appointmentPatch);
 
       const operation = newNotificationOperation(db);
       occurrences.forEach((occurrence, index) => {
@@ -1191,7 +1184,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           ...buildPendingSeriesOccurrencePatch({
             status: input.appointmentStatus,
             now,
-            refundPatch: refundPlan.appointmentPatches[index],
+            refundPatch: refundPatches[index],
           }),
           notificationOperationId: operation.operationId,
         }, { merge: true });
@@ -1206,16 +1199,10 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         customerEmail: occurrences[0]?.data.email ?? "",
         actor: input.requireOwner ? "customer" : "admin",
         createdAt: now,
-        refundedMinutes: refundPlan.appointmentPatches.reduce((total, patch) => (
+        refundedMinutes: refundPatches.reduce((total, patch) => (
           total + (typeof patch.minutesRefundedAmount === "number" ? patch.minutesRefundedAmount : 0)
         ), 0),
       });
-
-      transaction.set(bonoRef, {
-        minutosRestantes: refundPlan.bono.minutosRestantes,
-        estado: refundPlan.bono.estado,
-        historial: FieldValue.arrayUnion(...historialEntries),
-      }, { merge: true });
 
       const seriesPatch: Record<string, unknown> = {
         status: input.nextStatus,

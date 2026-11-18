@@ -29,6 +29,10 @@ export interface NotifiableAppointment {
   cancellationReason?: string;
   /** Set only when minutes were actually returned to the bono. */
   minutesRefundedAt?: string | null;
+  minutesRefundedAmount?: number;
+  minutesRefundRequestedAmount?: number;
+  minutesRefundPendingAmount?: number;
+  minutesRefundCappedAmount?: number;
 }
 
 export interface NotifiableProposal {

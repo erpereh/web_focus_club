@@ -1,10 +1,10 @@
+import { createFinanceContextReader, refundAppointmentMinutesInTransaction, BonoLedger } from "./appointmentFinance.js";
 import { FieldValue, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import {
   BOOKING_NOTICE_TOO_SHORT,
   bookingNoticeMessage,
   calculateAppointmentDeduction,
-  calculateAppointmentRefund,
   checkCustomerModificationSlots,
   classifyMadridCivilSlot,
   getBonoTotalMinutes,
@@ -1330,45 +1330,15 @@ async function runCustomerSeriesReplacement(
         ],
       };
     } else if (minutesDelta < 0) {
-      const exactRemaining = usableRemainingMinutes - minutesDelta;
-      if (!isNonNegativeInteger(exactRemaining) || exactRemaining > totalBonoMinutes) {
-        throwCustomerSeriesError("invalid_financial_reservation", "La devolucion no se puede aplicar con exactitud.");
-      }
-      let workingBono = { ...bono, minutosRestantes: usableRemainingMinutes };
+      const readFinance = createFinanceContextReader(transaction, deps.db);
+      const finance = await readFinance(cancelled[0].data);
+      const ledger = new BonoLedger();
+      const financeTx = ledger.transaction(transaction);
       cancelled.forEach((occurrence) => {
-        const refund = calculateAppointmentRefund(
-          workingBono as Parameters<typeof calculateAppointmentRefund>[0],
-          occurrence.data,
-          now,
-        );
-        if (!refund.ok) {
-          throwCustomerSeriesError("invalid_financial_reservation", "Una reserva cancelada no se puede devolver.");
-        }
-        workingBono = { ...workingBono, minutosRestantes: refund.remainingMinutes, estado: refund.bonoStatus };
-        refundPatches.set(occurrence.id, {
-          minutesRefunded: true,
-          minutesRefundedAmount: refund.minutesRefundedAmount,
-          minutesRefundedAt: refund.minutesRefundedAt,
-          minutesRefundReason: "customer_series_schedule_reduction",
-        });
+        const refund = refundAppointmentMinutesInTransaction(financeTx, occurrence.ref, occurrence.data,
+          ledger.context(finance), now, { reason: "customer_series_schedule_reduction" });
+        refundPatches.set(occurrence.id, refund.appointmentPatch);
       });
-      if (workingBono.minutosRestantes !== exactRemaining) {
-        throwCustomerSeriesError("invalid_financial_reservation", "La devolucion no coincide con el delta esperado.");
-      }
-      bonoPatch = {
-        minutosRestantes: workingBono.minutosRestantes,
-        estado: workingBono.estado,
-        historial: [
-          ...histories,
-          ...cancelled.map((occurrence) => ({
-            fecha: now,
-            tipo: series.serviceType ?? "",
-            duracion: String(seriesDuration),
-            appointmentId: occurrence.id,
-            accion: "devolucion_cita",
-          })),
-        ],
-      };
     }
 
     const deleted = FieldValue.delete();
@@ -1456,6 +1426,8 @@ async function runCustomerSeriesReplacement(
         minutesRefunded: false,
         minutesRefundedAmount: null,
         minutesRefundedAt: null,
+          minuteRefundId: null, minutesRefundRequestedAt: null, minutesRefundRequestedAmount: 0,
+          minutesRefundPendingAmount: 0, minutesRefundCappedAmount: 0, minutesRefundPendingReview: false,
         minutesRefundReason: null,
         notificationOperationId: operation.operationId,
         createdAt: now,

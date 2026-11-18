@@ -1,3 +1,4 @@
+import { hasFullMinuteRefund } from "../refundAccounting.js";
 import { getAppointmentEffectiveSlot } from "../appointmentLifecycle.js";
 import { type CustomerAppointmentEvent } from "../email/templates/index.js";
 import { classifyAppointmentChange, type NotifiableAppointment } from "./appointmentEvents.js";
@@ -118,7 +119,7 @@ export function createNotificationHandlers(deps: NotificationHandlerDeps) {
         trainerName: await trainerName(proposal ? proposal.proposedTrainer ?? appointment.assignedTrainer : appointment.assignedTrainer),
         duration: appointment.duration === undefined ? undefined : String(appointment.duration),
         appointmentType: appointment.appointmentType,
-        minutesRefunded: Boolean(appointment.minutesRefundedAt),
+        minutesRefunded: hasFullMinuteRefund(appointment),
       }));
     },
 
@@ -209,6 +210,7 @@ export function createNotificationHandlers(deps: NotificationHandlerDeps) {
           const current = await transaction.get(ref);
           const estado = current.exists ? (current.data() as NotifiableBono).estado : undefined;
           if (estado !== "activo" && estado !== "agotado") return;
+          if (planOverdueBonos([{ id: bonoId, data: current.data() as NotifiableBono }], now).length === 0) return;
           transaction.set(ref, {
             estado: "expirado",
             expiredAt: now.toISOString(),

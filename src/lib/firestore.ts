@@ -1,3 +1,5 @@
+import { getMinuteRefundSummary, type MinuteRefundSummary } from "./minute-refunds";
+import { bonoEffectiveMinutes } from "./bono-minutes";
 import {
     collection,
     doc,
@@ -20,10 +22,6 @@ import { httpsCallable } from 'firebase/functions';
 import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, storage, functions as firebaseFunctions } from './firebase';
 import type { RecurringRescheduleBackendScope, RecurringRescheduleScope } from './recurring-reschedule';
-import {
-    calculateManualBonoAdjustment,
-    manualBonoAdjustmentErrorMessage,
-} from './bono-adjustments';
 import { isBonoOverdue, planBonoExpirationRecalculation } from './bono-expiration';
 import type { AdminRestriction } from './admin-booking-overrides';
 import {
@@ -2007,13 +2005,7 @@ export async function updateSiteConfig(data: Partial<SiteConfig>): Promise<void>
 type BonoData = Omit<Bono, 'id'>;
 
 function getBonoMaxMinutes(bono: Partial<BonoData>): number {
-    if (typeof bono.tamano === 'number' && typeof bono.minutosTotales === 'number') {
-        return Math.max(bono.tamano, bono.minutosTotales);
-    }
-    if (typeof bono.minutosTotales === 'number') return bono.minutosTotales;
-    if (typeof bono.tamano === 'number') return bono.tamano;
-    const minPerSession = bono.modalidad === '30min' ? 30 : 60;
-    return (bono.sesionesTotales ?? 0) * minPerSession;
+    return bonoEffectiveMinutes(bono);
 }
 
 function getBonoRemainingMinutes(bono: Partial<BonoData>): number {
@@ -2058,7 +2050,8 @@ export async function getActiveBonoByUser(userId: string): Promise<Bono | null> 
     const snap = await getDocs(
         query(collection(db, 'bonos'), where('userId', '==', userId), where('estado', '==', 'activo'))
     );
-    return snap.empty ? null : normalizeBonoDoc(snap.docs[0].id, snap.docs[0].data() as BonoData);
+    if (snap.size > 1) throw new Error('El cliente tiene varios bonos activos. Revisa la incidencia.');
+    return snap.empty || isBonoOverdue(snap.docs[0].data() as BonoData, new Date()) ? null : normalizeBonoDoc(snap.docs[0].id, snap.docs[0].data() as BonoData);
 }
 
 export function subscribeActiveBonoByUser(
@@ -2068,7 +2061,10 @@ export function subscribeActiveBonoByUser(
 ): () => void {
     return onSnapshot(
         query(collection(db, 'bonos'), where('userId', '==', userId), where('estado', '==', 'activo')),
-        (snap) => callback(snap.empty ? null : normalizeBonoDoc(snap.docs[0].id, snap.docs[0].data() as BonoData)),
+        (snap) => {
+            if (snap.size > 1) { callback(null); onError?.(new Error('El cliente tiene varios bonos activos.')); return; }
+            callback(snap.empty || isBonoOverdue(snap.docs[0].data() as BonoData, new Date()) ? null : normalizeBonoDoc(snap.docs[0].id, snap.docs[0].data() as BonoData));
+        },
         onError
     );
 }
@@ -2092,35 +2088,8 @@ export function subscribeAllActiveBonos(
     );
 }
 
-function bonoLimitsPatch(data: BonoData): { minutosTotales: number; minutosRestantes: number } | null {
-    const maxMinutes = getBonoMaxMinutes(data);
-    const normalizedRemaining = getBonoRemainingMinutes(data);
-    return data.minutosTotales !== maxMinutes || data.minutosRestantes !== normalizedRemaining
-        ? { minutosTotales: maxMinutes, minutosRestantes: normalizedRemaining }
-        : null;
-}
-
-/**
- * Corrige bonos activos con totales/restantes incoherentes. Cada corrección se
- * recalcula dentro de su propia transacción para no pisar un descuento o una
- * devolución que las Functions hayan hecho entre la lectura y la escritura.
- */
-export async function normalizeActiveBonoLimits(): Promise<void> {
-    const snap = await getDocs(
-        query(collection(db, 'bonos'), where('estado', '==', 'activo'))
-    );
-    const candidates = snap.docs.filter((bonoDoc) => bonoLimitsPatch(bonoDoc.data() as BonoData));
-    for (const bonoDoc of candidates) {
-        await runTransaction(db, async (transaction) => {
-            const fresh = await transaction.get(bonoDoc.ref);
-            if (!fresh.exists()) return;
-            const data = fresh.data() as BonoData;
-            if (data.estado !== 'activo') return;
-            const patch = bonoLimitsPatch(data);
-            if (patch) transaction.update(bonoDoc.ref, patch);
-        });
-    }
-}
+/** Legacy compatibility entry point. Reads must never rewrite financial balances. */
+export async function normalizeActiveBonoLimits(): Promise<void> { /* server-owned accounting */ }
 
 export interface AssignBonoFromAdminInput {
     userId: string;
@@ -2146,54 +2115,34 @@ export async function assignBonoFromAdmin(
     return result.data;
 }
 
-/** Actualizar solo las fechas de validez de un bono existente */
-export async function updateBonoDates(
-    bonoId: string,
-    dates: Pick<Bono, 'fechaAsignacion' | 'fechaExpiracion'>
-): Promise<void> {
-    await updateDoc(doc(db, 'bonos', bonoId), {
-        fechaAsignacion: dates.fechaAsignacion,
-        fechaExpiracion: dates.fechaExpiracion,
-    });
+const pendingBonoMutations = new Map<string, Promise<void>>();
+const retryBonoRequestIds = new Map<string, string>();
+async function mutateBono(bonoId: string, action: string, extra: Record<string, unknown> = {}): Promise<void> {
+    const key = JSON.stringify([bonoId, action, extra]);
+    const pending = pendingBonoMutations.get(key);
+    if (pending) return pending;
+    const requestId = retryBonoRequestIds.get(key) ?? uuidv4();
+    retryBonoRequestIds.set(key, requestId);
+    const operation = httpsCallable(firebaseFunctions, 'mutateBonoFromAdmin')({ bonoId, action, requestId, ...extra })
+        .then(() => { retryBonoRequestIds.delete(key); })
+        .catch((error: unknown) => {
+            const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : '';
+            if (!['functions/unavailable', 'functions/deadline-exceeded', 'functions/internal'].includes(code)) retryBonoRequestIds.delete(key);
+            throw error;
+        }).finally(() => { pendingBonoMutations.delete(key); });
+    pendingBonoMutations.set(key, operation);
+    return operation;
 }
 
-/** Marcar un bono como eliminado (preserva historial) */
-export async function deleteBono(bonoId: string): Promise<void> {
-    await updateDoc(doc(db, 'bonos', bonoId), { estado: 'eliminado' });
+export async function updateBonoDates(bonoId: string, dates: Pick<Bono, 'fechaAsignacion' | 'fechaExpiracion'>): Promise<void> {
+    await mutateBono(bonoId, 'dates', dates);
 }
-
-/** Añade minutos al bono; si estaba agotado, lo reactiva */
+export async function deleteBono(bonoId: string): Promise<void> { await mutateBono(bonoId, 'delete'); }
 export async function addBonoMinutes(bonoId: string, minutes: number): Promise<void> {
-    await runTransaction(db, async (transaction) => {
-        const bonoRef = doc(db, 'bonos', bonoId);
-        const snap = await transaction.get(bonoRef);
-        if (!snap.exists()) throw new Error('Bono no encontrado');
-        const result = calculateManualBonoAdjustment(snap.data() as BonoData, minutes);
-        if (!result.ok) throw new Error(manualBonoAdjustmentErrorMessage(result.reason));
-        transaction.update(bonoRef, {
-            minutosRestantes: result.minutosRestantes,
-            minutosTotales: result.minutosTotales,
-            estado: result.estado,
-        });
-    });
+    await mutateBono(bonoId, 'adjust', { delta: minutes });
 }
-
-/** Deducción manual de minutos por parte del admin */
-export async function manualDeductBonoMinutes(bonoId: string, minutes: number, adminEmail: string): Promise<void> {
-    await runTransaction(db, async (transaction) => {
-        const bonoRef = doc(db, 'bonos', bonoId);
-        const snap = await transaction.get(bonoRef);
-        if (!snap.exists()) throw new Error('Bono no encontrado');
-        const result = calculateManualBonoAdjustment(snap.data() as BonoData, -minutes);
-        if (!result.ok) throw new Error(manualBonoAdjustmentErrorMessage(result.reason));
-        if (!result.historialEntry) throw new Error(manualBonoAdjustmentErrorMessage('invalid-argument'));
-        transaction.update(bonoRef, {
-            minutosRestantes: result.minutosRestantes,
-            minutosTotales: result.minutosTotales,
-            estado: result.estado,
-            historial: arrayUnion(result.historialEntry),
-        });
-    });
+export async function manualDeductBonoMinutes(bonoId: string, minutes: number, _adminEmail: string): Promise<void> {
+    await mutateBono(bonoId, 'adjust', { delta: -minutes });
 }
 
 /**
@@ -2212,12 +2161,8 @@ export async function recalculateAllBonoExpirations(newMonths: number): Promise<
         new Date(),
         `bulk-expiration-${uuidv4()}`,
     );
-    for (let index = 0; index < updates.length; index += 450) {
-        const batch = writeBatch(db);
-        for (const { id, ...update } of updates.slice(index, index + 450)) {
-            batch.update(doc(db, 'bonos', id), update);
-        }
-        await batch.commit();
+    for (const { id, ...update } of updates) {
+        await mutateBono(id, 'dates', update);
     }
     return updates.length;
 }
@@ -2227,22 +2172,8 @@ export async function recalculateAllBonoExpirations(newMonths: number): Promise<
  * transacción para no pisar cambios concurrentes (devoluciones, sustituciones).
  * La Function programada `expireOverdueBonosScheduled` hace lo mismo cada hora.
  */
-export async function expireOverdueBonos(): Promise<void> {
-    const activeBonos = await getAllActiveBonos();
-    const now = new Date();
-    const overdue = activeBonos.filter((b) => isBonoOverdue(b, now));
-
-    for (const bono of overdue) {
-        await runTransaction(db, async (transaction) => {
-            const ref = doc(db, 'bonos', bono.id);
-            const fresh = await transaction.get(ref);
-            if (!fresh.exists()) return;
-            const data = { id: fresh.id, ...fresh.data() } as Bono;
-            if (data.estado !== 'activo' || !isBonoOverdue(data, now)) return;
-            transaction.update(ref, { estado: 'expirado' });
-        });
-    }
-}
+/** Expiration is performed by the hourly server job; client reads are side-effect free. */
+export async function expireOverdueBonos(): Promise<void> { /* server-owned lifecycle */ }
 
 // ============================================
 // MEDIA FOLDERS
@@ -2696,6 +2627,7 @@ export interface StatisticsDataRequest {
 }
 
 export interface StatisticsData {
+    refundSummary?: MinuteRefundSummary;
     appointments: Appointment[];
     trainers: Trainer[];
     clients: UserProfile[];
@@ -2732,7 +2664,7 @@ export async function getStatisticsData(request: StatisticsDataRequest): Promise
     const bonoTo = addDays(request.period.endKey, 2);
     const occupancyTo = addDays(request.todayKey, request.occupancyCheckDays);
 
-    const [datedSnaps, undatedSnap, pendingSnap, clientsSnap, trainers, activeBonos, expiredSnap, replacedSnap, siteConfig, blockedSnap, occupancySnap, capacityExceptions] = await Promise.all([
+    const [datedSnaps, undatedSnap, pendingSnap, clientsSnap, trainers, activeBonos, expiredSnap, replacedSnap, siteConfig, blockedSnap, occupancySnap, capacityExceptions, refundSummary] = await Promise.all([
         Promise.all(dateRanges.map((range) => getDocs(query(appointmentsRef, where('date', '>=', range.from), where('date', '<=', range.to))))),
         getDocs(query(appointmentsRef, where('createdAt', '>=', undatedFrom), where('createdAt', '<', undatedTo))),
         getDocs(query(appointmentsRef, where('status', '==', 'pending'))),
@@ -2745,6 +2677,7 @@ export async function getStatisticsData(request: StatisticsDataRequest): Promise
         getDocs(query(collection(db, 'blocked_slots'), where('date', '>=', request.previous.startKey), where('date', '<=', request.period.endKey))),
         getDocs(query(collection(db, 'slot_occupancy'), where('date', '>=', request.todayKey), where('date', '<=', occupancyTo))),
         getCapacityExceptionsInRange(request.previous.startKey, addDays(request.period.endKey, 1)),
+        getMinuteRefundSummary(),
     ]);
 
     const appointments = new Map<string, Appointment>();
@@ -2769,6 +2702,7 @@ export async function getStatisticsData(request: StatisticsDataRequest): Promise
     }
 
     return {
+        refundSummary,
         appointments: [...appointments.values()],
         trainers,
         clients: clientsSnap.docs.map((d) => ({ ...(d.data() as UserProfile), uid: (d.data() as UserProfile).uid ?? d.id })),

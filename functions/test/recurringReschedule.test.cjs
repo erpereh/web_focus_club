@@ -623,6 +623,7 @@ class FakeFirestore {
     const staged = [];
     let firstWriteSeen = false;
     const transaction = {
+      getAll: async (...args) => Promise.all(args.filter((arg) => arg.kind === "doc").map((ref) => transaction.get(ref))),
       get: async (target) => {
         if (firstWriteSeen) throw new Error("read after write");
         this.operations.push({ type: "read", target: target.path ?? target.collectionName });
@@ -670,6 +671,13 @@ class FakeFirestore {
     staged.forEach(({ ref, value, merge, deleteFields = [] }) => {
       const previous = this.documents.get(ref.path) ?? {};
       const next = merge ? { ...previous, ...value } : value;
+      for (const [field, item] of Object.entries(value)) {
+        if (item?.constructor?.name === 'ArrayUnionTransform') {
+          const previous = this.documents.get(ref.path)?.[field] ?? [];
+          next[field] = [...previous, ...item.elements.filter((entry) => !previous.some((p) => JSON.stringify(p) === JSON.stringify(entry)))];
+        }
+        if (item?.constructor?.name === 'NumericIncrementTransform') next[field] = (this.documents.get(ref.path)?.[field] ?? 0) + item.operand;
+      }
       deleteFields.forEach((field) => delete next[field]);
       this.documents.set(ref.path, next);
     });

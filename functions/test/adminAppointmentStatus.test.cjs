@@ -341,16 +341,16 @@ test("deleting appointments releases seats, refunds once and is idempotent", asy
   });
   const result = await handlers.deleteAppointmentsFromAdmin(callable("admin", { appointmentIds: ["a1", "a2"] }));
   assert.deepEqual(result.deletedIds.sort(), ["a1", "a2"]);
-  assert.deepEqual(result.refundedIds.sort(), ["a1", "a2"]);
+  assert.deepEqual(result.refundedIds.sort(), ["a1"]);
   assert.equal(db.doc("appointments/a1"), undefined);
   assert.equal(count(db, "10:00"), 0);
   // Both refunds hit the same bono: 420 + 60 + 60 capped at 480 and recorded.
   const bono = db.doc("bonos/bono-1");
   assert.equal(bono.minutosRestantes, 480);
-  assert.equal(bono.historial.filter((entry) => entry.accion === "devolucion_cita").length, 2);
+  assert.equal(bono.historial.filter((entry) => entry.accion === "devolucion_cita").length, 1);
   const again = await handlers.deleteAppointmentsFromAdmin(callable("admin", { appointmentIds: ["a1"] }));
   assert.deepEqual(again.alreadyDeletedIds, ["a1"]);
-  assert.equal(db.doc("bonos/bono-1").historial.length, 2);
+  assert.equal(db.doc("bonos/bono-1").historial.length, 1);
   assert.equal(logs(db, "appointment_deleted").length, 2);
 });
 
@@ -432,9 +432,9 @@ test("a refund never reactivates a replaced bono: minutes go to the current acti
   await handlers.updateAppointmentStatusFromAdmin(callable("admin", { appointmentId: "a1", status: "cancelled", expectedStatus: "approved" }));
   assert.equal(db.doc("bonos/bono-1").estado, "agotado");
   assert.equal(db.doc("bonos/bono-1").minutosRestantes, 0);
-  assert.equal(db.doc("bonos/bono-2").minutosRestantes, 360);
-  assert.equal(db.doc("bonos/bono-2").historial[0].sourceBonoId, "bono-1");
-  assert.equal(db.doc("appointments/a1").minutesRefundedToBonoId, "bono-2");
+  assert.equal(db.doc("bonos/bono-2").minutosRestantes, 300);
+  assert.equal(db.doc("bonos/bono-2").historial.length, 0);
+  assert.equal(db.doc("appointments/a1").minutesRefundPendingAmount, 60);
 });
 
 test("legacy replaced bono (agotado with another active bono) is never reactivated either", async () => {
@@ -467,7 +467,7 @@ test("refund with no active bono to receive it changes no bono and is flagged", 
   assert.equal(db.doc("bonos/bono-1").estado, "agotado");
   const stored = db.doc("appointments/a1");
   assert.equal(stored.minutesRefundedAt, null);
-  assert.match(stored.minutesRefundReason, /sustituido/);
+  assert.equal(stored.minutesRefundReason, "automatic_compensation_required");
 });
 
 test("a refund never exceeds the bono maximum and records what was trimmed", async () => {
@@ -602,7 +602,7 @@ test("deleting with an impossible refund keeps the minutes pending for manual re
   assert.equal(result.pendingRefunds.length, 1);
   assert.equal(result.pendingRefunds[0].appointmentId, "a1");
   assert.equal(result.pendingRefunds[0].minutes, 60);
-  assert.match(result.pendingRefunds[0].reason, /sustituido/);
+  assert.equal(result.pendingRefunds[0].reason, "automatic_compensation_required");
   // No bono receives the minutes automatically.
   assert.equal(db.doc("bonos/bono-1").minutosRestantes, 0);
   assert.equal(db.doc("bonos/bono-1").estado, "agotado");
@@ -611,14 +611,14 @@ test("deleting with an impossible refund keeps the minutes pending for manual re
   assert.equal(record.userId, "user-1");
   assert.equal(record.context, "admin_delete");
   assert.deepEqual(record.appointment.slot, { date: DAY, time: "10:00" });
-  assert.equal(record.finance.refundStatus, "pending_manual");
+  assert.equal(record.finance.refundStatus, "pending_automatic");
   assert.equal(record.finance.pendingRefundMinutes, 60);
   assert.equal(record.finance.bonoId, "bono-1");
-  assert.equal(record.manualReview.status, "pending");
+  assert.equal(record.manualReview, null);
   assert.equal(record.expiresAt, undefined, "pending records never expire before review");
   assertNoPersonalData(record);
   const [[, log]] = logs(db, "appointment_deleted");
-  assert.equal(log.refundStatus, "pending_manual");
+  assert.equal(log.refundStatus, "pending_automatic");
   assert.equal(log.pendingRefundMinutes, 60);
 });
 
@@ -633,7 +633,7 @@ test("deleting with a capped refund records the trimmed minutes as pending", asy
   const result = await handlers.deleteAppointmentsFromAdmin(callable("admin", { appointmentIds: ["a1"] }));
   assert.equal(db.doc("bonos/bono-1").minutosRestantes, 480);
   const record = deletionRecord(db, "a1");
-  assert.equal(record.finance.refundStatus, "refunded_capped");
+  assert.equal(record.finance.refundStatus, "pending_automatic");
   assert.equal(record.finance.refundedAmount, 30);
   assert.equal(record.finance.cappedMinutes, 30);
   assert.equal(record.finance.pendingRefundMinutes, 30);
@@ -673,7 +673,7 @@ test("cancel with an impossible refund flags the appointment for manual review",
   });
   await handlers.updateAppointmentStatusFromAdmin(callable("admin", { appointmentId: "a1", status: "cancelled", expectedStatus: "approved" }));
   const stored = db.doc("appointments/a1");
-  assert.equal(stored.minutesRefundPendingReview, true);
+  assert.equal(stored.minutesRefundPendingReview, false);
   assert.equal(stored.minutesRefundPendingAmount, 60);
   assert.equal(stored.minutesRefundedAt, null);
 });

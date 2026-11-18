@@ -45,7 +45,7 @@ import { InteractiveCalendar } from '@/components/ui/interactive-calendar';
 import { useBrandingConfig } from '@/hooks/useBrandingConfig';
 import { useAuth } from '@/contexts/AuthContext';
 import type { TimeSlot, Appointment, Bono, Trainer, SiteConfig } from '@/types';
-import { getBonoMinutosRestantes, getBonoMinutosTotales, formatMinutos, getOpenCustomerConfirmation } from '@/types';
+import { getBonoMinutosRestantes, getBonoMinutosTotales, bonoCapacityLabel, formatMinutos, getOpenCustomerConfirmation } from '@/types';
 import {
   formatRecurringSeriesPreview,
   addUtcDays,
@@ -1457,7 +1457,7 @@ export default function PortalPage() {
                   ) : activeBono ? (
                     <>
                       <p className="text-[var(--color-text-primary)] font-semibold text-lg mb-1">
-                        Bono Mensual {getBonoMinutosTotales(activeBono) / 60}h
+                        {bonoCapacityLabel(activeBono)}
                       </p>
                       <div className="mt-2 mb-1 flex justify-between text-xs text-[var(--color-text-secondary)]">
                         <span>Disponible</span>
@@ -1627,7 +1627,7 @@ export default function PortalPage() {
                             <div className="flex items-start justify-between gap-2">
                               <div>
                                 <p className="text-[var(--color-text-primary)] text-xs font-medium">
-                                  Bono Mensual {getBonoMinutosTotales(bono) / 60}h
+                                  {bonoCapacityLabel(bono)}
                                 </p>
                                 <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
                                   {new Date(bono.fechaAsignacion).toLocaleDateString('es-ES')} → {new Date(bono.fechaExpiracion).toLocaleDateString('es-ES')}

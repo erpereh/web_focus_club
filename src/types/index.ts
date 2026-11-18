@@ -1,3 +1,4 @@
+import { bonoBaseMinutes, bonoEffectiveMinutes } from "@/lib/bono-minutes";
 import type { Timestamp } from 'firebase/firestore';
 
 // ============================================
@@ -192,6 +193,11 @@ export interface Appointment {
     renewalModified?: boolean;
     createdAt: string;
     updatedAt?: string;
+    minuteRefundId?: string | null;
+    minutesRefundRequestedAt?: string | null;
+    minutesRefundRequestedAmount?: number;
+    minutesRefundStatus?: string;
+    minutesRefundCappedAmount?: number;
 }
 
 /** Petición de confirmación abierta (propuesta o renovación) a la espera del cliente. */
@@ -384,6 +390,8 @@ export interface BonoHistorialEntry {
     tipo: string;           // nombre del servicio o "Deducción manual"
     duracion: string;       // '30' | '45' | '60' — minutos de la sesión
     appointmentId: string;  // ref a appointments/{id} o 'manual'
+    minutosAbonados?: number;
+    refundId?: string;
 }
 
 export interface Bono {
@@ -408,6 +416,8 @@ export interface Bono {
     sesionesTotales?: number;
     sesionesRestantes?: number;
     modalidad?: string;
+    minutosCapacidadBase?: number;
+    minutosExtraRecuperados?: number;
 }
 
 /** Devuelve los minutos restantes del bono, con soporte para bonos legacy. */
@@ -422,13 +432,14 @@ export function getBonoMinutosRestantes(bono: Bono): number {
 
 /** Devuelve los minutos totales del bono, con soporte para bonos legacy. */
 export function getBonoMinutosTotales(bono: Bono): number {
-    if (bono.tamano !== undefined && bono.minutosTotales !== undefined) {
-        return Math.max(bono.tamano, bono.minutosTotales);
-    }
-    if (bono.minutosTotales !== undefined) return bono.minutosTotales;
-    if (bono.tamano !== undefined) return bono.tamano;
-    const minPerSession = bono.modalidad === '30min' ? 30 : 60;
-    return (bono.sesionesTotales ?? 0) * minPerSession;
+    return bonoEffectiveMinutes(bono);
+}
+
+export function bonoCapacityLabel(bono: Bono): string {
+    const contracted = bono.tamano ?? bono.minutosCapacidadBase ?? bono.minutosTotales ?? 0;
+    const recovered = bono.minutosExtraRecuperados ?? 0;
+    const previous = Math.max(0, bonoBaseMinutes(bono) - contracted);
+    return `${contracted} min contratados${previous > 0 ? ` + ${previous} de ampliaciones previas` : ''}${recovered > 0 ? ` + ${recovered} recuperados` : ''}`;
 }
 
 /** Formatea minutos como string legible: "4h", "3h 30min", "30min" */

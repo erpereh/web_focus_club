@@ -1,5 +1,7 @@
 'use client';
 
+import { getMinuteRefundSummary } from '@/lib/minute-refunds';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
@@ -188,6 +190,15 @@ export function StatisticsDashboard({
             });
     }, [loadData, period, previous, requestKey]);
 
+    useEffect(() => {
+        const timer = window.setInterval(() => {
+            if (document.visibilityState !== 'visible') return;
+            getMinuteRefundSummary().then((refundSummary) => setLoaded((current) => current
+                ? { ...current, data: { ...current.data, refundSummary } } : current)).catch(() => undefined);
+        }, 30_000);
+        return () => window.clearInterval(timer);
+    }, []);
+
     const selectedTrainer = trainerId === 'all' ? null : trainerId;
     const result = useMemo(() => (data && loadedAt ? calculateStatistics({
         period,
@@ -204,6 +215,7 @@ export function StatisticsDashboard({
         blockedSlots: data.blockedSlots,
         upcomingOccupancy: data.upcomingOccupancy,
         pendingApprovalCount: data.pendingApprovalCount,
+        refundSummary: data.refundSummary,
     }) : null), [data, loadedAt, period, previous, selectedTrainer]);
 
     const trainerOptions = useMemo(() => [
@@ -892,7 +904,7 @@ export function StatisticsDashboard({
                                                     </ul>
                                                 )}
                                             </div>
-                                            <SectionLink href={buildAdminDeepLink(item.link)}>Revisar</SectionLink>
+                                            <SectionLink href={item.href ?? buildAdminDeepLink(item.link)}>Revisar</SectionLink>
                                         </li>
                                     );
                                 })}

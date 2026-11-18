@@ -4,81 +4,238 @@
             "collectionGroup": "appointments",
             "queryScope": "COLLECTION",
             "fields": [
-                { "fieldPath": "userId", "order": "ASCENDING" },
-                { "fieldPath": "createdAt", "order": "DESCENDING" }
+                {
+                    "fieldPath": "userId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
             ]
         },
         {
             "collectionGroup": "appointments",
             "queryScope": "COLLECTION",
             "fields": [
-                { "fieldPath": "status", "order": "ASCENDING" },
-                { "fieldPath": "createdAt", "order": "DESCENDING" }
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
             ]
         },
         {
             "collectionGroup": "appointments",
             "queryScope": "COLLECTION",
             "fields": [
-                { "fieldPath": "assignedTrainer", "order": "ASCENDING" },
-                { "fieldPath": "status", "order": "ASCENDING" },
-                { "fieldPath": "createdAt", "order": "DESCENDING" }
+                {
+                    "fieldPath": "assignedTrainer",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
             ]
         },
         {
             "collectionGroup": "gallery_items",
             "queryScope": "COLLECTION",
             "fields": [
-                { "fieldPath": "active", "order": "ASCENDING" },
-                { "fieldPath": "createdAt", "order": "DESCENDING" }
+                {
+                    "fieldPath": "active",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
             ]
         },
         {
             "collectionGroup": "support_conversations",
             "queryScope": "COLLECTION",
             "fields": [
-                { "fieldPath": "userId", "order": "ASCENDING" },
-                { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+                {
+                    "fieldPath": "userId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "lastMessageAt",
+                    "order": "DESCENDING"
+                }
             ]
         },
         {
             "collectionGroup": "support_conversations",
             "queryScope": "COLLECTION",
             "fields": [
-                { "fieldPath": "status", "order": "ASCENDING" },
-                { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "lastMessageAt",
+                    "order": "DESCENDING"
+                }
             ]
         },
         {
             "collectionGroup": "customer_suggestions",
             "queryScope": "COLLECTION",
             "fields": [
-                { "fieldPath": "status", "order": "ASCENDING" },
-                { "fieldPath": "createdAt", "order": "DESCENDING" }
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
             ]
         },
         {
             "collectionGroup": "bonos",
             "queryScope": "COLLECTION",
             "fields": [
-                { "fieldPath": "userId", "order": "ASCENDING" },
-                { "fieldPath": "createdAt", "order": "DESCENDING" }
+                {
+                    "fieldPath": "userId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
             ]
         },
         {
             "collectionGroup": "media_files",
             "queryScope": "COLLECTION",
             "fields": [
-                { "fieldPath": "folderId", "order": "ASCENDING" },
-                { "fieldPath": "createdAt", "order": "DESCENDING" }
+                {
+                    "fieldPath": "folderId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "createdAt",
+                    "order": "DESCENDING"
+                }
             ]
         },
         {
             "collectionGroup": "gallery_items",
             "queryScope": "COLLECTION",
             "fields": [
-                { "fieldPath": "active", "order": "ASCENDING" },
-                { "fieldPath": "order", "order": "ASCENDING" }
+                {
+                    "fieldPath": "active",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "order",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "minute_refunds",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "userId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "reviewApproved",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "pendingMinutes",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "minute_refunds",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "state",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "userId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "__name__",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "minute_refunds",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "state",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "sourceDeleted",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "__name__",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "minute_refunds",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "sourceDeleted",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "userId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "__name__",
+                    "order": "ASCENDING"
+                }
+            ]
+        },
+        {
+            "collectionGroup": "minute_refunds",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "state",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "sourceDeleted",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "userId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "__name__",
+                    "order": "ASCENDING"
+                }
             ]
         }
     ],
@@ -87,20 +244,44 @@
             "collectionGroup": "fcmTokens",
             "fieldPath": "token",
             "indexes": [
-                { "order": "ASCENDING", "queryScope": "COLLECTION" },
-                { "order": "DESCENDING", "queryScope": "COLLECTION" },
-                { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" },
-                { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+                {
+                    "order": "ASCENDING",
+                    "queryScope": "COLLECTION"
+                },
+                {
+                    "order": "DESCENDING",
+                    "queryScope": "COLLECTION"
+                },
+                {
+                    "arrayConfig": "CONTAINS",
+                    "queryScope": "COLLECTION"
+                },
+                {
+                    "order": "ASCENDING",
+                    "queryScope": "COLLECTION_GROUP"
+                }
             ]
         },
         {
             "collectionGroup": "fcmTokens",
             "fieldPath": "updatedAt",
             "indexes": [
-                { "order": "ASCENDING", "queryScope": "COLLECTION" },
-                { "order": "DESCENDING", "queryScope": "COLLECTION" },
-                { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" },
-                { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+                {
+                    "order": "ASCENDING",
+                    "queryScope": "COLLECTION"
+                },
+                {
+                    "order": "DESCENDING",
+                    "queryScope": "COLLECTION"
+                },
+                {
+                    "arrayConfig": "CONTAINS",
+                    "queryScope": "COLLECTION"
+                },
+                {
+                    "order": "ASCENDING",
+                    "queryScope": "COLLECTION_GROUP"
+                }
             ]
         }
     ]

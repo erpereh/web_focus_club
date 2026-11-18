@@ -1,3 +1,4 @@
+import type { MinuteRefundSummary } from "./minute-refunds";
 import { resolveMaxCapacity, type CapacityByDate } from '@/lib/capacity-exceptions';
 import {
     type Appointment,
@@ -52,6 +53,7 @@ export const UPCOMING_OCCUPANCY_CHECK_DAYS = 14;
 export const WEEKDAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'] as const;
 
 export interface StatisticsInput {
+    refundSummary?: MinuteRefundSummary;
     period: StatsPeriod;
     previous: StatsPeriod;
     now: Date;
@@ -213,6 +215,7 @@ export interface ReviewItem {
     title: string;
     description: string;
     count: number;
+    href?: string;
     link: { tab: 'appointments' | 'clients' | 'team' | 'availability'; status?: Appointment['status'] };
 }
 
@@ -289,7 +292,7 @@ function isCounted(item: Located, nowMs: number): boolean {
 /** Minutes debited for this appointment and still not refunded. */
 function consumedMinutes(appointment: Appointment): number {
     if (getAppointmentType(appointment) === 'nutrition') return 0;
-    if (appointment.minutesDeducted !== true || !appointment.minutesDeductedAt || appointment.minutesRefundedAt) return 0;
+    if (appointment.minutesDeducted !== true || !appointment.minutesDeductedAt || (appointment.minutesRefundRequestedAt || appointment.minutesRefundedAt)) return 0;
     const amount = Number(appointment.minutesDeductedAmount ?? 0);
     return Number.isFinite(amount) && amount > 0 ? amount : 0;
 }
@@ -865,10 +868,17 @@ export function calculateStatistics(input: StatisticsInput): StatisticsResult {
         link: { tab: 'clients' },
     });
     add({
-        id: 'pending-refunds', severity: 'critical', count: pendingRefundReview.length,
-        title: 'Minutos pendientes de revisión manual',
-        description: 'Devoluciones que no se pudieron abonar automáticamente.',
+        id: 'pending-refunds', severity: 'critical', count: input.refundSummary?.blocked ?? pendingRefundReview.length,
+        href: '/admin/devoluciones',
+        title: 'Devoluciones que necesitan revisión',
+        description: 'Inconsistencias o devoluciones históricas que requieren auditoría.',
         link: { tab: 'appointments' },
+    });
+    if (input.refundSummary) add({
+        id: 'waiting-refunds', severity: 'info', count: input.refundSummary.count - input.refundSummary.blocked,
+        title: 'Devoluciones pendientes de compensación',
+        description: `${input.refundSummary.minutes} minutos conservados, incluidas las citas eliminadas.`,
+        href: '/admin/devoluciones', link: { tab: 'clients' },
     });
     add({
         id: 'skipped-deductions', severity: 'warning', count: skippedDeductions.length,

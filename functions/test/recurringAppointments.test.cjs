@@ -442,13 +442,13 @@ assert.doesNotMatch(
   /\.where\("estado",\s*"==",\s*"activo"\)/,
 );
 assert.match(seriesSource, /validateReservedSeriesMinutes/);
-assert.match(seriesSource, /planSeriesMinutesRefund/);
+assert.match(seriesSource, /refundAppointmentMinutesInTransaction/);
 assert.match(seriesSource, /buildPendingSeriesOccurrencePatch/);
 assert.match(seriesSource, /input\.requireOwner && seriesHasSameDayOccurrence/);
 const finalizePendingSource = seriesSource.slice(seriesSource.indexOf("async function finalizePendingSeries"));
 assert.ok(
   finalizePendingSource.indexOf("input.requireOwner && seriesHasSameDayOccurrence")
-    < finalizePendingSource.indexOf("planSeriesMinutesRefund"),
+    < finalizePendingSource.indexOf("refundAppointmentMinutesInTransaction"),
   "pending series same-day must reject before refund",
 );
 assert.doesNotMatch(
@@ -512,6 +512,6 @@ assert.match(rulesSource, /minutesDeducted/);
 const protectedFields = rulesSource.match(/function recurringAppointmentProtectedFieldsUnchanged\(\) \{([\s\S]*?)\n {4}\}/)[1];
 assert.match(protectedFields, /'status'/);
 assert.match(protectedFields, /'duration'/);
-assert.match(rulesSource, /allow delete: if isAdmin\(\) && !isRecurringAppointment\(\);/);
+assert.match(rulesSource, /allow delete: if false;/);
 
 console.log("recurring appointment tests passed");

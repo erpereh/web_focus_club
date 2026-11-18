@@ -72,6 +72,7 @@ skills-lock.json
 !/docs/google_calendar_sync.md
 !/docs/production-release-checklist.md
 !/docs/cancelaciones-con-cargo-y-estadisticas.md
+!/docs/devoluciones-automaticas.md
 /mini-services/
 
 # Database files
