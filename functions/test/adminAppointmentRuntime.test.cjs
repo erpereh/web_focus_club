@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require("./helpers/pendingOccupancy.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { spawnSync } = require("node:child_process");
@@ -57,7 +58,7 @@ test("infrastructure errors are callable errors with safe messages and correlati
 test("observations isolate simultaneous requests and include committed transaction retries", async (t) => {
   const entries = [];
   for (const method of ["info", "warn", "error"]) t.mock.method(logger, method, (_message, entry) => entries.push(entry));
-  const db = new FakeFirestore({ "values/a": { count: 1 } });
+  const db = new FakeFirestore(withPendingOccupancy({ "values/a": { count: 1 } }));
   let injected = false;
   db.beforeCommit = async () => {
     if (injected) return;

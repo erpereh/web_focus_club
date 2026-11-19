@@ -7,7 +7,7 @@ import { classifyMadridCivilSlot, getAppointmentEffectiveSlot } from '@/lib/madr
  * Availability shown in the admin "Nueva cita" grid. It reads the same
  * `slot_occupancy` counters, in the same order, as `evaluateSlot` in
  * `createAppointmentFromAdmin`, so the grid can never show free seats the
- * server will refuse with `slot_full`. In-memory approved appointments are
+ * server will refuse with `slot_full`. In-memory pending and approved appointments are
  * only used to flag counters that drifted, never to decide availability.
  *
  * Restrictions an admin may knowingly override (past, outside schedule,
@@ -25,8 +25,8 @@ export interface AdminSlotStatus {
     label: string;
     tone: AdminSlotTone;
     occupancy: number;
-    /** Registered counter vs approved appointments, when they disagree. */
-    mismatch?: { registered: number; approved: number };
+    /** Registered counter vs pending and approved appointments, when they disagree. */
+    mismatch?: { registered: number; expected: number };
 }
 
 export interface AdminSlotStatusInput {
@@ -88,15 +88,15 @@ function getBaseStatus(input: AdminSlotStatusInput): AdminSlotStatus {
     }
     const occupancy = Math.max(0, ...(counts as number[]));
 
-    const approvedByKey = new Map<string, number>();
+    const expectedByKey = new Map<string, number>();
     input.appointments
-        .filter((appointment) => appointment.status === 'approved')
+        .filter((appointment) => ['pending', 'approved'].includes(appointment.status))
         .forEach((appointment) => appointmentKeys(appointment).forEach((key) => {
-            approvedByKey.set(key, (approvedByKey.get(key) ?? 0) + 1);
+            expectedByKey.set(key, (expectedByKey.get(key) ?? 0) + 1);
         }));
-    const mismatchIndex = keys.findIndex((key, index) => (approvedByKey.get(key) ?? 0) !== counts[index]);
+    const mismatchIndex = keys.findIndex((key, index) => (expectedByKey.get(key) ?? 0) !== counts[index]);
     const mismatch = mismatchIndex >= 0
-        ? { registered: counts[mismatchIndex] as number, approved: approvedByKey.get(keys[mismatchIndex]) ?? 0 }
+        ? { registered: counts[mismatchIndex] as number, expected: expectedByKey.get(keys[mismatchIndex]) ?? 0 }
         : undefined;
     const withMismatch = (status: AdminSlotStatus): AdminSlotStatus => (mismatch ? { ...status, mismatch } : status);
 

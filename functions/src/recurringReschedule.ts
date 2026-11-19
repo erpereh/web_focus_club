@@ -1,3 +1,4 @@
+import { runAppointmentTransaction } from "./appointmentTransaction.js";
 import { createFinanceContextReader, refundAppointmentMinutesInTransaction, BonoLedger } from "./appointmentFinance.js";
 import { FieldValue, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { HttpsError, type CallableRequest } from "firebase-functions/v2/https";
@@ -733,7 +734,7 @@ async function runCustomerSingleRecurringReschedule(
 ): Promise<Record<string, unknown>> {
   const actorUid = request.auth!.uid;
   const selectedRef = deps.db.collection("appointments").doc(parsed.appointmentId);
-  return deps.db.runTransaction(async (transaction: Transaction) => {
+  return runAppointmentTransaction(deps.db, async (transaction: Transaction) => {
     const selectedSnap = await transaction.get(selectedRef);
     if (!selectedSnap.exists) {
       throwCustomerSingleError("recurring_occurrence_unavailable", "No se ha encontrado la cita indicada.");
@@ -793,14 +794,14 @@ async function runCustomerSingleRecurringReschedule(
       );
     }
 
-    const oldKeys = selected.status === "approved" ? slotKeys(currentSlot, duration) : [];
+    const oldKeys = slotKeys(currentSlot, duration);
     const newKeys = slotKeys(parsed.preferredSlot, duration);
     if (newKeys.length === 0 || (selected.status === "approved" && oldKeys.length === 0)) {
       throwCustomerSingleError("invalid_occupancy", "Los bloques de ocupacion de la cita no son validos.", parsed.preferredSlot, selectedRef.id);
     }
     const occupancyDelta = new Map<string, number>();
     oldKeys.forEach((key) => occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) - 1));
-    newKeys.forEach((key) => occupancyDelta.set(key, occupancyDelta.get(key) ?? 0));
+    newKeys.forEach((key) => occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) + 1));
     const occupancyKeys = [...occupancyDelta.keys()].sort();
     const occupancyRefs = occupancyKeys.map((key) => deps.db.collection("slot_occupancy").doc(key));
     const blockedQuery = deps.db.collection("blocked_slots").where("date", "==", parsed.preferredSlot.date);
@@ -860,7 +861,7 @@ async function runCustomerSingleRecurringReschedule(
       if (!Number.isInteger(finalCount) || finalCount < 0) {
         throwCustomerSingleError("invalid_occupancy", "La ocupacion final no es valida.", parsed.preferredSlot, selectedRef.id);
       }
-      if (targetKeySet.has(key) && finalCount >= resolveMaxCapacity(config, capacityExceptions, parsed.preferredSlot.date)) {
+      if (targetKeySet.has(key) && delta > 0 && finalCount > resolveMaxCapacity(config, capacityExceptions, parsed.preferredSlot.date)) {
         throwCustomerSingleError("slot_full", "La franja seleccionada esta completa.", parsed.preferredSlot, selectedRef.id);
       }
       if (delta !== 0) {
@@ -998,7 +999,7 @@ async function runCustomerSeriesReplacement(
   }
   const customerUid = request.auth.uid;
   const selectedRef = deps.db.collection("appointments").doc(input.appointmentId);
-  return deps.db.runTransaction(async (transaction: Transaction) => {
+  return runAppointmentTransaction(deps.db, async (transaction: Transaction) => {
     const selectedSnap = await transaction.get(selectedRef);
     if (!selectedSnap.exists) {
       throwCustomerSeriesError("series_unavailable", "No se ha encontrado la cita indicada.");
@@ -1156,7 +1157,7 @@ async function runCustomerSeriesReplacement(
           occurrence.id,
         );
       }
-      const oldKeys = occurrence.data.status === "approved" ? slotKeys(slot, seriesDuration) : [];
+      const oldKeys = slotKeys(slot, seriesDuration);
       if (occurrence.data.status === "approved" && oldKeys.length === 0) {
         throwCustomerSeriesError("invalid_occupancy", "La ocupacion antigua no es valida.", slot, occurrence.id);
       }
@@ -1229,7 +1230,7 @@ async function runCustomerSeriesReplacement(
       occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) - 1);
     }));
     desired.forEach((occurrence) => occurrence.keys.forEach((key) => {
-      occupancyDelta.set(key, occupancyDelta.get(key) ?? 0);
+      occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) + 1);
     }));
     const occupancyKeys = [...occupancyDelta.keys()].sort();
     const occupancyRefs = occupancyKeys.map((key) => deps.db.collection("slot_occupancy").doc(key));
@@ -1275,7 +1276,7 @@ async function runCustomerSeriesReplacement(
         if (!Number.isInteger(effective) || effective < 0) {
           throwCustomerSeriesError("invalid_occupancy", "La ocupacion final calculada no es valida.", occurrence.slot);
         }
-        if (effective >= resolveMaxCapacity(config, capacityExceptions, occurrence.slot.date)) {
+        if ((occupancyDelta.get(key) ?? 0) > 0 && effective > resolveMaxCapacity(config, capacityExceptions, occurrence.slot.date)) {
           throwCustomerSeriesError("slot_full", "Una franja de la nueva serie esta completa.", occurrence.slot);
         }
         const targetKeys = new Set(occurrence.keys);
@@ -1537,7 +1538,7 @@ async function runRecurringReschedule(
   }
   const selectedRef = deps.db.collection("appointments").doc(parsed.appointmentId);
 
-  const result = await deps.db.runTransaction(async (transaction: Transaction) => {
+  const result = await runAppointmentTransaction(deps.db, async (transaction: Transaction) => {
     // A. Selected appointment.
     const selectedSnap = await transaction.get(selectedRef);
     if (!selectedSnap.exists) {

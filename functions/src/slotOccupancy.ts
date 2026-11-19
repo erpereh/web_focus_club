@@ -14,6 +14,11 @@ import {
 
 export const SUPPORTED_SESSION_MINUTES = [30, 45, 60] as const;
 
+/** Both states reserve exactly one seat until cancellation, rejection or deletion. */
+export function occupiesCapacity(status: unknown): boolean {
+  return status === "pending" || status === "approved";
+}
+
 export interface OccupancyAppointmentLike extends AppointmentEffectiveDateSource {
   duration?: string | number;
 }

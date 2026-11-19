@@ -1,3 +1,4 @@
+import { runAppointmentTransaction } from "./appointmentTransaction.js";
 import { createHash } from "node:crypto";
 import { FieldValue, type DocumentSnapshot, type Firestore } from "firebase-admin/firestore";
 import { bonoBaseMinutes, bonoEffectiveMinutes } from "./bonoMinutes.js";
@@ -53,14 +54,15 @@ export async function auditMinuteRefunds(db: Firestore, appointmentIds: string[]
       minutesRefundPendingAmount: deletion.data()!.finance?.pendingRefundMinutes,
     } : {})) as RefundSource;
     if (!source.userId || !source.bonoId) throw new Error(`Missing financial identity: ${appointmentId}`);
-    const [bonos, appointments, archives, refunds, logs] = await Promise.all([
+    const [bonos, appointments, archives, refunds, logs, account] = await Promise.all([
       db.collection("bonos").where("userId", "==", source.userId).get(),
       db.collection("appointments").where("userId", "==", source.userId).get(),
       db.collection("appointment_deletions").where("userId", "==", source.userId).get(),
       db.collection(REFUNDS).where("appointmentId", "==", appointmentId).get(),
       db.collection("activity_logs").where("appointmentId", "==", appointmentId).get(),
+      db.collection(REFUND_ACCOUNTS).doc(source.userId).get(),
     ]);
-    const documents = new Map<string, DocumentSnapshot>([appointment, deletion, ...bonos.docs, ...appointments.docs, ...archives.docs, ...refunds.docs, ...logs.docs].map((s) => [s.ref.path, s]));
+    const documents = new Map<string, DocumentSnapshot>([appointment, deletion, account, ...bonos.docs, ...appointments.docs, ...archives.docs, ...refunds.docs, ...logs.docs].map((s) => [s.ref.path, s]));
     const original = bonos.docs.find((d) => d.id === source.bonoId)?.data();
     const originalDebit = (Array.isArray(original?.historial) ? original.historial : []).filter((h: Record<string, unknown>) => h.appointmentId === appointmentId && h.accion === "descuento_cita" && h.fecha === source.minutesDeductedAt);
     const requested = Number(source.minutesRefundRequestedAmount || source.minutesDeductedAmount || 0);
@@ -100,7 +102,8 @@ export async function auditMinuteRefunds(db: Firestore, appointmentIds: string[]
     }
     const currentBalance = target ? Number(target.data()!.minutosRestantes) : null;
     if (target && balance !== currentBalance) issues.push("balance_reconstruction_mismatch");
-    if (targetHistory.some((h) => h.appointmentId === appointmentId && h.accion === "compensacion_devolucion")) issues.push("prior_compensation");
+    if (bonos.docs.some((bono) => (Array.isArray(bono.data().historial) ? bono.data().historial : [])
+      .some((h: Record<string, unknown>) => h.appointmentId === appointmentId && h.accion === "compensacion_devolucion"))) issues.push("prior_compensation");
     cases.push({ appointmentId, refundId: reservationIdentity(appointmentId, source), userId: source.userId, sourceBonoId: source.bonoId,
       targetBonoId: target?.id ?? null, requested, credited, pending, currentBalance, reconstructedBalance: balance,
       proposedBalance: currentBalance === null ? null : currentBalance + pending,
@@ -121,22 +124,49 @@ export async function applyReviewedMinuteRefundAudit(db: Firestore, report: Refu
   const { reportHash, ...body } = report;
   if (report.schemaVersion !== 1 || reportHash !== evidenceHash(body) || options.approvedReportHash !== reportHash
     || options.confirmProject !== report.projectId || databaseProjectId(db) !== report.projectId) throw new Error("Reviewed report/project confirmation does not match");
-  const reviewer = await db.collection("users").doc(options.reviewerUid).get();
-  if (reviewer.data()?.role !== "admin") throw new Error("A named administrator must review the report");
-  if (report.cases.some((c) => !c.eligibleForReviewedImport || c.pending <= 0 || c.issues.length > 0)) throw new Error("The report contains unresolved inconsistencies");
-  const imported: string[] = [];
-  for (const item of report.cases) {
-    await db.runTransaction(async (tx) => {
+  if (!options.reviewerUid || options.reviewerUid.includes("/") || !report.cases.length || report.cases.length > 20
+    || new Set(report.cases.map((item) => item.refundId)).size !== report.cases.length
+    || report.cases.some((c) => !c.eligibleForReviewedImport || c.pending <= 0 || c.issues.length > 0)) {
+    throw new Error("The report contains unresolved inconsistencies");
+  }
+  // Import the reviewed set atomically. A change in its last case must not
+  // authorize its first case or leave a partially imported approval behind.
+  return runAppointmentTransaction(db, async (tx) => {
+    const reviewer = await tx.get(db.collection("users").doc(options.reviewerUid));
+    if (reviewer.data()?.role !== "admin") throw new Error("A named administrator must review the report");
+    const receipts = await Promise.all(report.cases.map((item) => tx.get(db.collection(`${REFUNDS}/${item.refundId}/movements`).doc(`review_${reportHash}`))));
+    if (receipts.every((receipt) => receipt.exists)) return report.cases.map((item) => item.refundId);
+    if (receipts.some((receipt) => receipt.exists)) throw new Error("Partially imported legacy report; audit the remaining cases separately");
+    const contexts = await Promise.all(report.cases.map(async (item) => {
       const refundRef = db.collection(REFUNDS).doc(item.refundId);
-      const receiptRef = db.collection(`${REFUNDS}/${item.refundId}/movements`).doc(`review_${reportHash}`);
-      const [existing, receipt] = await Promise.all([tx.get(refundRef), tx.get(receiptRef)]);
-      if (receipt.exists) return; // Retrying the exact reviewed import is harmless even after settlement.
       const accountRef = db.collection(REFUND_ACCOUNTS).doc(item.userId);
-      await tx.get(accountRef);
-      const snapshots = await Promise.all(item.documents.map((d) => tx.get(db.doc(d.path))));
+      const [existing, , ...snapshots] = await Promise.all([
+        tx.get(refundRef), tx.get(accountRef), ...item.documents.map((d) => tx.get(db.doc(d.path))),
+      ]);
       for (let index = 0; index < snapshots.length; index += 1) {
         if (evidenceHash(evidence(snapshots[index])) !== evidenceHash(item.documents[index])) throw new Error(`Audit changed: ${item.documents[index].path}; run audit again`);
       }
+      // Version checks alone cannot detect a newly assigned bono or a refund
+      // created after the report. Revalidate query membership in this transaction.
+      for (const [collection, field, value] of [
+        ["bonos", "userId", item.userId], ["appointments", "userId", item.userId],
+        ["appointment_deletions", "userId", item.userId], [REFUNDS, "appointmentId", item.appointmentId],
+        ["activity_logs", "appointmentId", item.appointmentId],
+      ]) {
+        const current = await tx.get(db.collection(collection).where(field, "==", value));
+        const expected = item.documents.filter((document) => document.exists && document.path.startsWith(`${collection}/`)).map((document) => document.path).sort();
+        const actual = current.docs.map((document) => document.ref.path).sort();
+        if (evidenceHash(actual) !== evidenceHash(expected)) throw new Error(`Audit membership changed: ${collection}; run audit again`);
+      }
+      if (existing.exists) {
+        const prior = existing.data() as MinuteRefund;
+        if (prior.reviewApproved || prior.pendingMinutes !== item.pending || prior.creditedMinutes !== item.credited) throw new Error("Refund changed since audit");
+      }
+      return { item, refundRef, accountRef, existing, snapshots };
+    }));
+    const histories = new Map<string, Record<string, unknown>[]>();
+    for (const { item, refundRef, accountRef, existing, snapshots } of contexts) {
+      const receiptRef = db.collection(`${REFUNDS}/${item.refundId}/movements`).doc(`review_${reportHash}`);
       const at = new Date().toISOString();
       const sourceSnap = snapshots.find((d) => d.ref.path === `appointments/${item.appointmentId}`);
       const deletionSnap = snapshots.find((d) => d.ref.path === `appointment_deletions/${item.appointmentId}`);
@@ -147,7 +177,6 @@ export async function applyReviewedMinuteRefundAudit(db: Firestore, report: Refu
       let next: MinuteRefund;
       if (existing.exists) {
         const prior = existing.data() as MinuteRefund;
-        if (prior.reviewApproved || prior.pendingMinutes !== item.pending || prior.creditedMinutes !== item.credited) throw new Error("Refund changed since audit");
         next = { ...prior, reviewApproved: true, state: "ready", reason: null, updatedAt: at };
       } else {
         next = { ...recordMinuteRefund(tx, db, db.collection("appointments").doc(item.appointmentId), source, at,
@@ -164,14 +193,14 @@ export async function applyReviewedMinuteRefundAudit(db: Firestore, report: Refu
       // Decorate misleading legacy history; the original evidence remains in the reviewed report and request receipt.
       if (item.targetBonoId) {
         const target = snapshots.find((d) => d.ref.path === `bonos/${item.targetBonoId}`);
-        const history: Record<string, unknown>[] = target?.data()?.historial ?? [];
-        tx.update(db.collection("bonos").doc(item.targetBonoId), { historial: history.map((h) => h.appointmentId === item.appointmentId && h.accion === "devolucion_cita"
+        const history: Record<string, unknown>[] = histories.get(item.targetBonoId) ?? target?.data()?.historial ?? [];
+        histories.set(item.targetBonoId, history.map((h) => h.appointmentId === item.appointmentId && h.accion === "devolucion_cita"
           ? { ...h, minutosAbonados: item.credited, tipo: item.credited === 0 ? "Intento de devolución · sin abono" : h.tipo ?? "Devolución de minutos",
-            refundId: item.refundId, auditReportHash: reportHash } : h) });
+            refundId: item.refundId, auditReportHash: reportHash } : h));
       }
       tx.set(accountRef, { generation: FieldValue.increment(1), nextAttemptAt: at }, { merge: true });
-    });
-    imported.push(item.refundId);
-  }
-  return imported;
+    }
+    for (const [bonoId, historial] of histories) tx.update(db.collection("bonos").doc(bonoId), { historial });
+    return report.cases.map((item) => item.refundId);
+  });
 }

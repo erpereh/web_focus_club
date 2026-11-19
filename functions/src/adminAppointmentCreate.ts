@@ -1,3 +1,4 @@
+import { runAppointmentTransaction } from "./appointmentTransaction.js";
 import type { DocumentReference, Firestore, QueryDocumentSnapshot, Transaction } from "firebase-admin/firestore";
 import { type CallableRequest, HttpsError } from "firebase-functions/v2/https";
 import { getCanonicalSlotBlocks, madridCivilSlotToInstant, slotOccupancyDocId } from "./appointmentLifecycle.js";
@@ -269,7 +270,7 @@ export function createAdminAppointmentCreateHandlers(deps: AdminAppointmentCreat
       .where("userId", "==", input.userId)
       .where("estado", "==", "activo");
 
-    const result = await db.runTransaction(async (transaction) => {
+    const result = await runAppointmentTransaction(db, async (transaction) => {
       const isNutrition = input.appointmentType === "nutrition";
       const marker = await readIdempotencyMarker(transaction, db, { requestId, adminUid, kind: "single", payloadHash });
       if (marker.previous) return { replayed: true as const, response: marker.previous };

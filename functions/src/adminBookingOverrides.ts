@@ -153,7 +153,7 @@ const OVERRIDE_CONFIRM_ACTION: Record<AdminOverrideOperation, string> = {
  * `changed` when what the admin confirmed is no longer what applies).
  * Returns the audit record to store, or undefined when nothing was overridden.
  * Creations may only override as approved; reschedules and approvals of a
- * pending appointment may too (a pending one takes no seat until approved).
+ * pending appointment may too. Both statuses reserve capacity immediately.
  */
 export function authorizeAdminOverride(input: {
   restrictions: AdminRestriction[];

@@ -1,3 +1,5 @@
+> **Publicación coordinada de noviembre de 2026:** seguir únicamente [el procedimiento integrado de aforo y devoluciones](despliegue-integrado-aforo-devoluciones.md). Las órdenes de publicación y cifras históricas de este documento se conservan como referencia anterior; no ejecutarlas para esta entrega.
+
 # Devoluciones automáticas de minutos — 13 de noviembre de 2026
 
 Estado de entrega: código local y auditoría de solo lectura. **No se ha desplegado, activado, migrado ni compensado producción.**

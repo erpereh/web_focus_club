@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require("./helpers/pendingOccupancy.cjs");
 const assert = require("node:assert/strict");
 
 const {
@@ -714,7 +715,7 @@ function transactionDocuments({
 
 async function runHandlerTests() {
   const fixedNow = new Date("2026-09-01T08:00:00.000Z");
-  const db = new FakeFirestore(transactionDocuments());
+  const db = new FakeFirestore(withPendingOccupancy(transactionDocuments()));
   const handlers = createRecurringRescheduleHandlers({
     db,
     requireAdmin: async () => ({}),
@@ -764,7 +765,7 @@ async function runHandlerTests() {
   failingDocs[`slot_occupancy/${fullKey}`] = {
     date: fullKey.slice(0, 10), time: fullKey.slice(11), count: 2,
   };
-  const failingDb = new FakeFirestore(failingDocs);
+  const failingDb = new FakeFirestore(withPendingOccupancy(failingDocs));
   const failingHandlers = createRecurringRescheduleHandlers({
     db: failingDb,
     requireAdmin: async () => ({}),
@@ -781,14 +782,14 @@ async function runHandlerTests() {
     }),
     (error) => error.code === "failed-precondition" && error.details.reason === "slot_full",
   );
-  assert.deepEqual(failingDb.documents, new Map(Object.entries(failingDocs)), "failed transaction must not persist writes");
+  assert.deepEqual(failingDb.documents, new Map(Object.entries(withPendingOccupancy(failingDocs))), "failed transaction must not persist writes");
 
   const seriesDocuments = () => transactionDocuments({
     records: fullSeriesOccurrences,
     recurrenceSeries: { ...series, endDate: "2026-10-29" },
     draft: wholeSeries.draft,
   });
-  const seriesDb = new FakeFirestore(seriesDocuments());
+  const seriesDb = new FakeFirestore(withPendingOccupancy(seriesDocuments()));
   const seriesHandlers = createRecurringRescheduleHandlers({
     db: seriesDb,
     requireAdmin: async () => { throw new Error("customer handler must not require admin"); },
@@ -827,7 +828,7 @@ async function runHandlerTests() {
   assert.equal(seriesLog.affectedCount, 4);
 
   const foreignSeriesDocs = seriesDocuments();
-  const foreignSeriesDb = new FakeFirestore(foreignSeriesDocs);
+  const foreignSeriesDb = new FakeFirestore(withPendingOccupancy(foreignSeriesDocs));
   const foreignSeriesHandlers = createRecurringRescheduleHandlers({
     db: foreignSeriesDb,
     requireAdmin: async () => ({}),
@@ -844,7 +845,7 @@ async function runHandlerTests() {
     }),
     (error) => error.code === "permission-denied",
   );
-  assert.deepEqual(foreignSeriesDb.documents, new Map(Object.entries(foreignSeriesDocs)));
+  assert.deepEqual(foreignSeriesDb.documents, new Map(Object.entries(withPendingOccupancy(foreignSeriesDocs))));
 
   const failingSeriesDocs = seriesDocuments();
   failingSeriesDocs[`slot_occupancy/${firstSeriesNewKey}`] = {
@@ -852,7 +853,7 @@ async function runHandlerTests() {
     time: firstSeriesNewKey.slice(11),
     count: siteConfig.maxCapacity,
   };
-  const failingSeriesDb = new FakeFirestore(failingSeriesDocs);
+  const failingSeriesDb = new FakeFirestore(withPendingOccupancy(failingSeriesDocs));
   const failingSeriesHandlers = createRecurringRescheduleHandlers({
     db: failingSeriesDb,
     requireAdmin: async () => ({}),
@@ -872,9 +873,9 @@ async function runHandlerTests() {
       && error.details.problematicAppointmentId === "s1",
   );
   assert.equal(failingSeriesDb.operations.some((operation) => operation.type === "write"), false);
-  assert.deepEqual(failingSeriesDb.documents, new Map(Object.entries(failingSeriesDocs)));
+  assert.deepEqual(failingSeriesDb.documents, new Map(Object.entries(withPendingOccupancy(failingSeriesDocs))));
 
-  const customerDb = new FakeFirestore(transactionDocuments());
+  const customerDb = new FakeFirestore(withPendingOccupancy(transactionDocuments()));
   const customerHandlers = createRecurringRescheduleHandlers({
     db: customerDb,
     requireAdmin: async () => { throw new Error("customer handler must not require admin"); },
@@ -901,7 +902,7 @@ async function runHandlerTests() {
   const approvedSingleBefore = structuredClone(approvedSingleDocs["appointments/a1"]);
   const approvedSingleOldKeys = getCanonicalSlotBlocks("10:00", 60).map((time) => `2026-09-14_${time}`);
   const approvedSingleNewKeys = getCanonicalSlotBlocks("19:00", 60).map((time) => `2026-09-20_${time}`);
-  const approvedSingleDb = new FakeFirestore(approvedSingleDocs);
+  const approvedSingleDb = new FakeFirestore(withPendingOccupancy(approvedSingleDocs));
   const approvedSingleHandlers = createRecurringRescheduleHandlers({
     db: approvedSingleDb,
     requireAdmin: async () => { throw new Error("customer handler must not require admin"); },
@@ -934,7 +935,7 @@ async function runHandlerTests() {
     assert.equal(approvedSingleDb.documents.get(`slot_occupancy/${key}`).count, 0);
   });
   approvedSingleNewKeys.forEach((key) => {
-    assert.equal(approvedSingleDb.documents.get(`slot_occupancy/${key}`)?.count ?? 0, 0);
+    assert.equal(approvedSingleDb.documents.get(`slot_occupancy/${key}`)?.count ?? 0, 1);
   });
 
   const pendingSingleDocs = transactionDocuments({
@@ -952,7 +953,7 @@ async function runHandlerTests() {
     recurrenceSeries: { ...series, status: "pending" },
     draft: following.draft,
   });
-  const pendingSingleDb = new FakeFirestore(pendingSingleDocs);
+  const pendingSingleDb = new FakeFirestore(withPendingOccupancy(pendingSingleDocs));
   const pendingSingleHandlers = createRecurringRescheduleHandlers({
     db: pendingSingleDb,
     requireAdmin: async () => ({}),
@@ -970,7 +971,7 @@ async function runHandlerTests() {
   assert.equal(pendingSingleDb.documents.get("appointments/a1").status, "pending");
   assert.equal(
     pendingSingleDb.operations.some((operation) => operation.type === "write" && operation.target.startsWith("slot_occupancy/")),
-    false,
+    true,
   );
 
   const lockedSingleDocs = transactionDocuments();
@@ -981,7 +982,7 @@ async function runHandlerTests() {
     date: "2026-09-02",
     time: "10:00",
   };
-  const lockedSingleDb = new FakeFirestore(lockedSingleDocs);
+  const lockedSingleDb = new FakeFirestore(withPendingOccupancy(lockedSingleDocs));
   const lockedSingleHandlers = createRecurringRescheduleHandlers({
     db: lockedSingleDb,
     requireAdmin: async () => ({}),
@@ -1002,7 +1003,7 @@ async function runHandlerTests() {
   assert.equal(lockedSingleDb.operations.some((operation) => operation.type === "write"), false);
 
   const foreignDocs = transactionDocuments();
-  const foreignDb = new FakeFirestore(foreignDocs);
+  const foreignDb = new FakeFirestore(withPendingOccupancy(foreignDocs));
   const foreignHandlers = createRecurringRescheduleHandlers({
     db: foreignDb,
     requireAdmin: async () => ({}),
@@ -1019,7 +1020,7 @@ async function runHandlerTests() {
     }),
     (error) => error.code === "permission-denied",
   );
-  assert.deepEqual(foreignDb.documents, new Map(Object.entries(foreignDocs)));
+  assert.deepEqual(foreignDb.documents, new Map(Object.entries(withPendingOccupancy(foreignDocs))));
 
   const selectedTodayDocs = transactionDocuments();
   selectedTodayDocs["appointments/a1"] = {
@@ -1029,7 +1030,7 @@ async function runHandlerTests() {
     date: "2026-09-01",
     time: "19:00",
   };
-  const selectedTodayDb = new FakeFirestore(selectedTodayDocs);
+  const selectedTodayDb = new FakeFirestore(withPendingOccupancy(selectedTodayDocs));
   const selectedTodayHandlers = createRecurringRescheduleHandlers({
     db: selectedTodayDb,
     requireAdmin: async () => ({}),
@@ -1050,7 +1051,7 @@ async function runHandlerTests() {
   assert.equal(selectedTodayDb.operations.some((operation) => operation.type === "write"), false);
 
   const targetTodayDocs = transactionDocuments();
-  const targetTodayDb = new FakeFirestore(targetTodayDocs);
+  const targetTodayDb = new FakeFirestore(withPendingOccupancy(targetTodayDocs));
   const targetTodayHandlers = createRecurringRescheduleHandlers({
     db: targetTodayDb,
     requireAdmin: async () => ({}),
@@ -1074,7 +1075,7 @@ async function runHandlerTests() {
   customerFailingDocs[`slot_occupancy/${fullKey}`] = {
     date: fullKey.slice(0, 10), time: fullKey.slice(11), count: 2,
   };
-  const customerFailingDb = new FakeFirestore(customerFailingDocs);
+  const customerFailingDb = new FakeFirestore(withPendingOccupancy(customerFailingDocs));
   const customerFailingHandlers = createRecurringRescheduleHandlers({
     db: customerFailingDb,
     requireAdmin: async () => ({}),
@@ -1093,7 +1094,7 @@ async function runHandlerTests() {
   );
   assert.deepEqual(
     customerFailingDb.documents,
-    new Map(Object.entries(customerFailingDocs)),
+    new Map(Object.entries(withPendingOccupancy(customerFailingDocs))),
     "customer failure must not persist writes",
   );
 
@@ -1103,7 +1104,7 @@ async function runHandlerTests() {
   ]) {
     const corruptDocs = transactionDocuments();
     mutate(corruptDocs);
-    const corruptDb = new FakeFirestore(corruptDocs);
+    const corruptDb = new FakeFirestore(withPendingOccupancy(corruptDocs));
     const corruptHandlers = createRecurringRescheduleHandlers({
       db: corruptDb,
       requireAdmin: async () => ({}),
@@ -1123,7 +1124,7 @@ async function runHandlerTests() {
       label,
     );
     assert.equal(corruptDb.operations.some((operation) => operation.type === "write"), false, label);
-    assert.deepEqual(corruptDb.documents, new Map(Object.entries(corruptDocs)), label);
+    assert.deepEqual(corruptDb.documents, new Map(Object.entries(withPendingOccupancy(corruptDocs))), label);
   }
 }
 

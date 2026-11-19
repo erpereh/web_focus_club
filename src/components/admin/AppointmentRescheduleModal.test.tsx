@@ -834,7 +834,8 @@ describe('AppointmentRescheduleModal', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /Guardar cambio/i }));
       const dialog = await screen.findByRole('alertdialog');
-      expect(dialog).toHaveTextContent('no ocupa plaza hasta que se apruebe');
+      expect(dialog).toHaveTextContent('reservará plaza al guardar este cambio');
+      expect(dialog).toHaveTextContent('Aprobarla conservará esa misma plaza');
       fireEvent.click(within(dialog).getByRole('button', { name: 'Confirmar' }));
       await waitFor(() => expect(within(dialog).getByRole('alert')).toBeInTheDocument());
 

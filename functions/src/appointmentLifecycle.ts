@@ -614,10 +614,7 @@ export function isSlotAtCapacity(currentCount: number, maxCapacity: number): boo
 }
 
 export function isRescheduleCapacityAvailable(currentCount: number, includesOwnApprovedOccupancy: boolean, maxCapacity: number): boolean {
-  return !isSlotAtCapacity(
-    Math.max(0, currentCount - (includesOwnApprovedOccupancy ? 1 : 0)),
-    maxCapacity,
-  );
+  return includesOwnApprovedOccupancy || !isSlotAtCapacity(currentCount, maxCapacity);
 }
 
 export function shouldReconcileAppointmentTransition(expectedStatus: string, currentStatus: string): boolean {

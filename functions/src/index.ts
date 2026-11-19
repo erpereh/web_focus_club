@@ -1,7 +1,11 @@
+import { setGlobalOptions } from "firebase-functions/v2";
+import { guardCallable, guardBackground, createReleaseRecoveryHandler } from "./releaseMaintenance.js";
+import type { CallableRequest } from "firebase-functions/v2/https";
+import { runAppointmentTransaction } from "./appointmentTransaction.js";
 import { FieldPath, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { createMinuteRefundAdminHandlers } from "./minuteRefundAdmin.js";
 import { REFUND_ACCOUNTS, REFUND_FLAG, drainMinuteRefunds, recoverDueMinuteRefunds, wakeMinuteRefunds } from "./minuteRefunds.js";
-import { initializeApp } from "firebase-admin/app";
+import { initializeApp, getApps } from "firebase-admin/app";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { getAuth } from "firebase-admin/auth";
@@ -104,7 +108,8 @@ import {
   syncTrainerProfile,
 } from "./adminUsers";
 
-initializeApp();
+setGlobalOptions({ labels: { focus_release: "occupancy-v2-refunds-20261118", focus_phase: "final" } });
+if (!getApps().length) initializeApp();
 
 const db = getFirestore();
 const GOOGLE_CALENDAR_ID = defineSecret("GOOGLE_CALENDAR_ID");
@@ -411,7 +416,7 @@ async function enforceContactRateLimit(docId: string): Promise<void> {
   const now = Date.now();
   const ref = db.collection("contact_rate_limits").doc(docId);
 
-  await db.runTransaction(async (transaction) => {
+  await runAppointmentTransaction(db, async (transaction) => {
     const snap = await transaction.get(ref);
     const data = snap.exists ? snap.data() : undefined;
     const windowStartMillis = typeof data?.windowStartMillis === "number" ? data.windowStartMillis : 0;
@@ -749,7 +754,7 @@ const slotMigrations = createSlotMigrationHandlers({
   getTodayMadrid: () => getMadridDateKey(new Date()),
   requireAdmin,
   readApprovedAppointments: async () => {
-    const snapshot = await db.collection("appointments").where("status", "==", "approved").get();
+    const snapshot = await db.collection("appointments").where("status", "in", ["pending", "approved"]).get();
     return snapshot.docs.map((document) => ({ id: document.id, data: document.data() }));
   },
   readOccupancyDocuments: (range) => readMigrationRangeCollection("slot_occupancy", range),
@@ -791,27 +796,27 @@ async function addAdminUserActivityLog(data: Record<string, unknown>): Promise<v
 
 export const createSupportConversation = onCall(
   { region: REGION },
-  supportChat.createSupportConversation,
+  guardCallable(db, "createSupportConversation", supportChat.createSupportConversation),
 );
 
 export const submitCustomerSuggestion = onCall(
   { region: REGION },
-  customerSuggestions.submitCustomerSuggestion,
+  guardCallable(db, "submitCustomerSuggestion", customerSuggestions.submitCustomerSuggestion),
 );
 
 export const adminMarkSuggestionReviewed = onCall(
   { region: REGION },
-  customerSuggestions.adminMarkSuggestionReviewed,
+  guardCallable(db, "adminMarkSuggestionReviewed", customerSuggestions.adminMarkSuggestionReviewed),
 );
 
 export const adminMarkSuggestionNew = onCall(
   { region: REGION },
-  customerSuggestions.adminMarkSuggestionNew,
+  guardCallable(db, "adminMarkSuggestionNew", customerSuggestions.adminMarkSuggestionNew),
 );
 
 export const adminDeleteSuggestion = onCall(
   { region: REGION },
-  customerSuggestions.adminDeleteSuggestion,
+  guardCallable(db, "adminDeleteSuggestion", customerSuggestions.adminDeleteSuggestion),
 );
 
 export const onCustomerSuggestionCreated = onDocumentCreated(
@@ -820,7 +825,7 @@ export const onCustomerSuggestionCreated = onDocumentCreated(
     region: REGION,
     secrets: [BREVO_API_KEY],
   },
-  async (event) => {
+  guardBackground(db, "onCustomerSuggestionCreated", async (event) => {
     const data = event.data?.data();
     if (!data) return;
     await notifyCustomerSuggestionCreatedSafely(
@@ -828,44 +833,44 @@ export const onCustomerSuggestionCreated = onDocumentCreated(
       data,
       (suggestionEvent) => sendCustomerSuggestionEmail(emailDeps(), suggestionEvent),
     );
-  },
+  }),
 );
 
 export const sendSupportMessage = onCall(
   { region: REGION },
-  supportChat.sendSupportMessage,
+  guardCallable(db, "sendSupportMessage", supportChat.sendSupportMessage),
 );
 
 export const markSupportConversationRead = onCall(
   { region: REGION },
-  supportChat.markSupportConversationRead,
+  guardCallable(db, "markSupportConversationRead", supportChat.markSupportConversationRead),
 );
 
 export const adminSendSupportMessage = onCall(
   { region: REGION },
-  supportChat.adminSendSupportMessage,
+  guardCallable(db, "adminSendSupportMessage", supportChat.adminSendSupportMessage),
 );
 
 export const closeSupportConversation = onCall(
   { region: REGION },
-  supportChat.closeSupportConversation,
+  guardCallable(db, "closeSupportConversation", supportChat.closeSupportConversation),
 );
 
 export const reopenSupportConversation = onCall(
   { region: REGION },
-  supportChat.reopenSupportConversation,
+  guardCallable(db, "reopenSupportConversation", supportChat.reopenSupportConversation),
 );
 
 export const adminHideSupportConversation = onCall(
   { region: REGION },
-  supportChat.adminHideSupportConversation,
+  guardCallable(db, "adminHideSupportConversation", supportChat.adminHideSupportConversation),
 );
 
 export const createUserFromAdmin = onCall<CreateUserFromAdminRequest>(
   {
     region: REGION,
   },
-  async (request) => {
+  guardCallable(db, "createUserFromAdmin", async (request: CallableRequest<CreateUserFromAdminRequest>) => {
     if (!request.auth) {
       throw toHttpsError("permission-denied", "Debes iniciar sesion como admin.");
     }
@@ -881,14 +886,14 @@ export const createUserFromAdmin = onCall<CreateUserFromAdminRequest>(
       adminUid: request.auth.uid,
       adminEmail: request.auth.token.email ?? "",
     });
-  },
+  }),
 );
 
 export const updateUserFromAdmin = onCall<UpdateUserFromAdminRequest>(
   {
     region: REGION,
   },
-  async (request) => {
+  guardCallable(db, "updateUserFromAdmin", async (request: CallableRequest<UpdateUserFromAdminRequest>) => {
     if (!request.auth) {
       throw toHttpsError("permission-denied", "Debes iniciar sesion como admin.");
     }
@@ -934,14 +939,14 @@ export const updateUserFromAdmin = onCall<UpdateUserFromAdminRequest>(
       success: true,
       uid: input.targetUid,
     };
-  },
+  }),
 );
 
 export const deleteUserFromAdmin = onCall<DeleteUserFromAdminRequest>(
   {
     region: REGION,
   },
-  async (request) => {
+  guardCallable(db, "deleteUserFromAdmin", async (request: CallableRequest<DeleteUserFromAdminRequest>) => {
     if (!request.auth) {
       throw toHttpsError("permission-denied", "Debes iniciar sesion como admin.");
     }
@@ -1003,7 +1008,7 @@ export const deleteUserFromAdmin = onCall<DeleteUserFromAdminRequest>(
       success: true,
       uid: input.targetUid,
     };
-  },
+  }),
 );
 
 const adminAppointmentCreate = createAdminAppointmentCreateHandlers({
@@ -1027,7 +1032,7 @@ export const createAppointmentFromAdmin = onCall(
     region: REGION,
     secrets: [BREVO_API_KEY],
   },
-  adminAppointmentCreate.createAppointmentFromAdmin,
+  guardCallable(db, "createAppointmentFromAdmin", adminAppointmentCreate.createAppointmentFromAdmin),
 );
 
 const recurringSeries = createRecurringSeriesHandlers({
@@ -1081,141 +1086,141 @@ const capacityAdmin = createCapacityAdminHandlers({
 
 export const upsertCapacityExceptionsFromAdmin = onCall(
   { region: REGION },
-  capacityAdmin.upsertCapacityExceptionsFromAdmin,
+  guardCallable(db, "upsertCapacityExceptionsFromAdmin", capacityAdmin.upsertCapacityExceptionsFromAdmin),
 );
 
 export const deleteCapacityExceptionsFromAdmin = onCall(
   { region: REGION },
-  capacityAdmin.deleteCapacityExceptionsFromAdmin,
+  guardCallable(db, "deleteCapacityExceptionsFromAdmin", capacityAdmin.deleteCapacityExceptionsFromAdmin),
 );
 
 export const updateMaxCapacityFromAdmin = onCall(
   { region: REGION },
-  capacityAdmin.updateMaxCapacityFromAdmin,
+  guardCallable(db, "updateMaxCapacityFromAdmin", capacityAdmin.updateMaxCapacityFromAdmin),
 );
 
 export const createRecurringAppointmentsFromAdmin = onCall(
   { region: REGION },
-  recurringSeries.createRecurringAppointmentsFromAdmin,
+  guardCallable(db, "createRecurringAppointmentsFromAdmin", recurringSeries.createRecurringAppointmentsFromAdmin),
 );
 
 export const createRecurringAppointments = onCall(
   { region: REGION },
-  recurringSeries.createRecurringAppointments,
+  guardCallable(db, "createRecurringAppointments", recurringSeries.createRecurringAppointments),
 );
 
 export const approveRecurringAppointmentSeriesFromAdmin = onCall(
   { region: REGION },
-  recurringSeries.approveRecurringAppointmentSeriesFromAdmin,
+  guardCallable(db, "approveRecurringAppointmentSeriesFromAdmin", recurringSeries.approveRecurringAppointmentSeriesFromAdmin),
 );
 
 export const rejectRecurringAppointmentSeriesFromAdmin = onCall(
   { region: REGION },
-  recurringSeries.rejectRecurringAppointmentSeriesFromAdmin,
+  guardCallable(db, "rejectRecurringAppointmentSeriesFromAdmin", recurringSeries.rejectRecurringAppointmentSeriesFromAdmin),
 );
 
 export const cancelOwnRecurringAppointmentSeries = onCall(
   { region: REGION },
-  recurringSeries.cancelOwnRecurringAppointmentSeries,
+  guardCallable(db, "cancelOwnRecurringAppointmentSeries", recurringSeries.cancelOwnRecurringAppointmentSeries),
 );
 
 export const rescheduleRecurringAppointmentFromAdmin = onCall(
   { region: REGION },
-  recurringReschedule.rescheduleRecurringAppointmentFromAdmin,
+  guardCallable(db, "rescheduleRecurringAppointmentFromAdmin", recurringReschedule.rescheduleRecurringAppointmentFromAdmin),
 );
 
 export const rescheduleOwnRecurringAppointment = onCall(
   { region: REGION },
-  recurringReschedule.rescheduleOwnRecurringAppointment,
+  guardCallable(db, "rescheduleOwnRecurringAppointment", recurringReschedule.rescheduleOwnRecurringAppointment),
 );
 
 export const reconcileSlotOccupancyFromApprovedAppointments = onCall(
   { region: REGION },
-  slotMigrations.reconcileSlotOccupancyFromApprovedAppointments,
+  guardCallable(db, "reconcileSlotOccupancyFromApprovedAppointments", slotMigrations.reconcileSlotOccupancyFromApprovedAppointments),
 );
 
 export const migrateLegacyBlockedSlots = onCall(
   { region: REGION },
-  slotMigrations.migrateLegacyBlockedSlots,
+  guardCallable(db, "migrateLegacyBlockedSlots", slotMigrations.migrateLegacyBlockedSlots),
 );
 
 export const replaceOwnRecurringSeriesSchedule = onCall(
   { region: REGION },
-  recurringReschedule.replaceOwnRecurringSeriesSchedule,
+  guardCallable(db, "replaceOwnRecurringSeriesSchedule", recurringReschedule.replaceOwnRecurringSeriesSchedule),
 );
 
 export const rescheduleAppointmentFromAdmin = onCall(
   { region: REGION, ...ADMIN_APPOINTMENT_RUNTIME },
-  observeAdminAppointmentOperation("rescheduleAppointmentFromAdmin", adminAppointmentReschedule.rescheduleAppointmentFromAdmin),
+  guardCallable(db, "rescheduleAppointmentFromAdmin", observeAdminAppointmentOperation("rescheduleAppointmentFromAdmin", adminAppointmentReschedule.rescheduleAppointmentFromAdmin)),
 );
 
 export const replaceRecurringSeriesScheduleFromAdmin = onCall(
   { region: REGION, ...ADMIN_APPOINTMENT_RUNTIME },
-  observeAdminAppointmentOperation("replaceRecurringSeriesScheduleFromAdmin", adminAppointmentReschedule.replaceRecurringSeriesScheduleFromAdmin),
+  guardCallable(db, "replaceRecurringSeriesScheduleFromAdmin", observeAdminAppointmentOperation("replaceRecurringSeriesScheduleFromAdmin", adminAppointmentReschedule.replaceRecurringSeriesScheduleFromAdmin)),
 );
 
 export const returnRecurringSeriesToPendingFromAdmin = onCall(
   { region: REGION },
-  adminAppointmentReschedule.returnRecurringSeriesToPendingFromAdmin,
+  guardCallable(db, "returnRecurringSeriesToPendingFromAdmin", adminAppointmentReschedule.returnRecurringSeriesToPendingFromAdmin),
 );
 
 export const proposeAppointmentSlotFromAdmin = onCall(
   { region: REGION },
-  appointmentProposals.proposeAppointmentSlotFromAdmin,
+  guardCallable(db, "proposeAppointmentSlotFromAdmin", appointmentProposals.proposeAppointmentSlotFromAdmin),
 );
 
 export const respondToAppointmentConfirmation = onCall(
   { region: REGION },
-  appointmentProposals.respondToAppointmentConfirmation,
+  guardCallable(db, "respondToAppointmentConfirmation", appointmentProposals.respondToAppointmentConfirmation),
 );
 
 export const previewBonoAppointmentRenewalFromAdmin = onCall(
   { region: REGION },
-  bonoRenewal.previewBonoAppointmentRenewalFromAdmin,
+  guardCallable(db, "previewBonoAppointmentRenewalFromAdmin", bonoRenewal.previewBonoAppointmentRenewalFromAdmin),
 );
 
 export const commitBonoAppointmentRenewalFromAdmin = onCall(
   { region: REGION },
-  bonoRenewal.commitBonoAppointmentRenewalFromAdmin,
+  guardCallable(db, "commitBonoAppointmentRenewalFromAdmin", bonoRenewal.commitBonoAppointmentRenewalFromAdmin),
 );
 
 export const updateAppointmentStatusFromAdmin = onCall(
   { region: REGION, ...ADMIN_APPOINTMENT_RUNTIME },
-  observeAdminAppointmentOperation("updateAppointmentStatusFromAdmin", adminAppointmentStatus.updateAppointmentStatusFromAdmin),
+  guardCallable(db, "updateAppointmentStatusFromAdmin", observeAdminAppointmentOperation("updateAppointmentStatusFromAdmin", adminAppointmentStatus.updateAppointmentStatusFromAdmin)),
 );
 
 export const deleteAppointmentsFromAdmin = onCall(
   { region: REGION, ...ADMIN_APPOINTMENT_RUNTIME },
-  observeAdminAppointmentOperation("deleteAppointmentsFromAdmin", adminAppointmentStatus.deleteAppointmentsFromAdmin),
+  guardCallable(db, "deleteAppointmentsFromAdmin", observeAdminAppointmentOperation("deleteAppointmentsFromAdmin", adminAppointmentStatus.deleteAppointmentsFromAdmin)),
 );
 
 export const blockSlotsFromAdmin = onCall(
   { region: REGION },
-  adminAppointmentStatus.blockSlotsFromAdmin,
+  guardCallable(db, "blockSlotsFromAdmin", adminAppointmentStatus.blockSlotsFromAdmin),
 );
 
 const minuteRefundAdmin = createMinuteRefundAdminHandlers({ db, requireAdmin });
-export const auditMinuteRefundsFromAdmin = onCall({ region: REGION }, minuteRefundAdmin.auditMinuteRefundsFromAdmin);
-export const getMinuteRefundsFromAdmin = onCall({ region: REGION }, minuteRefundAdmin.getMinuteRefundsFromAdmin);
-export const getMinuteRefundSummaryFromAdmin = onCall({ region: REGION }, minuteRefundAdmin.getMinuteRefundSummaryFromAdmin);
-export const getMinuteRefundDetailFromAdmin = onCall({ region: REGION }, minuteRefundAdmin.getMinuteRefundDetailFromAdmin);
-export const retryMinuteRefundFromAdmin = onCall({ region: REGION }, minuteRefundAdmin.retryMinuteRefundFromAdmin);
-export const mutateBonoFromAdmin = onCall({ region: REGION }, minuteRefundAdmin.mutateBonoFromAdmin);
+export const auditMinuteRefundsFromAdmin = onCall({ region: REGION }, guardCallable(db, "auditMinuteRefundsFromAdmin", minuteRefundAdmin.auditMinuteRefundsFromAdmin));
+export const getMinuteRefundsFromAdmin = onCall({ region: REGION }, guardCallable(db, "getMinuteRefundsFromAdmin", minuteRefundAdmin.getMinuteRefundsFromAdmin));
+export const getMinuteRefundSummaryFromAdmin = onCall({ region: REGION }, guardCallable(db, "getMinuteRefundSummaryFromAdmin", minuteRefundAdmin.getMinuteRefundSummaryFromAdmin));
+export const getMinuteRefundDetailFromAdmin = onCall({ region: REGION }, guardCallable(db, "getMinuteRefundDetailFromAdmin", minuteRefundAdmin.getMinuteRefundDetailFromAdmin));
+export const retryMinuteRefundFromAdmin = onCall({ region: REGION }, guardCallable(db, "retryMinuteRefundFromAdmin", minuteRefundAdmin.retryMinuteRefundFromAdmin));
+export const mutateBonoFromAdmin = onCall({ region: REGION }, guardCallable(db, "mutateBonoFromAdmin", minuteRefundAdmin.mutateBonoFromAdmin));
 
 export const onMinuteRefundAccountWritten = onDocumentWritten(
   { document: "minute_refund_accounts/{userId}", region: REGION, retry: true },
-  async (event) => {
+  guardBackground(db, "onMinuteRefundAccountWritten", async (event) => {
     const before = event.data?.before.data();
     const after = event.data?.after.data();
     if (!after || Number(after.pendingMinutes ?? 0) <= 0 || before?.generation === after.generation) return;
     const credited = await drainMinuteRefunds(db, String(event.params.userId), undefined, Number(after.generation));
     if (credited > 0) console.log("[MinuteRefund] Automatic credit", { credited });
-  },
+  }),
 );
 
 export const onBonoRefundDestinationChanged = onDocumentWritten(
   { document: "bonos/{bonoId}", region: REGION, retry: true },
-  async (event) => {
+  guardBackground(db, "onBonoRefundDestinationChanged", async (event) => {
     const before = event.data?.before.data();
     const after = event.data?.after.data();
     const fields = ["userId", "estado", "fechaAsignacion", "fechaExpiracion", "replacedByBonoId"];
@@ -1224,12 +1229,12 @@ export const onBonoRefundDestinationChanged = onDocumentWritten(
     if (before && after && fields.every((key) => before[key] === after[key])) return;
     const users = new Set([before?.userId, after?.userId].filter((value): value is string => typeof value === "string"));
     for (const uid of users) await wakeMinuteRefunds(db, uid);
-  },
+  }),
 );
 
 export const onMinuteRefundActivation = onDocumentUpdated(
   { document: "site_config/main", region: REGION, retry: true },
-  async (event) => {
+  guardBackground(db, "onMinuteRefundActivation", async (event) => {
     if (event.data?.before.data()?.[REFUND_FLAG] === true || event.data?.after.data()?.[REFUND_FLAG] !== true) return;
     let cursor: QueryDocumentSnapshot | undefined;
     do {
@@ -1239,12 +1244,12 @@ export const onMinuteRefundActivation = onDocumentUpdated(
       for (const account of page.docs) await wakeMinuteRefunds(db, account.id);
       cursor = page.size === 50 ? page.docs.at(-1)! : undefined;
     } while (cursor);
-  },
+  }),
 );
 
 export const assignBonoFromAdmin = onCall(
   { region: REGION },
-  adminAppointmentStatus.assignBonoFromAdmin,
+  guardCallable(db, "assignBonoFromAdmin", adminAppointmentStatus.assignBonoFromAdmin),
 );
 
 export const sendContactMessage = onCall<ContactMessageRequest>(
@@ -1252,7 +1257,7 @@ export const sendContactMessage = onCall<ContactMessageRequest>(
     region: REGION,
     secrets: [BREVO_API_KEY],
   },
-  async (request) => {
+  guardCallable(db, "sendContactMessage", async (request: CallableRequest<ContactMessageRequest>) => {
     const contactMessage = parseContactMessage(request.data);
     const submittedAt = new Date();
     const createdAt = submittedAt.toISOString();
@@ -1290,7 +1295,7 @@ export const sendContactMessage = onCall<ContactMessageRequest>(
       });
       throw toHttpsError("internal", "No se ha podido enviar el mensaje. Intentalo de nuevo mas tarde.");
     }
-  },
+  }),
 );
 
 export const syncAppointmentWithGoogleCalendar = onDocumentWritten(
@@ -1299,7 +1304,7 @@ export const syncAppointmentWithGoogleCalendar = onDocumentWritten(
     region: REGION,
     secrets: [GOOGLE_CALENDAR_ID],
   },
-  async (event) => {
+  guardBackground(db, "syncAppointmentWithGoogleCalendar", async (event) => {
     const appointmentId = String(event.params.appointmentId);
     const beforeSnap = event.data?.before;
     const afterSnap = event.data?.after;
@@ -1407,19 +1412,19 @@ export const syncAppointmentWithGoogleCalendar = onDocumentWritten(
       console.error("[GoogleCalendar] Failed to sync appointment", appointmentId, error);
       await writeGoogleCalendarSyncError(appointmentRef, error);
     }
-  },
+  }),
 );
 
 export const createAppointment = onCall<CreateAppointmentRequest>(
   {
     region: REGION,
   },
-  customerBooking.createAppointment,
+  guardCallable(db, "createAppointment", customerBooking.createAppointment),
 );
 
 export const cancelOwnAppointment = onCall<CancelOwnAppointmentRequest>(
   { region: REGION },
-  async (request) => {
+  guardCallable(db, "cancelOwnAppointment", async (request: CallableRequest<CancelOwnAppointmentRequest>) => {
     if (!request.auth) {
       throw toHttpsError("permission-denied", "Debes iniciar sesión para cancelar una cita.");
     }
@@ -1431,7 +1436,7 @@ export const cancelOwnAppointment = onCall<CancelOwnAppointmentRequest>(
     const appointmentId = normalizeTextField(request.data.appointmentId, "cita", 256);
     const appointmentRef = db.collection("appointments").doc(appointmentId);
 
-    await db.runTransaction(async (transaction) => {
+    await runAppointmentTransaction(db, async (transaction) => {
       const appointmentSnap = await transaction.get(appointmentRef);
       if (!appointmentSnap.exists) {
         throw toHttpsError("failed-precondition", "No se ha encontrado la cita indicada.");
@@ -1507,12 +1512,12 @@ export const cancelOwnAppointment = onCall<CancelOwnAppointmentRequest>(
     });
 
     return { success: true, appointmentId };
-  },
+  }),
 );
 
 export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
   { region: REGION },
-  async (request) => {
+  guardCallable(db, "updateOwnAppointmentSlot", async (request: CallableRequest<UpdateOwnAppointmentSlotRequest>) => {
     if (!request.auth) {
       throw toHttpsError("permission-denied", "Debes iniciar sesión para modificar una cita.");
     }
@@ -1528,7 +1533,7 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
     const preferredSlot = request.data.preferredSlot;
     const appointmentRef = db.collection("appointments").doc(appointmentId);
 
-    await db.runTransaction(async (transaction) => {
+    await runAppointmentTransaction(db, async (transaction) => {
       const appointmentSnap = await transaction.get(appointmentRef);
       if (!appointmentSnap.exists) {
         throw toHttpsError("failed-precondition", "No se ha encontrado la cita indicada.");
@@ -1613,7 +1618,7 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
         }
         occupancyByTime.set(occupancy.time, occupancy.count);
       });
-      const ownApprovedKeys = appointment.status === "approved" ? appointmentSlotKeys(appointment) : new Set<string>();
+      const ownApprovedKeys = appointmentSlotKeys(appointment);
       const targetMaxCapacity = resolveMaxCapacity(config, capacityExceptions, preferredSlot.date);
       if (slotBlocks.some((time) => {
         const key = `${preferredSlot.date}_${time}`;
@@ -1709,7 +1714,7 @@ export const updateOwnAppointmentSlot = onCall<UpdateOwnAppointmentSlotRequest>(
     });
 
     return { success: true, appointmentId };
-  },
+  }),
 );
 
 export const onUserProfileCreatedWelcomeEmail = onDocumentCreated(
@@ -1718,7 +1723,7 @@ export const onUserProfileCreatedWelcomeEmail = onDocumentCreated(
     region: REGION,
     secrets: [BREVO_API_KEY],
   },
-  async (event) => {
+  guardBackground(db, "onUserProfileCreatedWelcomeEmail", async (event) => {
     const userSnap = event.data;
     const uid = String(event.params.uid);
 
@@ -1780,7 +1785,7 @@ export const onUserProfileCreatedWelcomeEmail = onDocumentCreated(
         });
       }
     }
-  },
+  }),
 );
 
 export const onAppointmentCreated = onDocumentCreated(
@@ -1789,7 +1794,7 @@ export const onAppointmentCreated = onDocumentCreated(
     region: REGION,
     secrets: [BREVO_API_KEY],
   },
-  async (event) => {
+  guardBackground(db, "onAppointmentCreated", async (event) => {
     const appointment = event.data?.data() as AppointmentDoc | undefined;
     const appointmentId = String(event.params.appointmentId);
 
@@ -1805,7 +1810,7 @@ export const onAppointmentCreated = onDocumentCreated(
       "admin",
       ADMIN_NOTIFICATION_EMAIL,
     );
-  },
+  }),
 );
 
 export const onAppointmentApproved = onDocumentUpdated(
@@ -1814,7 +1819,7 @@ export const onAppointmentApproved = onDocumentUpdated(
     region: REGION,
     secrets: [BREVO_API_KEY],
   },
-  async (event) => {
+  guardBackground(db, "onAppointmentApproved", async (event) => {
     const before = event.data?.before.data() as AppointmentDoc | undefined;
     const after = event.data?.after.data() as AppointmentDoc | undefined;
     const appointmentId = String(event.params.appointmentId);
@@ -1830,7 +1835,7 @@ export const onAppointmentApproved = onDocumentUpdated(
     const skipNotification = shouldSkipRecurringStatusNotification(before, after);
 
     if (!skipFinance && (changedToApproved || changedToRejected || changedToCancelled)) {
-      await db.runTransaction(async (transaction) => {
+      await runAppointmentTransaction(db, async (transaction) => {
         const appointmentRef = db.collection("appointments").doc(appointmentId);
         const appointmentSnap = await transaction.get(appointmentRef);
         if (!appointmentSnap.exists) return;
@@ -1862,7 +1867,7 @@ export const onAppointmentApproved = onDocumentUpdated(
     // Customer notices come from onAppointmentCustomerNotification.
     const action = changedToApproved ? "confirmed" : "deleted";
     await sendAppointmentEmailSafely(event.id, appointmentId, after, action, "admin", ADMIN_NOTIFICATION_EMAIL);
-  },
+  }),
 );
 
 export const onAppointmentDeleted = onDocumentDeleted(
@@ -1871,7 +1876,7 @@ export const onAppointmentDeleted = onDocumentDeleted(
     region: REGION,
     secrets: [BREVO_API_KEY],
   },
-  async (event) => {
+  guardBackground(db, "onAppointmentDeleted", async (event) => {
     const appointment = event.data?.data() as AppointmentDoc | undefined;
     const appointmentId = String(event.params.appointmentId);
     if (!appointment) return;
@@ -1886,7 +1891,7 @@ export const onAppointmentDeleted = onDocumentDeleted(
       ADMIN_NOTIFICATION_EMAIL,
       "deleted",
     );
-  },
+  }),
 );
 
 export const onAppointmentCustomerNotification = onDocumentWritten(
@@ -1895,7 +1900,7 @@ export const onAppointmentCustomerNotification = onDocumentWritten(
     region: REGION,
     secrets: [BREVO_API_KEY],
   },
-  async (event) => {
+  guardBackground(db, "onAppointmentCustomerNotification", async (event) => {
     const beforeSnap = event.data?.before;
     const afterSnap = event.data?.after;
     await notifications.onAppointmentWritten({
@@ -1904,7 +1909,7 @@ export const onAppointmentCustomerNotification = onDocumentWritten(
       before: beforeSnap?.exists ? beforeSnap.data() as NotifiableAppointment : undefined,
       after: afterSnap?.exists ? afterSnap.data() as NotifiableAppointment : undefined,
     });
-  },
+  }),
 );
 
 export const onNotificationOutboxCreated = onDocumentCreated(
@@ -1913,11 +1918,11 @@ export const onNotificationOutboxCreated = onDocumentCreated(
     region: REGION,
     secrets: [BREVO_API_KEY],
   },
-  async (event) => {
+  guardBackground(db, "onNotificationOutboxCreated", async (event) => {
     const entry = event.data?.data() as NotificationOutboxEntry | undefined;
     if (!entry) return;
     await notifications.onOutboxCreated({ operationId: String(event.params.operationId), entry });
-  },
+  }),
 );
 
 export const onBonoCustomerNotification = onDocumentWritten(
@@ -1926,7 +1931,7 @@ export const onBonoCustomerNotification = onDocumentWritten(
     region: REGION,
     secrets: [BREVO_API_KEY],
   },
-  async (event) => {
+  guardBackground(db, "onBonoCustomerNotification", async (event) => {
     const beforeSnap = event.data?.before;
     const afterSnap = event.data?.after;
     await notifications.onBonoWritten({
@@ -1935,37 +1940,37 @@ export const onBonoCustomerNotification = onDocumentWritten(
       before: beforeSnap?.exists ? beforeSnap.data() as NotifiableBono : undefined,
       after: afterSnap?.exists ? afterSnap.data() as NotifiableBono : undefined,
     });
-  },
+  }),
 );
 
 const SCHEDULE_OPTIONS = { region: REGION, timeZone: "Europe/Madrid" } as const;
 
 export const bonoExpiryWarningsScheduled = onSchedule(
   { ...SCHEDULE_OPTIONS, schedule: "0 10 * * *", secrets: [BREVO_API_KEY] },
-  async () => {
+  guardBackground(db, "bonoExpiryWarningsScheduled", async () => {
     const count = await notifications.runBonoExpiryWarnings();
     console.log("[Notify] Bono expiry warnings processed", { count });
-  },
+  }),
 );
 
 export const expireOverdueBonosScheduled = onSchedule(
   { ...SCHEDULE_OPTIONS, schedule: "5 * * * *" },
-  async () => {
+  guardBackground(db, "expireOverdueBonosScheduled", async () => {
     const count = await notifications.runExpireOverdueBonos();
     console.log("[Notify] Overdue bonos expired", { count });
     try {
       const credited = await recoverDueMinuteRefunds(db);
       if (credited > 0) console.log("[MinuteRefund] Recovered credits", { credited });
     } catch (error) { console.error("[MinuteRefund] Recovery deferred", { error: String(error) }); }
-  },
+  }),
 );
 
 export const appointmentRemindersScheduled = onSchedule(
   { ...SCHEDULE_OPTIONS, schedule: "*/15 * * * *" },
-  async () => {
+  guardBackground(db, "appointmentRemindersScheduled", async () => {
     const count = await notifications.runAppointmentReminders();
     console.log("[Notify] Appointment reminders processed", { count });
-  },
+  }),
 );
 
 export const onFcmTokenWritten = onDocumentWritten(
@@ -1973,28 +1978,46 @@ export const onFcmTokenWritten = onDocumentWritten(
     document: "users/{uid}/fcmTokens/{tokenId}",
     region: REGION,
   },
-  async (event) => {
+  guardBackground(db, "onFcmTokenWritten", async (event) => {
     const after = event.data?.after;
     if (!after?.exists) return;
     const token = (after.data() as { token?: unknown }).token;
     if (typeof token !== "string" || !token.trim()) return;
     const removed = await claimFcmTokenForUser(db, String(event.params.uid), token.trim());
     if (removed > 0) console.log("[Push] Token moved to its latest account", { removed });
-  },
+  }),
 );
 
 export const pruneStaleFcmTokensScheduled = onSchedule(
   { ...SCHEDULE_OPTIONS, schedule: "30 4 * * 1" },
-  async () => {
+  guardBackground(db, "pruneStaleFcmTokensScheduled", async () => {
     const count = await pruneStaleFcmTokens(db, new Date());
     console.log("[Push] Stale FCM tokens pruned", { count });
-  },
+  }),
 );
 
 export const retryNotificationDeliveriesScheduled = onSchedule(
   { ...SCHEDULE_OPTIONS, schedule: "*/15 * * * *", secrets: [BREVO_API_KEY] },
-  async () => {
+  guardBackground(db, "retryNotificationDeliveriesScheduled", async () => {
     const count = await notifications.runDeliveryRetries();
     console.log("[Notify] Notification delivery retries processed", { count });
-  },
+  }),
+);
+
+
+// The job collection is IAM-only. Unlike business triggers this dispatcher must
+// run while frozen; it admits only operator-approved recovery for this epoch.
+export const onReleaseDeferredEventWritten = onDocumentWritten(
+  { document: "release_deferred_events/{jobId}", region: REGION, timeoutSeconds: 540,
+    secrets: [BREVO_API_KEY, GOOGLE_CALENDAR_ID], retry: true },
+  createReleaseRecoveryHandler(db, () => ({
+    onAppointmentCreated, onAppointmentApproved, onAppointmentDeleted,
+    onAppointmentCustomerNotification, onBonoCustomerNotification,
+    onBonoRefundDestinationChanged, onMinuteRefundAccountWritten,
+    onMinuteRefundActivation, onCustomerSuggestionCreated, onFcmTokenWritten,
+    onNotificationOutboxCreated, onUserProfileCreatedWelcomeEmail,
+    syncAppointmentWithGoogleCalendar, appointmentRemindersScheduled,
+    bonoExpiryWarningsScheduled, expireOverdueBonosScheduled,
+    pruneStaleFcmTokensScheduled, retryNotificationDeliveriesScheduled,
+  })),
 );

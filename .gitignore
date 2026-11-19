@@ -81,3 +81,10 @@ skills-lock.json
 # Personal/temp files
 promt.txt
 worklog.md
+
+# Reviewed local deployment artifacts and audit evidence (never Hosting content).
+/release/bootstrap/
+/release/verification-*.json
+/release/*audit*.json
+/release/test-logs/
+!/docs/despliegue-integrado-aforo-devoluciones.md

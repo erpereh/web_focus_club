@@ -84,11 +84,25 @@ describe('getAdminCreateSlotStatus', () => {
             appointments,
             occupancy: { '2030-01-15_18:15': 5, '2030-01-15_18:30': 5 },
         });
-        expect(status).toMatchObject({ disabled: false, restricted: true, tone: 'full', occupancy: 5, mismatch: { registered: 5, approved: 3 } });
+        expect(status).toMatchObject({ disabled: false, restricted: true, tone: 'full', occupancy: 5, mismatch: { registered: 5, expected: 3 } });
     });
 
     it('waits for the counters instead of showing free seats', () => {
         expect(getAdminCreateSlotStatus({ ...base, occupancy: null })).toMatchObject({ disabled: true, label: 'Cargando…' });
+    });
+
+    it('includes a pending appointment in drift checks and prefers its requested slot', () => {
+        const pending = {
+            ...approved('pending', 'u2', '12:00', 45),
+            status: 'pending' as const,
+            preferredSlots: [{ date: base.date, time: '18:15' }],
+            approvedSlot: { date: base.date, time: '12:00' },
+        };
+        expect(getAdminCreateSlotStatus({ ...base, appointments: [pending], occupancy: {} }))
+            .toMatchObject({ mismatch: { registered: 0, expected: 1 } });
+        expect(getAdminCreateSlotStatus({ ...base, appointments: [pending], occupancy: {
+            '2030-01-15_18:15': 1, '2030-01-15_18:30': 1,
+        } })).not.toHaveProperty('mismatch');
     });
 
     it('shows partial occupancy against the configured capacity', () => {

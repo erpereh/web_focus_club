@@ -69,6 +69,33 @@ test.beforeEach(async () => {
 const verified = (uid) => env.authenticatedContext(uid, { email: `${uid}@example.com`, email_verified: true }).firestore();
 const rangeQuery = (db) => query(collection(db, "appointments"), where("date", ">=", "2026-10-01"), where("date", "<=", "2026-10-31"));
 
+test("maintenance blocks direct writes for admins and clients while old app reads remain compatible", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    await setDoc(doc(context.firestore(), "system_controls/release"), {phase:"frozen",releaseId:"reviewed",epoch:1});
+  });
+  const admin = verified("admin"), owner = verified("user-1"), trainer = verified("coach");
+  await assertFails(updateDoc(doc(admin,"appointments/a1"),{trainerNotes:"during maintenance"}));
+  await assertFails(updateDoc(doc(trainer,"appointments/a1"),{trainerNotes:"during maintenance"}));
+  await assertFails(updateDoc(doc(owner,"users/user-1"),{name:"during maintenance"}));
+  await assertFails(setDoc(doc(admin,"blocked_slots/x"),{date:DAY,time:"10:00"}));
+  await assertFails(setDoc(doc(admin,"system_controls/release"),{phase:"open"}));
+  await assertFails(setDoc(doc(admin,"release_deferred_events/x"),{state:"ready"}));
+  await assertFails(setDoc(doc(admin,"slot_occupancy_migrations/x"),{complete:true}));
+  await assertSucceeds(getDoc(doc(owner,"appointments/a1")));
+  await assertSucceeds(getDoc(doc(admin,"appointments/a1")));
+});
+
+test("even admins cannot bypass release controls or mandatory app builds from an old tab", async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    await setDoc(doc(context.firestore(),"site_config/main"),{maxCapacity:2,maintenanceMode:false,minAndroidBuild:20,minIosBuild:20});
+  });
+  const admin=verified("admin");
+  for (const update of [{maintenanceMode:true},{automaticMinuteRefundsEnabled:true},{minAndroidBuild:22},{minIosBuild:22}]) {
+    await assertFails(updateDoc(doc(admin,"site_config/main"),update));
+  }
+  await assertSucceeds(getDoc(doc(env.unauthenticatedContext().firestore(),"site_config/main")));
+});
+
 test("statistics reads: only an admin can list appointments, bonos and users by range", async () => {
   const admin = verified("admin");
   const snapshot = await assertSucceeds(getDocs(rangeQuery(admin)));

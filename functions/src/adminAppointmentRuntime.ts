@@ -1,3 +1,4 @@
+import { runAppointmentTransaction } from "./appointmentTransaction.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import type { Firestore, Transaction } from "firebase-admin/firestore";
@@ -34,7 +35,7 @@ export async function measureAdminPhase<T>(phase: string, work: () => Promise<T>
 
 /** Observe the existing SDK transaction, including its commit and retries. */
 export function runAdminAppointmentTransaction<T>(db: Firestore, work: (transaction: Transaction) => Promise<T>): Promise<T> {
-  return measureAdminPhase("transaction", () => db.runTransaction(async (transaction) => {
+  return measureAdminPhase("transaction", () => runAppointmentTransaction(db, async (transaction) => {
     const observation = observations.getStore();
     if (!observation) return work(transaction);
     observation.attempts += 1;

@@ -1,3 +1,4 @@
+import { runAppointmentTransaction } from "./appointmentTransaction.js";
 import type { Firestore, Transaction } from "firebase-admin/firestore";
 import { type CallableRequest, HttpsError } from "firebase-functions/v2/https";
 import {
@@ -6,7 +7,7 @@ import {
   slotOccupancyDocId,
 } from "./appointmentLifecycle.js";
 import { readFinanceContext, refundAppointmentMinutesInTransaction } from "./appointmentFinance.js";
-import { planOccupancyWrites } from "./slotOccupancy.js";
+import { planOccupancyWrites, appointmentOccupancyKeys } from "./slotOccupancy.js";
 import {
   appointmentDurationOf,
   type AppointmentType,
@@ -198,7 +199,7 @@ export function createAppointmentProposalHandlers(deps: AppointmentProposalDeps)
       : null;
 
     const appointmentRef = db.collection("appointments").doc(appointmentId);
-    return db.runTransaction(async (transaction) => {
+    return runAppointmentTransaction(db, async (transaction) => {
       const snap = await transaction.get(appointmentRef);
       if (!snap.exists) fail("failed-precondition", "No se ha encontrado la cita indicada.", "appointment_not_found");
       const appointment = snap.data() as ProposalAppointment;
@@ -236,6 +237,7 @@ export function createAppointmentProposalHandlers(deps: AppointmentProposalDeps)
         now: getNowDate(),
         customerAppointments,
         excludeAppointmentIds: [appointmentId],
+        ownApprovedOccupancyKeys: new Set(appointmentOccupancyKeys(appointment)),
         trainer,
         trainerAppointments,
       });
@@ -300,7 +302,7 @@ export function createAppointmentProposalHandlers(deps: AppointmentProposalDeps)
     const response: CustomerConfirmationResponse = action === "accept" ? "accepted" : "declined";
     const appointmentRef = db.collection("appointments").doc(appointmentId);
 
-    return db.runTransaction(async (transaction) => {
+    return runAppointmentTransaction(db, async (transaction) => {
       const snap = await transaction.get(appointmentRef);
       if (!snap.exists) fail("failed-precondition", "No se ha encontrado la cita indicada.", "appointment_not_found");
       const appointment = snap.data() as ProposalAppointment;
@@ -389,6 +391,7 @@ export function createAppointmentProposalHandlers(deps: AppointmentProposalDeps)
         now: getNowDate(),
         customerAppointments,
         excludeAppointmentIds: [appointmentId],
+        ownApprovedOccupancyKeys: new Set(appointmentOccupancyKeys(appointment)),
         trainer,
         trainerAppointments,
       });

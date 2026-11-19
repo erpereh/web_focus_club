@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require("./helpers/pendingOccupancy.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -398,7 +399,7 @@ test("admin single reschedule updates a future pending record without consuming 
     "slot_occupancy/2026-09-08_12:00": slotOccupancy("2026-09-08", "12:00"),
     "bonos/bono-1": { userId: "user-1", estado: "activo", minutosRestantes: 120 },
   };
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const handlers = createAdminAppointmentRescheduleHandlers({
     db,
     requireAdmin: async () => ({}),
@@ -425,7 +426,7 @@ test("admin single reschedule updates a future pending record without consuming 
   assert.equal(updated.minutesDeductedAt, before.minutesDeductedAt);
   assert.equal(updated.googleCalendarEventId, before.googleCalendarEventId);
   assert.deepEqual(db.documents.get("bonos/bono-1"), documents["bonos/bono-1"]);
-  assert.equal(db.operations.some((operation) => operation.target.startsWith("slot_occupancy/") && operation.type === "write"), false);
+  assert.equal(db.operations.some((operation) => operation.target.startsWith("slot_occupancy/") && operation.type === "write"), true);
   const log = [...db.documents.entries()].find(([path]) => path.startsWith("activity_logs/"))[1];
   assert.equal(log.action, "appointment_rescheduled_by_admin");
   assert.equal(log.adminUid, "admin-1");
@@ -447,7 +448,7 @@ test("admin single reschedule requires authentication and admin authorization be
   const documents = {
     "appointments/pending-1": futurePendingAppointment(),
   };
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   let requireAdminCalls = 0;
   const handlers = createHandlers(db, {
     requireAdmin: async () => { requireAdminCalls += 1; },
@@ -467,7 +468,7 @@ test("admin single reschedule requires authentication and admin authorization be
   assert.equal(requireAdminCalls, 0);
   assertNoWrites(db, before);
 
-  const deniedDb = new FakeFirestore(documents);
+  const deniedDb = new FakeFirestore(withPendingOccupancy(documents));
   const deniedHandlers = createHandlers(deniedDb, {
     requireAdmin: async () => {
       const error = new Error("denied");
@@ -486,7 +487,7 @@ test("admin single reschedule requires authentication and admin authorization be
     }),
     (error) => error.code === "permission-denied" && error.details.reason === "admin_required",
   );
-  assertNoWrites(deniedDb, snapshotDocuments(new FakeFirestore(documents)));
+  assertNoWrites(deniedDb, snapshotDocuments(new FakeFirestore(withPendingOccupancy(documents))));
 });
 
 test("both admin rescheduling callables expose stable reasons for denied admin checks", async (t) => {
@@ -509,7 +510,7 @@ test("both admin rescheduling callables expose stable reasons for denied admin c
 
   for (const [handlerName, data] of Object.entries(requestDataByHandler)) {
     await t.test(`${handlerName} unauthenticated`, async () => {
-      const db = new FakeFirestore({});
+      const db = new FakeFirestore(withPendingOccupancy({}));
       let requireAdminCalls = 0;
       const handlers = createHandlers(db, {
         requireAdmin: async () => { requireAdminCalls += 1; },
@@ -525,7 +526,7 @@ test("both admin rescheduling callables expose stable reasons for denied admin c
     });
 
     await t.test(`${handlerName} denied admin`, async () => {
-      const db = new FakeFirestore({});
+      const db = new FakeFirestore(withPendingOccupancy({}));
       const handlers = createHandlers(db, {
         requireAdmin: async () => {
           const error = new Error("raw admin denial");
@@ -566,17 +567,19 @@ test("admin single approved correction aggregates old and historical occupancy w
   };
   addOccupancy(documents, "2026-09-07", "10:00", 1);
   addOccupancy(documents, "2026-08-20", "11:00", 5);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const handlers = createHandlers(db);
 
-  await handlers.rescheduleAppointmentFromAdmin({
+  const correction = {
     auth: { uid: "admin-1", token: {} },
     data: {
       appointmentId: "approved-1",
       slot: { date: "2026-08-20", time: "11:00" },
       assignedTrainer: "trainer-1",
     },
-  });
+  };
+  const prompt = await expectOverridePrompt(handlers.rescheduleAppointmentFromAdmin(correction));
+  await handlers.rescheduleAppointmentFromAdmin({ ...correction, data: { ...correction.data, acknowledgedRestrictions: prompt.fingerprint } });
 
   const updated = db.documents.get("appointments/approved-1");
   assert.equal(updated.status, "approved");
@@ -586,7 +589,7 @@ test("admin single approved correction aggregates old and historical occupancy w
     assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 0);
   });
   slotKeys("2026-08-20", "11:00").forEach((key) => {
-    assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 6);
+    assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 7);
   });
   assert.deepEqual(db.documents.get("bonos/bono-1"), documents["bonos/bono-1"]);
   const log = [...db.documents.entries()].find(([path]) => path.startsWith("activity_logs/"))[1];
@@ -612,7 +615,7 @@ test("admin single future validation treats a later Madrid-today target as futur
   };
   addOccupancy(documents, "2026-09-07", "10:00", 1);
   addOccupancy(documents, "2026-09-01", "11:00", 0);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const before = snapshotDocuments(db);
 
   await assert.rejects(
@@ -640,7 +643,7 @@ test("admin single trainer-only changes do not read or write occupancy or bono a
     "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 },
     "bonos/bono-1": { userId: "user-1", estado: "activo", minutosRestantes: 120 },
   };
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const handlers = createHandlers(db);
   await handlers.rescheduleAppointmentFromAdmin({
     auth: { uid: "admin-1", token: {} },
@@ -654,10 +657,10 @@ test("admin single trainer-only changes do not read or write occupancy or bono a
   assert.equal(db.operations.some((operation) => operation.target.startsWith("slot_occupancy/")), false);
   assert.equal(db.operations.some((operation) => operation.target.startsWith("bonos/")), false);
 
-  const unassignDb = new FakeFirestore({
+  const unassignDb = new FakeFirestore(withPendingOccupancy({
     ...documents,
     "appointments/approved-1": { ...appointment, assignedTrainer: "trainer-2" },
-  });
+  }));
   await createHandlers(unassignDb).rescheduleAppointmentFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: {
@@ -680,11 +683,11 @@ test("admin single rejects a changed or future inactive trainer but preserves an
     date: "2026-08-20",
     time: "10:00",
   });
-  const historicalDb = new FakeFirestore({
+  const historicalDb = new FakeFirestore(withPendingOccupancy({
     "appointments/historical": historical,
     "trainers/trainer-inactive": { uid: "trainer-inactive", active: false },
     "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 },
-  });
+  }));
   await createHandlers(historicalDb).rescheduleAppointmentFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: {
@@ -700,11 +703,11 @@ test("admin single rejects a changed or future inactive trainer but preserves an
     assignedTrainer: "trainer-inactive",
     approvedSlot: { date: "2026-09-07", time: "10:00" },
   });
-  const futureDb = new FakeFirestore({
+  const futureDb = new FakeFirestore(withPendingOccupancy({
     "appointments/future": future,
     "trainers/trainer-inactive": { uid: "trainer-inactive", active: false },
     "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 },
-  });
+  }));
   const before = snapshotDocuments(futureDb);
   await assert.rejects(
     createHandlers(futureDb).rescheduleAppointmentFromAdmin({
@@ -736,7 +739,7 @@ test("admin single cannot carry an unchanged inactive trainer from a historical 
   };
   addOccupancy(documents, "2026-08-20", "10:00", 1);
   addOccupancy(documents, "2026-09-07", "11:00", 0);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const before = snapshotDocuments(db);
   await assert.rejects(
     createHandlers(db).rescheduleAppointmentFromAdmin({
@@ -774,7 +777,7 @@ test("admin single pending move to a full slot needs confirmation, then keeps th
     "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 },
   };
   addOccupancy(documents, "2026-09-08", "11:00", 2);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const before = snapshotDocuments(db);
   const data = {
     appointmentId: "pending-1",
@@ -801,7 +804,7 @@ test("admin single pending move to a full slot needs confirmation, then keeps th
   assert.equal(updated.status, "pending");
   assert.deepEqual(updated.preferredSlots, [{ date: "2026-09-08", time: "11:00" }]);
   // A pending appointment takes no seat until it is approved.
-  assert.equal(writesTo(db, "slot_occupancy/").length, 0);
+  assert.equal(writesTo(db, "slot_occupancy/").length, 8);
   const log = activityLog(db, "appointment_rescheduled_with_admin_override");
   assert.equal(log.adminEmail, "admin@example.com");
   assert.equal(log.status, "pending");
@@ -824,7 +827,7 @@ test("admin single approved move to a full slot is over capacity only after an u
     slot: { date: "2026-09-08", time: "11:00" },
     assignedTrainer: "trainer-1",
   };
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const prompt = await expectOverridePrompt(createHandlers(db).rescheduleAppointmentFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data,
@@ -872,7 +875,7 @@ test("admin single leaving or shifting inside a slot already over capacity needs
         "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 },
       };
       addOccupancy(documents, "2026-09-07", "10:00", 5);
-      const db = new FakeFirestore(documents);
+      const db = new FakeFirestore(withPendingOccupancy(documents));
       const result = await createHandlers(db).rescheduleAppointmentFromAdmin({
         auth: { uid: "admin-1", token: {} },
         data: { appointmentId: "approved-1", slot: target, assignedTrainer: "trainer-1" },
@@ -914,7 +917,7 @@ test("admin single confirmation never overrides blocked slots or customer overla
       };
       addOccupancy(documents, "2026-09-08", "11:00", 2);
       mutate(documents);
-      const db = new FakeFirestore(documents);
+      const db = new FakeFirestore(withPendingOccupancy(documents));
       const before = snapshotDocuments(db);
       await assert.rejects(
         createHandlers(db).rescheduleAppointmentFromAdmin({
@@ -943,7 +946,7 @@ test("admin single requestId replays an applied change once and refuses reuse wi
     "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 },
   };
   addOccupancy(documents, "2026-09-07", "10:00", 1);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const data = {
     appointmentId: "approved-1",
     slot: { date: "2026-09-08", time: "11:00" },
@@ -992,7 +995,7 @@ test("admin single approved reschedule reads delta-zero occupancy and writes onl
   const oldKeys = new Set(slotKeys("2026-09-07", "10:00"));
   const newKeys = new Set(slotKeys("2026-09-07", "10:30"));
   const zeroDeltaKeys = [...oldKeys].filter((key) => newKeys.has(key));
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
 
   await createHandlers(db).rescheduleAppointmentFromAdmin({
     auth: { uid: "admin-1", token: {} },
@@ -1034,7 +1037,7 @@ test("admin single recurrent approved reschedule changes only its selected recor
   };
   addOccupancy(documents, "2026-09-07", "10:00", 1);
   addOccupancy(documents, "2026-09-21", "11:00", 0);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
 
   await createHandlers(db).rescheduleAppointmentFromAdmin({
     auth: { uid: "admin-1", token: {} },
@@ -1069,7 +1072,7 @@ test("admin single allows a recurring pending occurrence and preserves its finan
     "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2 },
   };
   addOccupancy(documents, "2026-09-08", "11:00", 0);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const before = clone(documents["appointments/recurring-pending"]);
   await createHandlers(db).rescheduleAppointmentFromAdmin({
     auth: { uid: "admin-1", token: {} },
@@ -1087,7 +1090,7 @@ test("admin single allows a recurring pending occurrence and preserves its finan
   for (const field of ["bonoId", "minutesDeducted", "minutesDeductedAmount", "minutesDeductedAt", "recurrenceSeriesId", "recurrenceIndex"]) {
     assert.equal(updated[field], before[field]);
   }
-  assert.equal(db.operations.some((operation) => operation.type === "write" && operation.target.startsWith("slot_occupancy/")), false);
+  assert.equal(db.operations.some((operation) => operation.type === "write" && operation.target.startsWith("slot_occupancy/")), true);
 });
 
 test("recurring pending trainer-only bypasses full and blocked availability without occupancy reads", async () => {
@@ -1103,7 +1106,7 @@ test("recurring pending trainer-only bypasses full and blocked availability with
     "blocked_slots/blocked": { date: "2026-09-07", time: "10:00" },
   };
   addOccupancy(documents, "2026-09-07", "10:00", 1);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const beforeSlot = clone(documents["appointments/recurring-pending"].preferredSlots);
   await createHandlers(db).rescheduleAppointmentFromAdmin({
     auth: { uid: "admin-1", token: {} },
@@ -1124,7 +1127,7 @@ test("recurring pending trainer-only bypasses full and blocked availability with
 });
 
 test("admin series rejects an extreme end date before reading availability or allocating unbounded dates", async () => {
-  const db = new FakeFirestore(pendingRecurringSeriesFixture());
+  const db = new FakeFirestore(withPendingOccupancy(pendingRecurringSeriesFixture()));
   await assert.rejects(createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: { appointmentId: "pending-1", startSlot: { date: "2026-09-08", time: "11:00" }, endDate: "9999-12-31", assignedTrainer: "trainer-2" },
@@ -1133,10 +1136,10 @@ test("admin series rejects an extreme end date before reading availability or al
 });
 
 test("series block reads include only generated dates and exclude unrelated intervening days", async () => {
-  const db = new FakeFirestore({
+  const db = new FakeFirestore(withPendingOccupancy({
     ...pendingRecurringSeriesFixture(),
     "blocked_slots/unrelated": { date: "2026-09-10", time: "11:00" },
-  });
+  }));
   await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: { appointmentId: "pending-1", startSlot: { date: "2026-09-08", time: "11:00" }, endDate: "2026-09-15", assignedTrainer: "trainer-2" },
@@ -1148,7 +1151,7 @@ test("series block reads include only generated dates and exclude unrelated inte
 });
 
 test("a valid short series near ISO year 9999 generates exactly its requested dates", async () => {
-  const db = new FakeFirestore(pendingRecurringSeriesFixture({ bono: { estado: "expirado", fechaExpiracion: "2026-01-01T00:00:00Z" } }));
+  const db = new FakeFirestore(withPendingOccupancy(pendingRecurringSeriesFixture({ bono: { estado: "expirado", fechaExpiracion: "2026-01-01T00:00:00Z" } })));
   const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: { appointmentId: "pending-1", startSlot: { date: "9999-12-20", time: "11:00" }, endDate: "9999-12-27", assignedTrainer: null },
@@ -1160,7 +1163,7 @@ test("a valid short series near ISO year 9999 generates exactly its requested da
 
 test("admin pending series replacement reuses records and applies only the financial delta without occupancy", async () => {
   const documents = pendingRecurringSeriesFixture();
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: {
@@ -1178,7 +1181,7 @@ test("admin pending series replacement reuses records and applies only the finan
   assert.equal(db.documents.get("appointments/pending-0").approvedSlot, undefined);
   assert.equal(db.documents.get("appointments/pending-2").minutesRefunded, true);
   assert.equal(db.documents.get("bonos/bono-1").minutosRestantes, 360);
-  assert.equal(db.operations.some((operation) => operation.type === "write" && operation.target.startsWith("slot_occupancy/")), false);
+  assert.equal(db.operations.some((operation) => operation.type === "write" && operation.target.startsWith("slot_occupancy/")), true);
   const series = db.documents.get("appointment_recurrences/series-1");
   assert.equal(series.status, "pending");
   assert.equal(series.occurrenceCount, 2);
@@ -1189,7 +1192,7 @@ test("admin pending series replacement reuses records and applies only the finan
 test("admin pending series same-count replacement changes neither bono nor occupancy", async () => {
   const documents = pendingRecurringSeriesFixture();
   const beforeBono = clone(documents["bonos/bono-1"]);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: {
@@ -1202,14 +1205,14 @@ test("admin pending series same-count replacement changes neither bono nor occup
   assert.equal(result.minutesDelta, 0);
   assert.deepEqual(result.reusedAppointmentIds, ["pending-0", "pending-1", "pending-2"]);
   assert.deepEqual(db.documents.get("bonos/bono-1"), beforeBono);
-  assert.equal(db.operations.some((operation) => operation.type === "write" && operation.target.startsWith("slot_occupancy/")), false);
+  assert.equal(db.operations.some((operation) => operation.type === "write" && operation.target.startsWith("slot_occupancy/")), true);
 });
 
 test("admin pending series validates capacity and an eliminated bono before writes", async (t) => {
   await t.test("full target needs confirmation and takes no seat", async () => {
     const documents = pendingRecurringSeriesFixture();
     addOccupancy(documents, "2026-09-08", "11:00", 2);
-    const db = new FakeFirestore(documents);
+    const db = new FakeFirestore(withPendingOccupancy(documents));
     const before = snapshotDocuments(db);
     const data = {
       appointmentId: "pending-0",
@@ -1231,14 +1234,14 @@ test("admin pending series validates capacity and an eliminated bono before writ
       data: { ...data, acknowledgedRestrictions: prompt.fingerprint },
     });
     assert.deepEqual(result.overriddenRestrictions, prompt.restrictions);
-    assert.equal(writesTo(db, "slot_occupancy/").length, 0);
+    assert.equal(writesTo(db, "slot_occupancy/").length, 24);
     assert.equal(db.documents.get("appointments/pending-0").status, "pending");
     assert.equal(activityLog(db, "recurring_series_schedule_replaced_with_admin_override").status, "pending");
   });
 
   await t.test("eliminated bono", async () => {
     const documents = pendingRecurringSeriesFixture({ bono: { estado: "eliminado" } });
-    const db = new FakeFirestore(documents);
+    const db = new FakeFirestore(withPendingOccupancy(documents));
     const before = snapshotDocuments(db);
     await assert.rejects(
       createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
@@ -1264,7 +1267,7 @@ test("returning an approved series to pending releases occupancy and preserves f
     },
     series: { occurrenceCount: 3, totalMinutes: 180, startDate: "2026-09-07" },
   });
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const result = await createHandlers(db).returnRecurringSeriesToPendingFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: { seriesId: "series-1" },
@@ -1283,7 +1286,7 @@ test("returning an approved series to pending releases occupancy and preserves f
   assert.equal(db.documents.get("appointment_recurrences/series-1").status, "pending");
   assert.equal(db.documents.get("appointment_recurrences/series-1").assignedTrainer, null);
   assert.equal(db.documents.get("bonos/bono-1").minutosRestantes, 500);
-  slotKeys("2026-09-07", "10:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 0));
+  slotKeys("2026-09-07", "10:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 1));
   assert.equal(activityLog(db, "recurring_series_returned_to_pending").oldStatus, "approved");
   const log = activityLog(db, "recurring_series_returned_to_pending");
   assert.equal("email" in log, false);
@@ -1294,7 +1297,7 @@ test("returning an approved series to pending releases occupancy and preserves f
 test("returning an approved series rejects historical occurrences and invalid occupancy atomically", async (t) => {
   await t.test("historical occurrence", async () => {
     const documents = recurringSeriesFixture();
-    const db = new FakeFirestore(documents);
+    const db = new FakeFirestore(withPendingOccupancy(documents));
     const before = snapshotDocuments(db);
     await assert.rejects(
       createHandlers(db).returnRecurringSeriesToPendingFromAdmin({
@@ -1313,7 +1316,7 @@ test("returning an approved series rejects historical occurrences and invalid oc
       series: { occurrenceCount: 3, totalMinutes: 180, startDate: "2026-09-07" },
     });
     documents[`slot_occupancy/${slotKeys("2026-09-07", "10:00")[0]}`].count = -1;
-    const db = new FakeFirestore(documents);
+    const db = new FakeFirestore(withPendingOccupancy(documents));
     const before = snapshotDocuments(db);
     await assert.rejects(
       createHandlers(db).returnRecurringSeriesToPendingFromAdmin({
@@ -1331,7 +1334,7 @@ test("admin series replacement uses a cancelled selected occurrence only to iden
   const beforeFutureOne = clone(documents["appointments/future-1"]);
   const beforePast = clone(documents["appointments/past-0"]);
   const beforeCancelled = clone(documents["appointments/cancelled-4"]);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
 
   const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
     auth: { uid: "admin-1", token: {} },
@@ -1406,7 +1409,7 @@ test("admin series replacement derives owner and dates from its series, not a st
       };
       if (staleUserId === undefined) delete documents[selectedPath].userId;
       const selectedBefore = clone(documents[selectedPath]);
-      const db = new FakeFirestore(documents);
+      const db = new FakeFirestore(withPendingOccupancy(documents));
 
       const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
         auth: { uid: "admin-1", token: {} },
@@ -1437,7 +1440,7 @@ test("admin series replacement treats only safely dated invalid approved occurre
       },
     },
   });
-  const historicalDb = new FakeFirestore(historicalDocuments);
+  const historicalDb = new FakeFirestore(withPendingOccupancy(historicalDocuments));
   await createHandlers(historicalDb).replaceRecurringSeriesScheduleFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: {
@@ -1456,7 +1459,7 @@ test("admin series replacement treats only safely dated invalid approved occurre
       },
     },
   });
-  const unsafeDb = new FakeFirestore(unsafeDocuments);
+  const unsafeDb = new FakeFirestore(withPendingOccupancy(unsafeDocuments));
   const before = snapshotDocuments(unsafeDb);
   await assert.rejects(
     createHandlers(unsafeDb).replaceRecurringSeriesScheduleFromAdmin({
@@ -1474,7 +1477,7 @@ test("admin series replacement treats only safely dated invalid approved occurre
 });
 
 test("admin series replacement updates its historical start metadata only when no historical occurrence remains", async () => {
-  const db = new FakeFirestore(recurringSeriesFixture({
+  const db = new FakeFirestore(withPendingOccupancy(recurringSeriesFixture({
     records: {
       "past-0": {
         status: "cancelled",
@@ -1484,7 +1487,7 @@ test("admin series replacement updates its historical start metadata only when n
         time: "10:00",
       },
     },
-  }));
+  })));
   await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: {
@@ -1500,7 +1503,7 @@ test("admin series replacement updates its historical start metadata only when n
 });
 
 test("admin series replacement omits trainer patches when the selected trainer is unchanged", async () => {
-  const db = new FakeFirestore(recurringSeriesFixture());
+  const db = new FakeFirestore(withPendingOccupancy(recurringSeriesFixture()));
   await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: {
@@ -1519,7 +1522,7 @@ test("admin series replacement omits trainer patches when the selected trainer i
 test("admin series reduction cancels only surplus future approved records, unassigns reused records, and refunds once", async () => {
   const documents = recurringSeriesFixture();
   const beforePast = clone(documents["appointments/past-0"]);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
 
   const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
     auth: { uid: "admin-1", token: {} },
@@ -1573,7 +1576,7 @@ test("admin series reduction cancels only surplus future approved records, unass
 
 test("admin series finance updates retain every existing bono history entry", async () => {
   const legacyHistory = ["legacy-entry", { accion: "older_entry", payload: { preserved: true } }];
-  const db = new FakeFirestore(recurringSeriesFixture({ bono: { historial: legacyHistory } }));
+  const db = new FakeFirestore(withPendingOccupancy(recurringSeriesFixture({ bono: { historial: legacyHistory } })));
   await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: {
@@ -1594,7 +1597,7 @@ test("admin series replacement rejects malformed reserved-bono data even when it
     ["negative remaining minutes", { minutosRestantes: -1 }],
   ]) {
     await t.test(label, async () => {
-      const db = new FakeFirestore(recurringSeriesFixture({ bono }));
+      const db = new FakeFirestore(withPendingOccupancy(recurringSeriesFixture({ bono })));
       const before = snapshotDocuments(db);
       await assert.rejects(
         createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
@@ -1622,7 +1625,7 @@ test("admin series replacement rejects an eliminated bono before every financial
 
   for (const [label, startDate, endDate] of cases) {
     await t.test(label, async () => {
-      const db = new FakeFirestore(recurringSeriesFixture({ bono: { estado: "eliminado" } }));
+      const db = new FakeFirestore(withPendingOccupancy(recurringSeriesFixture({ bono: { estado: "eliminado" } })));
       const before = snapshotDocuments(db);
 
       await assert.rejects(
@@ -1644,9 +1647,9 @@ test("admin series replacement rejects an eliminated bono before every financial
 
 test("admin series replacement enforces civil bono expiration only while the bono is still current", async (t) => {
   await t.test("active bono rejects a final occurrence after its civil expiration", async () => {
-    const db = new FakeFirestore(recurringSeriesFixture({
+    const db = new FakeFirestore(withPendingOccupancy(recurringSeriesFixture({
       bono: { fechaExpiracion: "2026-09-30T23:59:59.000Z", estado: "activo" },
-    }));
+    })));
     const before = snapshotDocuments(db);
     await assert.rejects(
       createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
@@ -1664,9 +1667,9 @@ test("admin series replacement enforces civil bono expiration only while the bon
   });
 
   await t.test("active bono accepts a final occurrence within its civil expiration", async () => {
-    const db = new FakeFirestore(recurringSeriesFixture({
+    const db = new FakeFirestore(withPendingOccupancy(recurringSeriesFixture({
       bono: { fechaExpiracion: "2026-09-30T23:59:59.000Z", estado: "activo" },
-    }));
+    })));
     const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
       auth: { uid: "admin-1", token: {} },
       data: {
@@ -1681,9 +1684,9 @@ test("admin series replacement enforces civil bono expiration only while the bon
   });
 
   await t.test("already expired bono can still reduce existing reservations", async () => {
-    const db = new FakeFirestore(recurringSeriesFixture({
+    const db = new FakeFirestore(withPendingOccupancy(recurringSeriesFixture({
       bono: { fechaExpiracion: "2026-08-31T23:59:59.000Z", estado: "expirado" },
-    }));
+    })));
     const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
       auth: { uid: "admin-1", token: {} },
       data: {
@@ -1698,9 +1701,9 @@ test("admin series replacement enforces civil bono expiration only while the bon
   });
 
   await t.test("already expired bono still rejects expansion", async () => {
-    const db = new FakeFirestore(recurringSeriesFixture({
+    const db = new FakeFirestore(withPendingOccupancy(recurringSeriesFixture({
       bono: { fechaExpiracion: "2026-08-31T23:59:59.000Z", estado: "expirado" },
-    }));
+    })));
     const before = snapshotDocuments(db);
     await assert.rejects(
       createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
@@ -1728,7 +1731,7 @@ test("admin series replacement rejects missing and over-total usable bono balanc
     await t.test(label, async () => {
       const documents = recurringSeriesFixture();
       mutate(documents);
-      const db = new FakeFirestore(documents);
+      const db = new FakeFirestore(withPendingOccupancy(documents));
       const before = snapshotDocuments(db);
 
       await assert.rejects(
@@ -1749,7 +1752,7 @@ test("admin series replacement rejects missing and over-total usable bono balanc
 });
 
 test("admin series reduction preserves excess refund minutes as a durable debt", async () => {
-  const db = new FakeFirestore(recurringSeriesFixture({ bono: { minutosRestantes: 980 } }));
+  const db = new FakeFirestore(withPendingOccupancy(recurringSeriesFixture({ bono: { minutosRestantes: 980 } })));
   await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: { appointmentId: "future-1", startSlot: { date: "2026-09-08", time: "11:00" }, endDate: "2026-09-15", assignedTrainer: null },
@@ -1763,7 +1766,7 @@ test("admin series reduction preserves excess refund minutes as a durable debt",
 test("admin series expansion creates a new high unique index with copied identity and correct reservation metadata", async () => {
   const documents = recurringSeriesFixture();
   const template = clone(documents["appointments/future-1"]);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
 
   const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
     auth: { uid: "admin-1", token: {} },
@@ -1834,7 +1837,7 @@ test("admin series replacement rejects blocked, full, conflicting, invalid caden
     await t.test(label, async () => {
       const documents = recurringSeriesFixture();
       mutate(documents);
-      const db = new FakeFirestore(documents);
+      const db = new FakeFirestore(withPendingOccupancy(documents));
       const before = snapshotDocuments(db);
       await assert.rejects(
         createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
@@ -1864,7 +1867,7 @@ test("admin series replacement rejects expired, insufficient, inconsistent, and 
 
   for (const [label, overrides, reason] of failureCases) {
     await t.test(label, async () => {
-      const db = new FakeFirestore(recurringSeriesFixture(overrides));
+      const db = new FakeFirestore(withPendingOccupancy(recurringSeriesFixture(overrides)));
       const before = snapshotDocuments(db);
       await assert.rejects(
         createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
@@ -1886,7 +1889,7 @@ test("admin series replacement rejects expired, insufficient, inconsistent, and 
 test("admin approved series replacement into a full slot is applied over capacity only after confirmation", async () => {
   const documents = recurringSeriesFixture();
   addOccupancy(documents, "2026-09-08", "11:00", 2);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const before = snapshotDocuments(db);
   const data = {
     appointmentId: "future-1",
@@ -1922,7 +1925,7 @@ test("admin approved series replacement into a full slot is applied over capacit
 test("admin approved series replacement leaving a slot already over capacity needs no confirmation", async () => {
   const documents = recurringSeriesFixture();
   addOccupancy(documents, "2026-09-07", "10:00", 5);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const result = await createHandlers(db).replaceRecurringSeriesScheduleFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: {
@@ -1938,7 +1941,7 @@ test("admin approved series replacement leaving a slot already over capacity nee
 
 test("admin series replacement requestId replays without a second outbox, log or bono change", async () => {
   const documents = recurringSeriesFixture();
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   const data = {
     appointmentId: "future-1",
     startSlot: { date: "2026-09-08", time: "11:00" },
@@ -1964,11 +1967,11 @@ test("returning an approved series to pending releases seats from slots already 
     series: { occurrenceCount: 3, totalMinutes: 180, startDate: "2026-09-07" },
   });
   addOccupancy(documents, "2026-09-07", "10:00", 5);
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
   await createHandlers(db).returnRecurringSeriesToPendingFromAdmin({
     auth: { uid: "admin-1", token: {} },
     data: { seriesId: "series-1" },
   });
-  slotKeys("2026-09-07", "10:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 4));
+  slotKeys("2026-09-07", "10:00").forEach((key) => assert.equal(db.documents.get(`slot_occupancy/${key}`).count, 5));
   assert.equal(db.documents.get("appointment_recurrences/series-1").status, "pending");
 });

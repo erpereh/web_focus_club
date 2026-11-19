@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require('../helpers/pendingOccupancy.cjs');
 // Runs against the Firestore EMULATOR only, with the real Admin SDK and the
 // real handlers (no fakes): `createAppointment` exactly as deployed
 // (customerBooking.ts) and the admin booking callables.
@@ -42,7 +43,7 @@ async function resetDatabase() {
 
 async function seed(documents) {
   const batch = db.batch();
-  for (const [path, data] of Object.entries(documents)) batch.set(db.doc(path), data);
+  for (const [path, data] of Object.entries(withPendingOccupancy(documents))) batch.set(db.doc(path), data);
   await batch.commit();
 }
 
@@ -466,7 +467,7 @@ test("a pending customer request cancelled with charge keeps its reserved minute
   const result = await cancelAs(id, "charged", "pending");
   assert.equal(result.chargedMinutes, 30);
   assert.equal((await docData("bonos/bono-1")).minutosRestantes, 450);
-  assert.equal(await docData(`slot_occupancy/${DAY}_20:00`), undefined, "a pending request never held a seat");
+  assert.equal((await docData(`slot_occupancy/${DAY}_20:00`)).count,0,"the pending seat was released");
 });
 
 // ------------------------------------------------------------ admin overrides when modifying and approving
@@ -526,20 +527,18 @@ test("modify override, full flow: pending moved into a full slot, then approved 
   assert.equal(prompt.reason, "admin_override_required");
   await reschedule.rescheduleAppointmentFromAdmin(callable("admin", { ...move, acknowledgedRestrictions: prompt.fingerprint }));
   assert.equal((await docData(`appointments/${id}`)).status, "pending");
-  assert.deepEqual(await hourCounts(DAY, "10"), [4, 4, 4, 4], "a pending appointment takes no seat");
+  assert.deepEqual(await hourCounts(DAY, "10"), [5, 5, 5, 5], "the confirmed move immediately reserves its pending seat");
 
   // Approval asks again (approving is what takes the seat) and honours the admin's confirmation.
   const approve = { appointmentId: id, status: "approved", expectedStatus: "pending" };
-  const refused = await settle(admin.updateAppointmentStatusFromAdmin(callable("admin", approve)));
-  assert.equal(refused.reason, "slot_full");
   const approved = await admin.updateAppointmentStatusFromAdmin(callable("admin", { ...approve, allowOverCapacity: true }));
-  assert.equal(approved.overCapacity, true);
+  assert.equal(approved.overCapacity, false);
   assert.deepEqual(await hourCounts(DAY, "10"), [5, 5, 5, 5]);
   assert.equal((await docData(`appointments/${id}`)).status, "approved");
   assert.equal((await docData("bonos/bono-1")).minutosRestantes, 420, "minutes are reserved once");
   const actions = await logActions();
   assert.ok(actions.includes("appointment_rescheduled_with_admin_override"));
-  assert.ok(actions.includes("appointment_approved_over_capacity"));
+  assert.ok(!actions.includes("appointment_approved_over_capacity"));
 });
 
 test("modify override, full flow: pending series moved into a full slot, then approved over capacity", async () => {
@@ -572,21 +571,16 @@ test("modify override, full flow: pending series moved into a full slot, then ap
   const move = { appointmentId: "occ-0", startSlot: { date: DAY, time: "10:00" }, endDate: week, assignedTrainer: null };
   const movePrompt = await promptOf(reschedule.replaceRecurringSeriesScheduleFromAdmin(callable("admin", move)));
   await reschedule.replaceRecurringSeriesScheduleFromAdmin(callable("admin", { ...move, acknowledgedRestrictions: movePrompt.fingerprint }));
-  assert.deepEqual(await hourCounts(DAY, "10"), [4, 4, 4, 4]);
+  assert.deepEqual(await hourCounts(DAY, "10"), [5, 5, 5, 5]);
 
-  const approvePrompt = await promptOf(series.approveRecurringAppointmentSeriesFromAdmin(callable("admin", { seriesId: "series-1" })));
-  assert.equal(approvePrompt.reason, "admin_override_required");
-  assert.deepEqual(approvePrompt.restrictions.map((item) => item.date), [DAY]);
-  await series.approveRecurringAppointmentSeriesFromAdmin(callable("admin", {
-    seriesId: "series-1", acknowledgedRestrictions: approvePrompt.fingerprint,
-  }));
+  await series.approveRecurringAppointmentSeriesFromAdmin(callable("admin",{seriesId:"series-1"}));
   assert.equal((await docData("appointment_recurrences/series-1")).status, "approved");
   assert.deepEqual(await hourCounts(DAY, "10"), [5, 5, 5, 5]);
   assert.deepEqual(await hourCounts(week, "10"), [1, 1, 1, 1]);
   assert.equal((await docData("bonos/bono-1")).minutosRestantes, 360);
   const actions = await logActions();
   assert.ok(actions.includes("recurring_series_schedule_replaced_with_admin_override"));
-  assert.ok(actions.includes("recurring_series_approved_with_admin_override"));
+  assert.ok(!actions.includes("recurring_series_approved_with_admin_override"));
 });
 
 test("modify override, concurrency: two admins race for the last seat and only one gets it unconfirmed", async () => {
@@ -756,8 +750,8 @@ test("per-date capacity, concurrency: two approvals for the last seat of a capac
     "appointments/p2": pendingAt("user-2", DAY, "10:00"),
   }));
   const results = await Promise.all(["p1", "p2"].map((id) => settle(admin.updateAppointmentStatusFromAdmin(approveRequest(id)))));
-  assert.deepEqual(results.map((result) => (result.ok ? "ok" : result.reason)).sort(), ["ok", "slot_full"]);
-  assert.deepEqual(await hourCounts(DAY, "10"), [2, 2, 2, 2]);
+  assert.deepEqual(results.map((result) => (result.ok ? "ok" : result.reason)).sort(), ["ok", "ok"]);
+  assert.deepEqual(await hourCounts(DAY, "10"), [3, 3, 3, 3]);
 });
 
 test("per-date capacity, concurrency: approval racing a reschedule into the last seat", async () => {
@@ -780,7 +774,7 @@ test("per-date capacity, concurrency: approval racing a reschedule into the last
 
 test("per-date capacity, concurrency: accepting a proposal racing an approval for the last seat", async () => {
   await seed(capacityDocuments({
-    ...hourOccupancy(DAY, "11", 1),
+    ...hourOccupancy(DAY, "11", 0),
     "appointments/p1": pendingAt("user-1", addDays(DAY, 1), "10:00"),
     "appointments/p2": pendingAt("user-2", DAY, "11:00"),
   }));
@@ -789,8 +783,7 @@ test("per-date capacity, concurrency: accepting a proposal racing an approval fo
     settle(proposals.respondToAppointmentConfirmation(callable("user-1", { appointmentId: "p1", action: "accept" }))),
     settle(admin.updateAppointmentStatusFromAdmin(approveRequest("p2"))),
   ]);
-  assert.equal([accept, approval].filter((result) => result.ok).length, 1, JSON.stringify([accept, approval]));
-  assert.equal((accept.ok ? approval : accept).reason, "slot_full");
+  assert.equal([accept, approval].filter((result) => result.ok).length, 2, JSON.stringify([accept, approval]));
   assert.deepEqual(await hourCounts(DAY, "11"), [2, 2, 2, 2]);
 });
 
@@ -821,9 +814,8 @@ test("per-date capacity, concurrency: a series approval racing a single approval
     settle(series.approveRecurringAppointmentSeriesFromAdmin(callable("admin", { seriesId: "series-1" }))),
     settle(admin.updateAppointmentStatusFromAdmin(approveRequest("single"))),
   ]);
-  assert.equal([seriesResult, single].filter((result) => result.ok).length, 1, JSON.stringify([seriesResult, single]));
-  assert.ok(["slot_full", "admin_override_required"].includes((seriesResult.ok ? single : seriesResult).reason));
-  assert.deepEqual(await hourCounts(DAY, "18"), [2, 2, 2, 2]);
+  assert.equal([seriesResult, single].filter((result) => result.ok).length, 2, JSON.stringify([seriesResult, single]));
+  assert.deepEqual(await hourCounts(DAY, "18"), [3, 3, 3, 3]);
 });
 
 test("per-date capacity, concurrency: reducing the day while an approval runs never passes unconfirmed", async () => {
@@ -937,5 +929,5 @@ test("five simultaneous recurring replacements replay one request without duplic
   assert.deepEqual((await docData("bonos/bono-1")).historial, []);
   assert.equal((await docData("appointment_recurrences/race-series")).occurrenceCount, 2);
   assert.equal((await db.collection("notification_outbox").get()).size, 1);
-  assert.equal((await db.collection("slot_occupancy").get()).size, 0);
+  assert.equal((await db.collection("slot_occupancy").get()).size, 16);
 });

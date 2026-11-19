@@ -162,8 +162,8 @@ test('dryRun completes every read without writes and apply writes only after rea
   assert.deepEqual(events, ['admin', 'appointments', 'occupancy']);
 
   events.length = 0;
-  await handlers.reconcileSlotOccupancyFromApprovedAppointments({ auth: { uid: 'admin' }, data: { mode: 'apply', confirmApply: true } });
-  assert.deepEqual(events, ['admin', 'appointments', 'occupancy', 'write']);
+  await assert.rejects(handlers.reconcileSlotOccupancyFromApprovedAppointments({ auth: { uid: 'admin' }, data: { mode: 'apply', confirmApply: true } }), error=>error.details.reason==='reviewed_audit_required');
+  assert.deepEqual(events, ['admin', 'appointments', 'occupancy']);
 });
 
 test('legacy blocked slots expand to deterministic 15 minute documents and become idempotent', () => {

@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require("./helpers/pendingOccupancy.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -238,7 +239,7 @@ function requestFor(overrides = {}, uid = "user-1") {
 }
 
 test("customer replaces a mixed future series with deterministic reuse/create results", async () => {
-  const db = new FakeFirestore(baseDocuments());
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
   const handlers = handlersFor(db);
   assert.equal(typeof handlers.replaceOwnRecurringSeriesSchedule, "function");
 
@@ -312,7 +313,7 @@ test("customer replaces a mixed future series with deterministic reuse/create re
 });
 
 test("customer series replacement keeps bono untouched for a zero delta", async () => {
-  const db = new FakeFirestore(baseDocuments());
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
   const beforeBono = clone(db.documents.get("bonos/bono-1"));
   const response = await handlersFor(db).replaceOwnRecurringSeriesSchedule(requestFor({
     endDate: "2026-09-14",
@@ -335,7 +336,7 @@ test("customer series reduction refunds once and returns deterministic ordered a
     const key = slotOccupancyDocId("2026-09-24", time);
     documents[`slot_occupancy/${key}`] = { date: "2026-09-24", time, count: 1 };
   });
-  const db = new FakeFirestore(documents);
+  const db = new FakeFirestore(withPendingOccupancy(documents));
 
   const response = await handlersFor(db).replaceOwnRecurringSeriesSchedule(requestFor({ endDate: "2026-09-14" }));
 
@@ -366,7 +367,7 @@ test("expired bonos allow reduction but reject expansion", async (t) => {
       const key = slotOccupancyDocId("2026-09-24", time);
       documents[`slot_occupancy/${key}`] = { date: "2026-09-24", time, count: 1 };
     });
-    const response = await handlersFor(new FakeFirestore(documents))
+    const response = await handlersFor(new FakeFirestore(withPendingOccupancy(documents)))
       .replaceOwnRecurringSeriesSchedule(requestFor({ endDate: "2026-09-14" }));
     assert.deepEqual(response.cancelledAppointmentIds, ["future-third"]);
   });
@@ -375,7 +376,7 @@ test("expired bonos allow reduction but reject expansion", async (t) => {
     const documents = baseDocuments();
     documents["bonos/bono-1"].estado = "expirado";
     documents["bonos/bono-1"].fechaExpiracion = "2026-08-31";
-    const db = new FakeFirestore(documents);
+    const db = new FakeFirestore(withPendingOccupancy(documents));
     const before = snapshot(db);
     await assert.rejects(
       handlersFor(db).replaceOwnRecurringSeriesSchedule(requestFor()),
@@ -399,7 +400,7 @@ test("invalid future reservation structure and invalid cadence abort without wri
     await t.test(label, async () => {
       const documents = baseDocuments();
       mutate(documents);
-      const db = new FakeFirestore(documents);
+      const db = new FakeFirestore(withPendingOccupancy(documents));
       const before = snapshot(db);
       await assert.rejects(
         handlersFor(db).replaceOwnRecurringSeriesSchedule(requestFor(overrides)),
@@ -412,7 +413,7 @@ test("invalid future reservation structure and invalid cadence abort without wri
 
 test("customer replacement rejects ownership and unavailable bonos atomically", async (t) => {
   await t.test("unauthenticated", async () => {
-    const db = new FakeFirestore(baseDocuments());
+    const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
     const before = snapshot(db);
     await assert.rejects(
       handlersFor(db).replaceOwnRecurringSeriesSchedule({ auth: undefined, data: requestFor().data }),
@@ -422,7 +423,7 @@ test("customer replacement rejects ownership and unavailable bonos atomically", 
   });
 
   await t.test("foreign owner", async () => {
-    const db = new FakeFirestore(baseDocuments());
+    const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
     const before = snapshot(db);
     await assert.rejects(
       handlersFor(db).replaceOwnRecurringSeriesSchedule(requestFor({}, "user-2")),
@@ -434,7 +435,7 @@ test("customer replacement rejects ownership and unavailable bonos atomically", 
   await t.test("deleted bono", async () => {
     const documents = baseDocuments();
     documents["bonos/bono-1"].estado = "eliminado";
-    const db = new FakeFirestore(documents);
+    const db = new FakeFirestore(withPendingOccupancy(documents));
     const before = snapshot(db);
     await assert.rejects(
       handlersFor(db).replaceOwnRecurringSeriesSchedule(requestFor({ endDate: "2026-09-14" })),
@@ -470,7 +471,7 @@ test("customer replacement enforces blocked, capacity and own-conflict checks at
     await t.test(label, async () => {
       const documents = baseDocuments();
       mutate(documents);
-      const db = new FakeFirestore(documents);
+      const db = new FakeFirestore(withPendingOccupancy(documents));
       const before = snapshot(db);
       await assert.rejects(
         handlersFor(db).replaceOwnRecurringSeriesSchedule(requestFor({ endDate: "2026-09-14" })),
@@ -491,7 +492,7 @@ test("customer replacement uses an inclusive real 24-hour lock window", async (t
       date: exact.date,
       time: exact.time,
     });
-    const db = new FakeFirestore(documents);
+    const db = new FakeFirestore(withPendingOccupancy(documents));
     const before = snapshot(db);
     await assert.rejects(
       handlersFor(db).replaceOwnRecurringSeriesSchedule(requestFor({ endDate: "2026-09-14" })),
@@ -501,7 +502,7 @@ test("customer replacement uses an inclusive real 24-hour lock window", async (t
   });
 
   await t.test("destination 23 hours 59 minutes away", async () => {
-    const db = new FakeFirestore(baseDocuments());
+    const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
     const before = snapshot(db);
     await assert.rejects(
       handlersFor(db).replaceOwnRecurringSeriesSchedule(requestFor({
@@ -515,7 +516,7 @@ test("customer replacement uses an inclusive real 24-hour lock window", async (t
   });
 
   await t.test("destination exactly 24 hours away", async () => {
-    const db = new FakeFirestore(baseDocuments());
+    const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
     const before = snapshot(db);
     await assert.rejects(
       handlersFor(db).replaceOwnRecurringSeriesSchedule(requestFor({
@@ -529,7 +530,7 @@ test("customer replacement uses an inclusive real 24-hour lock window", async (t
   });
 
   await t.test("destination 25 hours away is accepted", async () => {
-    const db = new FakeFirestore(baseDocuments());
+    const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
     const response = await handlersFor(db).replaceOwnRecurringSeriesSchedule(requestFor({
       startSlot: { date: "2026-09-02", time: "11:00" },
       intervalDays: 1,
@@ -584,7 +585,7 @@ test("invalid civil slots use the safe-date fallback and reject non-historical D
       date: "2026-08-25",
       time: "invalid",
     });
-    const response = await handlersFor(new FakeFirestore(documents))
+    const response = await handlersFor(new FakeFirestore(withPendingOccupancy(documents)))
       .replaceOwnRecurringSeriesSchedule(requestFor({ endDate: "2026-09-14" }));
     assert.equal(response.success, true);
     assert.equal(response.occurrenceCount, 3);
@@ -599,7 +600,7 @@ test("invalid civil slots use the safe-date fallback and reject non-historical D
       date: gap.date,
       time: gap.time,
     });
-    const db = new FakeFirestore(documents);
+    const db = new FakeFirestore(withPendingOccupancy(documents));
     const before = snapshot(db);
     await assert.rejects(
       handlersFor(db, new Date("2026-03-28T09:00:00.000Z"))

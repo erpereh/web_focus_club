@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require("./helpers/pendingOccupancy.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -131,7 +132,7 @@ test("customer modifications: current keeps the 24h lock, target respects max(24
 });
 
 test("admin proposals are not limited by the booking notice", async () => {
-  const db = new FakeFirestore({
+  const db = new FakeFirestore(withPendingOccupancy({
     "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2, minBookingNoticeHours: 24 },
     "users/admin": { role: "admin", email: "admin@example.com", name: "Admin" },
     "users/user-1": { uid: "user-1", name: "Lucía", email: "lucia@example.com" },
@@ -147,7 +148,7 @@ test("admin proposals are not limited by the booking notice", async () => {
       status: "pending",
       createdAt: "2026-10-01T10:00:00.000Z",
     },
-  });
+  }));
   const handlers = createAppointmentProposalHandlers({
     db,
     getNowDate: () => NOW,

@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require("./helpers/pendingOccupancy.cjs");
 // Server half of the web/server parity check. The web half
 // (src/lib/admin-slot-status.test.ts) evaluates the same fixture with the
 // admin "Nueva cita" grid; both must reach the same verdict.
@@ -20,7 +21,7 @@ for (const testCase of fixture.cases) {
     for (const time of testCase.blocked) {
       documents[`blocked_slots/${fixture.date}_${time}`] = { date: fixture.date, time };
     }
-    const db = new FakeFirestore(documents);
+    const db = new FakeFirestore(withPendingOccupancy(documents));
     const config = normalizeSiteConfig(fixture.config);
     const day = await loadSlotDay(reader, db, config, fixture.date);
     const customerAppointments = testCase.customerBooked

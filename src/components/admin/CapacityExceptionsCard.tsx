@@ -49,7 +49,7 @@ function plural(count: number, one: string, many: string): string {
  * "Aforo por fecha": the admin selects several days on a month grid and gives
  * them their own capacity, or removes it so they follow the global value.
  * Every change goes through Cloud Functions, which asks for confirmation when
- * approved appointments exceed the new capacity and never touches them.
+ * pending or approved appointments exceed the new capacity and never touches them.
  */
 export function CapacityExceptionsCard({ globalCapacity, enabled, todayKey: todayOverride, className }: CapacityExceptionsCardProps) {
     const todayKey = todayOverride ?? getMadridDateKey(new Date());
@@ -143,7 +143,7 @@ export function CapacityExceptionsCard({ globalCapacity, enabled, todayKey: toda
             </div>
             <p className="mb-5 text-sm text-[var(--color-text-secondary)]">
                 Selecciona uno o varios días y asígnales un aforo distinto del general ({globalCapacity} persona(s)).
-                Las citas ya aprobadas nunca se cancelan ni se modifican.
+                Las citas pendientes y aprobadas existentes se conservan.
             </p>
 
             {!enabled && (

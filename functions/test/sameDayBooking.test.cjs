@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require("./helpers/pendingOccupancy.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -156,7 +157,7 @@ const seriesRequest = (date, endDate) => callable("user-1", {
 });
 
 test("createRecurringAppointments rejects today's series with reason and date, writing nothing", async () => {
-  const db = new FakeFirestore(seriesDocuments({ blockSameDayBooking: true }));
+  const db = new FakeFirestore(withPendingOccupancy(seriesDocuments({ blockSameDayBooking: true })));
   const error = await rejectsWithReason(
     seriesHandlers(db).createRecurringAppointments(seriesRequest("2026-10-05", "2026-10-19")),
     SAME_DAY_BOOKING_DISABLED,
@@ -168,17 +169,17 @@ test("createRecurringAppointments rejects today's series with reason and date, w
 });
 
 test("createRecurringAppointments still works from tomorrow, and today when the flag is off", async () => {
-  const onDb = new FakeFirestore(seriesDocuments({ blockSameDayBooking: true }));
+  const onDb = new FakeFirestore(withPendingOccupancy(seriesDocuments({ blockSameDayBooking: true })));
   const fromTomorrow = await seriesHandlers(onDb).createRecurringAppointments(seriesRequest("2026-10-06", "2026-10-20"));
   assert.equal(fromTomorrow.success, true);
 
-  const legacyDb = new FakeFirestore(seriesDocuments({}));
+  const legacyDb = new FakeFirestore(withPendingOccupancy(seriesDocuments({})));
   const today = await seriesHandlers(legacyDb).createRecurringAppointments(seriesRequest("2026-10-05", "2026-10-19"));
   assert.equal(today.success, true, "configs without the field keep the legacy behaviour");
 });
 
 test("admin proposals for today are not limited by the same-day block", async () => {
-  const db = new FakeFirestore({
+  const db = new FakeFirestore(withPendingOccupancy({
     "site_config/main": { startHour: 8, endHour: 20, slotInterval: 30, maxCapacity: 2, blockSameDayBooking: true },
     "users/admin": { role: "admin", email: "admin@example.com", name: "Admin" },
     "users/user-1": { uid: "user-1", name: "Lucía", email: "lucia@example.com" },
@@ -194,7 +195,7 @@ test("admin proposals for today are not limited by the same-day block", async ()
       status: "pending",
       createdAt: "2026-10-01T10:00:00.000Z",
     },
-  });
+  }));
   const handlers = createAppointmentProposalHandlers({
     db,
     getNowDate: () => NOW,

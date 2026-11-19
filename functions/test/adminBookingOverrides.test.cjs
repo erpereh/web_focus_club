@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require("./helpers/pendingOccupancy.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -48,7 +49,7 @@ function baseDocuments(extra = {}) {
 }
 
 function setup(extra = {}, now = NOW) {
-  const db = new FakeFirestore(baseDocuments(extra));
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments(extra)));
   const emails = [];
   const deps = {
     db,

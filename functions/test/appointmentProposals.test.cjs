@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require("./helpers/pendingOccupancy.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -187,7 +188,7 @@ test("nutrition appointments never deduct nor refund bono minutes", () => {
 });
 
 test("recurring series callables refuse nutrition", async () => {
-  const db = new FakeFirestore(baseDocuments());
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
   const series = createRecurringSeriesHandlers({
     db,
     requireAdmin: async () => ({}),
@@ -202,7 +203,7 @@ test("recurring series callables refuse nutrition", async () => {
 // ------------------------------------------------------------- proposals
 
 test("admin proposes a valid slot: pending proposal with full traceability", async () => {
-  const db = new FakeFirestore(baseDocuments());
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
   const result = await handlers(db).proposeAppointmentSlotFromAdmin(callable("admin", {
     appointmentId: "appt-1",
     slot: PROPOSED,
@@ -221,12 +222,12 @@ test("admin proposes a valid slot: pending proposal with full traceability", asy
   assert.equal(appointment.customerConfirmation.kind, "proposal");
   assert.equal(appointment.customerConfirmation.response, null);
   assert.deepEqual(appointment.proposalHistory.map((entry) => entry.event), ["proposed"]);
-  assert.equal([...db.documents.keys()].filter((key) => key.startsWith("slot_occupancy/")).length, 0,
-    "a pending proposal does not take capacity");
+  assert.equal([...db.documents.keys()].filter((key) => key.startsWith("slot_occupancy/")).length, 4,
+    "the original pending slot remains reserved");
 });
 
 test("proposing an occupied, blocked or invalid slot fails without writing", async () => {
-  const db = new FakeFirestore(baseDocuments({ "blocked_slots/b1": { date: "2026-10-14", time: "10:00" } }));
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments({ "blocked_slots/b1": { date: "2026-10-14", time: "10:00" } })));
   fill(db, PROPOSED, 60, 2);
   const before = JSON.stringify(db.doc("appointments/appt-1"));
   await rejectsWithReason(handlers(db).proposeAppointmentSlotFromAdmin(callable("admin", { appointmentId: "appt-1", slot: PROPOSED })), "slot_full");
@@ -237,17 +238,17 @@ test("proposing an occupied, blocked or invalid slot fails without writing", asy
 });
 
 test("only admins can propose, and only on single pending requests", async () => {
-  const db = new FakeFirestore(baseDocuments({
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments({
     "appointments/approved": { ...baseDocuments()["appointments/appt-1"], status: "approved" },
     "appointments/series": { ...baseDocuments()["appointments/appt-1"], recurrenceSeriesId: "s1" },
-  }));
+  })));
   await rejectsWithReason(handlers(db).proposeAppointmentSlotFromAdmin(callable("user-1", { appointmentId: "appt-1", slot: PROPOSED })), "not_admin", "permission-denied");
   await rejectsWithReason(handlers(db).proposeAppointmentSlotFromAdmin(callable("admin", { appointmentId: "approved", slot: PROPOSED })), "appointment_not_pending");
   await rejectsWithReason(handlers(db).proposeAppointmentSlotFromAdmin(callable("admin", { appointmentId: "series", slot: PROPOSED })), "recurring_not_supported");
 });
 
 test("a new proposal supersedes the previous one", async () => {
-  const db = new FakeFirestore(baseDocuments());
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
   await handlers(db).proposeAppointmentSlotFromAdmin(callable("admin", { appointmentId: "appt-1", slot: PROPOSED }));
   await handlers(db).proposeAppointmentSlotFromAdmin(callable("admin", { appointmentId: "appt-1", slot: { date: "2026-10-14", time: "12:00" } }));
   const appointment = db.doc("appointments/appt-1");
@@ -256,7 +257,7 @@ test("a new proposal supersedes the previous one", async () => {
 });
 
 test("customer accepts: approved in the proposed slot, occupancy taken, trainer assigned", async () => {
-  const db = new FakeFirestore(baseDocuments());
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
   fill(db, PROPOSED, 60, 1);
   await handlers(db).proposeAppointmentSlotFromAdmin(callable("admin", { appointmentId: "appt-1", slot: PROPOSED, assignedTrainer: "trainer-1" }));
   const result = await handlers(db).respondToAppointmentConfirmation(callable("user-1", { appointmentId: "appt-1", action: "accept" }));
@@ -277,7 +278,7 @@ test("customer accepts: approved in the proposed slot, occupancy taken, trainer 
 });
 
 test("availability race: the slot filled up after the proposal, acceptance changes nothing", async () => {
-  const db = new FakeFirestore(baseDocuments());
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
   await handlers(db).proposeAppointmentSlotFromAdmin(callable("admin", { appointmentId: "appt-1", slot: PROPOSED }));
   fill(db, PROPOSED, 60, 2);
   const before = JSON.stringify(db.doc("appointments/appt-1"));
@@ -292,7 +293,7 @@ test("availability race: the slot filled up after the proposal, acceptance chang
 });
 
 test("customer declines: proposal closed, request rejected and minutes refunded once", async () => {
-  const db = new FakeFirestore(baseDocuments());
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
   await handlers(db).proposeAppointmentSlotFromAdmin(callable("admin", { appointmentId: "appt-1", slot: PROPOSED }));
   await handlers(db).respondToAppointmentConfirmation(callable("user-1", { appointmentId: "appt-1", action: "decline" }));
   const appointment = db.doc("appointments/appt-1");
@@ -307,7 +308,7 @@ test("customer declines: proposal closed, request rejected and minutes refunded 
 });
 
 test("responses are idempotent and a second, different answer is refused", async () => {
-  const db = new FakeFirestore(baseDocuments());
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
   await handlers(db).proposeAppointmentSlotFromAdmin(callable("admin", { appointmentId: "appt-1", slot: PROPOSED }));
   const respond = (action) => handlers(db).respondToAppointmentConfirmation(callable("user-1", { appointmentId: "appt-1", action }));
   await respond("accept");
@@ -319,13 +320,13 @@ test("responses are idempotent and a second, different answer is refused", async
 });
 
 test("permissions: only the verified owner can answer", async () => {
-  const db = new FakeFirestore(baseDocuments());
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments()));
   await handlers(db).proposeAppointmentSlotFromAdmin(callable("admin", { appointmentId: "appt-1", slot: PROPOSED }));
   await rejectsWithReason(handlers(db).respondToAppointmentConfirmation(callable("user-2", { appointmentId: "appt-1", action: "accept" })), "not_owner", "permission-denied");
   await rejectsWithReason(handlers(db).respondToAppointmentConfirmation(callable("user-1", { appointmentId: "appt-1", action: "accept" }, { emailVerified: false })), "email_not_verified", "permission-denied");
   await rejectsWithReason(handlers(db).respondToAppointmentConfirmation(callable(undefined, { appointmentId: "appt-1", action: "accept" })), "unauthenticated");
   await rejectsWithReason(handlers(db).respondToAppointmentConfirmation(callable("user-1", { appointmentId: "appt-1", action: "maybe" })), "invalid_action");
-  const plain = new FakeFirestore(baseDocuments());
+  const plain = new FakeFirestore(withPendingOccupancy(baseDocuments()));
   await rejectsWithReason(handlers(plain).respondToAppointmentConfirmation(callable("user-1", { appointmentId: "appt-1", action: "accept" })), "no_confirmation_pending");
 });
 
@@ -338,13 +339,13 @@ test("nutrition proposals require a nutrition professional without overlaps", as
     bonoId: undefined,
     minutesDeducted: undefined,
   };
-  const db = new FakeFirestore(baseDocuments({
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments({
     "appointments/nutri": nutrition,
     "appointments/busy": {
       userId: "user-2", status: "approved", duration: "30", appointmentType: "nutrition",
       assignedTrainer: "nutri-1", approvedSlot: PROPOSED, preferredSlots: [PROPOSED],
     },
-  }));
+  })));
   await rejectsWithReason(handlers(db).proposeAppointmentSlotFromAdmin(callable("admin", { appointmentId: "nutri", slot: PROPOSED })), "trainer_required");
   await rejectsWithReason(handlers(db).proposeAppointmentSlotFromAdmin(callable("admin", { appointmentId: "nutri", slot: PROPOSED, assignedTrainer: "trainer-1" })), "trainer_not_nutrition");
   await rejectsWithReason(handlers(db).proposeAppointmentSlotFromAdmin(callable("admin", { appointmentId: "nutri", slot: PROPOSED, assignedTrainer: "nutri-1" })), "professional_conflict");

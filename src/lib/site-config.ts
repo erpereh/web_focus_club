@@ -95,9 +95,7 @@ export function sanitizeSiteConfigUpdate(data: Partial<SiteConfig>): Partial<Sit
             : DEFAULT_SITE_CONFIG.bonoExpirationMonths;
     }
 
-    if ('maintenanceMode' in data) {
-        sanitized.maintenanceMode = Boolean(data.maintenanceMode);
-    }
+    // Maintenance is controlled by the audited operator procedure.
 
     // maxCapacity and capacityExceptionsEnabled are never written from here: the
     // global capacity goes through updateMaxCapacityFromAdmin (Firestore rules

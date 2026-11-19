@@ -91,7 +91,8 @@ describe('AdminOverrideConfirmModal', () => {
         expect(dialog).toHaveTextContent('La nueva programación tiene restricciones');
         expect(dialog).toHaveTextContent('1 de 3 sesiones');
         expect(dialog).toHaveTextContent('no se cambia ninguna cita');
-        expect(dialog).toHaveTextContent('no ocupa plaza hasta que se apruebe');
+        expect(dialog).toHaveTextContent('reservará plaza al guardar este cambio');
+        expect(dialog).toHaveTextContent('Aprobarla conservará esa misma plaza');
         expect(dialog).toHaveTextContent('Antes de guardar');
         expect(dialog).not.toHaveTextContent(/crea/);
 

@@ -1,3 +1,4 @@
+import { runAppointmentTransaction } from "./appointmentTransaction.js";
 import { auditMinuteRefunds, databaseProjectId } from "./minuteRefundAudit.js";
 import { AggregateField, FieldPath, FieldValue, type Firestore } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
@@ -110,7 +111,7 @@ export function createMinuteRefundAdminHandlers(deps: { db: Firestore; requireAd
       const ref = db.collection("bonos").doc(data.bonoId);
       const operationRef = db.collection("bono_admin_operations").doc(data.requestId);
       const payload = JSON.stringify([data.bonoId, data.action, data.delta ?? null, data.fechaAsignacion ?? null, data.fechaExpiracion ?? null]);
-      return db.runTransaction(async (tx) => {
+      return runAppointmentTransaction(db, async (tx) => {
         const [snap, operation] = await Promise.all([tx.get(ref), tx.get(operationRef)]);
         if (operation.exists) {
           if (operation.data()?.payload !== payload || operation.data()?.actorUid !== uid) throw new HttpsError("already-exists", "La operación ya se usó para otro cambio.");

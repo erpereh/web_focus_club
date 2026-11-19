@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require("./helpers/pendingOccupancy.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -117,14 +118,14 @@ test("planning continues each series cadence inside the new period", () => {
 });
 
 test("preview builds the plan from approved series and flags every conflict with its reason", async () => {
-  const db = new FakeFirestore(fixture({
+  const db = new FakeFirestore(withPendingOccupancy(fixture({
     "blocked_slots/x": { date: "2026-10-22", time: "18:15" },
     // The customer already has a session overlapping the 3 Nov renewal.
     "appointments/existing": {
       userId: "user-1", status: "pending", duration: "60",
       preferredSlots: [{ date: "2026-11-03", time: "09:00" }],
     },
-  }));
+  })));
   fill(db, "2026-10-29", "18:00", 60, 2);
   const preview = await handlers(db).previewBonoAppointmentRenewalFromAdmin(callable("admin", { ...PREVIEW_INPUT, availableMinutes: 300 }));
   const items = byKey(preview.items);
@@ -143,7 +144,7 @@ test("preview builds the plan from approved series and flags every conflict with
 });
 
 test("preview revalidates a manual date/time change before marking it ready", async () => {
-  const db = new FakeFirestore(fixture({ "blocked_slots/x": { date: "2026-10-22", time: "18:15" } }));
+  const db = new FakeFirestore(withPendingOccupancy(fixture({ "blocked_slots/x": { date: "2026-10-22", time: "18:15" } })));
   const preview = await handlers(db).previewBonoAppointmentRenewalFromAdmin(callable("admin", PREVIEW_INPUT));
   const items = preview.items.map((item) => item.key === "s-weekly:2026-10-22"
     ? { ...item, slot: { date: "2026-10-23", time: "18:00" } }
@@ -161,7 +162,7 @@ test("preview revalidates a manual date/time change before marking it ready", as
 });
 
 test("commit creates pending appointments awaiting the customer, reserving minutes once", async () => {
-  const db = new FakeFirestore(fixture());
+  const db = new FakeFirestore(withPendingOccupancy(fixture()));
   const preview = await handlers(db).previewBonoAppointmentRenewalFromAdmin(callable("admin", PREVIEW_INPUT));
   const ready = preview.items.filter((item) => item.status === "ready");
   const toCreate = ready.filter((item) => item.key !== "s-weekly:2026-11-05");
@@ -189,8 +190,8 @@ test("commit creates pending appointments awaiting the customer, reserving minut
   assert.equal(appointment.minutesDeducted, true);
   assert.equal(appointment.renewalSourceSeriesId, "s-weekly");
   assert.equal(appointment.recurrenceSeriesId, undefined, "renewed appointments are standalone");
-  assert.equal([...db.documents.keys()].filter((key) => key.startsWith("slot_occupancy/")).length, 0,
-    "pending renewals do not take capacity");
+  assert.equal([...db.documents.keys()].filter((key) => key.startsWith("slot_occupancy/")).length, 18,
+    "pending renewals immediately reserve their blocks");
 
   const bono = db.doc("bonos/bono-new");
   assert.equal(bono.minutosRestantes, 360 - (60 + 45 + 60 + 60 + 45));
@@ -211,7 +212,7 @@ test("commit creates pending appointments awaiting the customer, reserving minut
 });
 
 test("retrying the same renewal never duplicates appointments nor minutes", async () => {
-  const db = new FakeFirestore(fixture());
+  const db = new FakeFirestore(withPendingOccupancy(fixture()));
   const preview = await handlers(db).previewBonoAppointmentRenewalFromAdmin(callable("admin", PREVIEW_INPUT));
   const input = {
     renewalId: "renewal-0002",
@@ -233,7 +234,7 @@ test("retrying the same renewal never duplicates appointments nor minutes", asyn
 });
 
 test("a slot taken between preview and commit comes back as a conflict to resolve", async () => {
-  const db = new FakeFirestore(fixture());
+  const db = new FakeFirestore(withPendingOccupancy(fixture()));
   const preview = await handlers(db).previewBonoAppointmentRenewalFromAdmin(callable("admin", PREVIEW_INPUT));
   fill(db, "2026-10-15", "18:00", 60, 2);
   const input = {
@@ -263,7 +264,7 @@ test("a slot taken between preview and commit comes back as a conflict to resolv
 });
 
 test("commit refuses an inactive bono, a foreign renewal id and bad items", async () => {
-  const db = new FakeFirestore(fixture({ "bonos/bono-new": { ...fixture()["bonos/bono-new"], estado: "expirado" } }));
+  const db = new FakeFirestore(withPendingOccupancy(fixture({ "bonos/bono-new": { ...fixture()["bonos/bono-new"], estado: "expirado" } })));
   const base = { renewalId: "renewal-0004", userId: "user-1", bonoId: "bono-new", sourceBonoId: "bono-old", items: [] };
   await rejectsWithReason(handlers(db).commitBonoAppointmentRenewalFromAdmin(callable("admin", base)), "bono_not_active");
   await rejectsWithReason(handlers(db).commitBonoAppointmentRenewalFromAdmin(callable("admin", { ...base, renewalId: "x" })), "invalid_request");
@@ -275,7 +276,7 @@ test("commit refuses an inactive bono, a foreign renewal id and bad items", asyn
 });
 
 test("the customer confirms or declines each renewed appointment", async () => {
-  const db = new FakeFirestore(fixture());
+  const db = new FakeFirestore(withPendingOccupancy(fixture()));
   const preview = await handlers(db).previewBonoAppointmentRenewalFromAdmin(callable("admin", PREVIEW_INPUT));
   await handlers(db).commitBonoAppointmentRenewalFromAdmin(callable("admin", {
     renewalId: "renewal-0005",
@@ -305,6 +306,6 @@ test("the customer confirms or declines each renewed appointment", async () => {
   // Race: the slot of another renewed appointment filled up before the customer answered.
   const third = renewalAppointmentId("renewal-0005", "s-weekly:2026-10-22");
   fill(db, "2026-10-22", "18:00", 60, 2);
-  await rejectsWithReason(confirmations(db).respondToAppointmentConfirmation(callable("user-1", { appointmentId: third, action: "accept" })), "slot_full");
-  assert.equal(db.doc(`appointments/${third}`).status, "pending");
+  await confirmations(db).respondToAppointmentConfirmation(callable("user-1", {appointmentId:third,action:"accept"}));
+  assert.equal(db.doc(`appointments/${third}`).status, "approved");
 });

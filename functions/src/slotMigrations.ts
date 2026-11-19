@@ -1,6 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
-import { getCanonicalSlotBlocks, slotOccupancyDocId } from './appointmentLifecycle.js';
+import { getAppointmentEffectiveSlot, getCanonicalSlotBlocks, slotOccupancyDocId } from './appointmentLifecycle.js';
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
@@ -134,9 +134,7 @@ function documentsEqual(left: Record<string, unknown>, right: Record<string, unk
 }
 
 function selectedEffectiveSlot(data: Record<string, unknown>): unknown {
-  if (data.approvedSlot !== undefined && data.approvedSlot !== null) return data.approvedSlot;
-  if (Array.isArray(data.preferredSlots) && data.preferredSlots.length > 0) return data.preferredSlots[0];
-  return { date: data.date, time: data.time };
+  return getAppointmentEffectiveSlot(data);
 }
 
 function validEffectiveAppointment(data: Record<string, unknown>): { date: string; time: string; duration: number } | undefined {
@@ -177,7 +175,7 @@ export function planSlotOccupancyReconciliation(input: {
   let invalidAppointments = 0;
 
   for (const appointment of [...input.appointments].sort((left, right) => left.id.localeCompare(right.id))) {
-    if (appointment.data.status !== 'approved') continue;
+    if (appointment.data.status !== 'approved' && appointment.data.status !== 'pending') continue;
     const slot = selectedEffectiveSlot(appointment.data);
     const candidateDate = isRecord(slot) ? slot.date : undefined;
     if (isIsoDate(candidateDate) && !isInRange(candidateDate, range)) continue;
@@ -463,10 +461,10 @@ export function createSlotMigrationHandlers(deps: SlotMigrationDeps) {
       if (parsed.mode === 'apply' && plan.report.invalidAppointments > 0) {
         throw new HttpsError('failed-precondition', 'Hay citas aprobadas inválidas; no se ha escrito ningún documento.');
       }
-      if (parsed.mode === 'apply') await deps.applyOperations(plan.operations);
+      if (parsed.mode === 'apply') throw new HttpsError('failed-precondition', 'Utiliza el informe revisado y scripts/reconcile-slot-occupancy.cjs.', { reason: 'reviewed_audit_required' });
       return {
         mode: parsed.mode,
-        applied: parsed.mode === 'apply',
+        applied: false,
         ...plan.report,
         ...(parsed.mode === 'dryRun' ? { differences: describeOccupancyDifferences(plan.operations, occupancyDocuments) } : {}),
       };

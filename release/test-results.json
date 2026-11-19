@@ -1,0 +1,148 @@
+{
+  "schema": "focus-release-validation-v1",
+  "recordedAt": "2026-11-18T23:02:33.127Z",
+  "projectId": "focus-club-f73b8",
+  "productionWrites": false,
+  "deploymentsPerformed": false,
+  "flagsActivated": false,
+  "historicalCreditsApplied": false,
+  "checks": [
+    {
+      "name": "Functions shared",
+      "command": "npm --prefix functions test",
+      "status": "passed",
+      "structuredTests": 482,
+      "legacyAssertionScripts": 6
+    },
+    {
+      "name": "Firestore emulator",
+      "command": "npm --prefix functions run test:emulator",
+      "status": "passed",
+      "tests": 78,
+      "project": "demo-focus-club"
+    },
+    {
+      "name": "Web",
+      "command": "npm test",
+      "status": "passed",
+      "tests": 409,
+      "files": 48
+    },
+    {
+      "name": "Web types",
+      "command": "npx tsc --noEmit",
+      "status": "passed"
+    },
+    {
+      "name": "Web static build",
+      "command": "npm run build",
+      "status": "passed",
+      "staticRoutes": 17
+    },
+    {
+      "name": "Flutter",
+      "command": "flutter test --reporter expanded",
+      "status": "passed",
+      "tests": 456
+    },
+    {
+      "name": "Flutter analyze",
+      "command": "flutter analyze",
+      "status": "passed"
+    },
+    {
+      "name": "Portal Functions",
+      "command": "npm --prefix ../app_focus_club/functions test",
+      "status": "passed",
+      "tests": 2,
+      "exports": "deleteOwnAccount"
+    },
+    {
+      "name": "Release guards",
+      "command": "node --test functions/test/releaseTools.test.cjs",
+      "status": "passed",
+      "tests": 8,
+      "note": "Already included in the 482 shared tests; repeated after final operator-tool changes."
+    },
+    {
+      "name": "ESLint changed TypeScript",
+      "status": "passed"
+    },
+    {
+      "name": "PowerShell deployment syntax",
+      "status": "passed"
+    },
+    {
+      "name": "Git diff --check, both repositories",
+      "status": "passed"
+    }
+  ],
+  "audit": {
+    "refundReport": "release/refund-audit-2026-11-18-final.json",
+    "refundReportHash": "d963da61fc7083efa6dec80513e7fea3a939bdadec9aa5e77b8ae664ff83f217",
+    "pendingMinutes": 120,
+    "readOnly": true,
+    "occupancyReport": "release/slot-audit-2026-11-18-preliminary.json",
+    "occupancyActiveAppointments": 1179,
+    "occupancyOverCapacityBlocks": 4,
+    "occupancyIssues": 0,
+    "occupancyApplicable": false
+  },
+  "mobile": {
+    "version": "1.5.2",
+    "build": 22,
+    "storesVerified": false,
+    "releaseBinariesBuilt": false,
+    "iosBuildRequiresMac": true
+  },
+  "manualChecksRemaining": [
+    "Check build 22 is unused in both stores before release; increment both and regenerate if needed.",
+    "Build/sign Android and iOS release artifacts and verify on real devices.",
+    "Verify public availability in both stores before raising minimum builds.",
+    "Review a fresh frozen occupancy audit before migration.",
+    "Authorize activation separately after both minimum builds are enforced.",
+    "Review a fresh historical financial audit before importing approvals."
+  ],
+  "evidence": {
+    "functions": {
+      "path": "release/test-logs/focus-functions-final.log",
+      "sha256": "9baaedebaf8c5f8b46676074255fb43f16942c855460b2a4cd598157765147d2"
+    },
+    "emulator": {
+      "path": "release/test-logs/focus-emulator-final.log",
+      "sha256": "157a70cc38ed317ca73d096c126ba758be639ae41da1ceda7b951bc0494997ab"
+    },
+    "web": {
+      "path": "release/test-logs/focus-web-final.log",
+      "sha256": "9ba6f80c633049cfd76f0b8e77599045cf9711ae185d0e529fe382ebe7dc76bd"
+    },
+    "webTypes": {
+      "path": "release/test-logs/focus-web-types-final.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "webBuild": {
+      "path": "release/test-logs/focus-web-build-final.log",
+      "sha256": "cfdaa42e8eb0ed431a46dde21b7c2cf198c1544e2fa4a1937baa6df9d78abe66"
+    },
+    "flutter": {
+      "path": "release/test-logs/focus-flutter-final.log",
+      "sha256": "7cec48bc91aed2f059efd4f02f50199c8f691426e2a218bd0c7d7cb7a9ddc665"
+    },
+    "flutterAnalyze": {
+      "path": "release/test-logs/focus-flutter-analyze-final.log",
+      "sha256": "900c0eafc1d3eed377dce949d392a4b0b75b816eec80f9a4ba22a17fca02da24"
+    },
+    "portal": {
+      "path": "release/test-logs/focus-portal-final.log",
+      "sha256": "c7c71e865d651d5a1ef89bc9f63084c5ddae4f3f09da703c6e9c90cc1cc4ce72"
+    },
+    "releaseTools": {
+      "path": "release/test-logs/focus-release-tools-final.log",
+      "sha256": "6385bca3e8b32adf430c8539ea88e0386effef5a41afd06cd782d7f2d0dfed0e"
+    },
+    "lint": {
+      "path": "release/test-logs/focus-lint-final.log",
+      "sha256": "724986d6c8d2f748471f69c44eb90fd2740a65887b44bd6ec5c5d9bcb0ea9ea5"
+    }
+  }
+}

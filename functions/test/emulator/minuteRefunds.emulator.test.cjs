@@ -217,6 +217,44 @@ test('reviewed historical import checks hash and current evidence, is repeatable
   assert.deepEqual([(await data('bonos/b')).minutosRestantes, (await data('bonos/b')).minutosTotales], [240, 300]);
 });
 
+test('a reviewed multi-case import is atomic if the last case changes, then corrects shared history together', async () => {
+  const legacy = source({bonoId:'old',minutesRefunded:true,minutesRefundedAmount:60,minutesRefundedAt:'2026-11-06T12:00:00Z',
+    minutesRefundedToBonoId:'b',minutesRefundCappedAmount:60,minutesRefundPendingAmount:60});
+  await reset({'appointments/a':legacy,'appointments/z':legacy,
+    'bonos/old':bono({estado:'agotado',minutosRestantes:0,replacedByBonoId:'b',createdAt:'2026-10-01',
+      historial:['a','z'].map(appointmentId=>({appointmentId,fecha:DEDUCTED,accion:'descuento_cita',duracion:'60'}))}),
+    'bonos/b':bono({historial:['a','z'].map(appointmentId=>({appointmentId,fecha:'2026-11-06T12:00:00Z',accion:'devolucion_cita',duracion:'60'}))})});
+  let report=await auditMinuteRefunds(db,['a','z'],projectId,NOW);
+  assert.ok(report.cases.every(item=>item.eligibleForReviewedImport));
+  await db.doc('appointments/z').update({reason:'changed after audit'});
+  await assert.rejects(applyReviewedMinuteRefundAudit(db,report,{confirmProject:projectId,approvedReportHash:report.reportHash,reviewerUid:'admin'}),/Audit changed/);
+  assert.equal((await db.collection('minute_refunds').get()).size,0,'the first case must not have been imported');
+  assert.ok((await data('bonos/b')).historial.every(entry=>entry.minutosAbonados===undefined));
+  report=await auditMinuteRefunds(db,['a','z'],projectId,NOW);
+  await applyReviewedMinuteRefundAudit(db,report,{confirmProject:projectId,approvedReportHash:report.reportHash,reviewerUid:'admin'});
+  assert.equal((await db.collection('minute_refunds').get()).size,2);
+  assert.equal((await data('minute_refund_accounts/u')).pendingMinutes,120);
+  assert.ok((await data('bonos/b')).historial.every(entry=>entry.minutosAbonados===0&&entry.auditReportHash===report.reportHash));
+  assert.equal((await data('bonos/b')).minutosRestantes,240);
+});
+
+test('new financial documents and a prior compensation on another bono invalidate historical approval',async()=>{
+  const legacy=source({bonoId:'old',minutesRefunded:true,minutesRefundedAmount:60,minutesRefundedAt:'2026-11-06T12:00:00Z',
+    minutesRefundedToBonoId:'b',minutesRefundCappedAmount:60,minutesRefundPendingAmount:60});
+  await reset({'appointments/a':legacy,'bonos/old':bono({estado:'agotado',minutosRestantes:0,replacedByBonoId:'b',createdAt:'2026-10-01',
+    historial:[{appointmentId:'a',fecha:DEDUCTED,accion:'descuento_cita',duracion:'60'}]}),
+    'bonos/b':bono({historial:[{appointmentId:'a',fecha:'2026-11-06T12:00:00Z',accion:'devolucion_cita',duracion:'60'}]})});
+  const report=await auditMinuteRefunds(db,['a'],projectId,NOW);
+  assert.equal(report.cases[0].eligibleForReviewedImport,true);
+  await db.doc('bonos/new-after-report').set(bono({estado:'caducado',createdAt:'2026-01-01',historial:[]}));
+  await assert.rejects(applyReviewedMinuteRefundAudit(db,report,{confirmProject:projectId,approvedReportHash:report.reportHash,reviewerUid:'admin'}),/membership changed/);
+  assert.equal((await db.collection('minute_refunds').get()).size,0);
+  await db.doc('bonos/new-after-report').update({historial:[{appointmentId:'a',accion:'compensacion_devolucion',minutosAbonados:60}]});
+  const changed=await auditMinuteRefunds(db,['a'],projectId,NOW);
+  assert.ok(changed.cases[0].issues.includes('prior_compensation'));
+  assert.equal(changed.cases[0].eligibleForReviewedImport,false);
+});
+
 test('manual additions never extend capacity, are idempotent and audited', async () => {
   await reset({ 'bonos/b': bono({ minutosRestantes: 210 }) });
   const input = { bonoId: 'b', requestId: 'manual-test-0001', action: 'adjust', delta: 30 };

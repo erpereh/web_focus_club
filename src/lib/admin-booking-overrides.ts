@@ -14,7 +14,7 @@ export type AdminOverridableReason =
     | 'outside_schedule'
     | 'slot_blocked'
     | 'slot_full'
-    /** Capacity change: more approved seats than the new capacity (nothing is cancelled). */
+    /** Capacity change: more pending and approved seats than the new capacity (nothing is cancelled). */
     | 'capacity_below_occupancy';
 
 export interface AdminRestriction {
@@ -46,7 +46,7 @@ export const ADMIN_RESTRICTION_LABELS: Record<AdminOverridableReason, string> = 
     outside_schedule: 'Fuera del horario configurado',
     slot_blocked: 'Franja bloqueada',
     slot_full: 'Aforo completo',
-    capacity_below_occupancy: 'Más citas aprobadas que el nuevo aforo',
+    capacity_below_occupancy: 'Más reservas que el nuevo aforo',
 };
 
 /** Callable reasons that ask the admin to confirm a list of restrictions. */
@@ -89,7 +89,7 @@ export function describeAdminRestriction(restriction: AdminRestriction): string 
         return `${label}: ${restriction.occupancy}/${restriction.maxCapacity} personas (quedaría en ${restriction.occupancy + 1}/${restriction.maxCapacity})`;
     }
     if (restriction.reason === 'capacity_below_occupancy' && typeof restriction.occupancy === 'number' && typeof restriction.maxCapacity === 'number') {
-        return `${label}: ${restriction.occupancy} aprobadas con aforo ${restriction.maxCapacity}. Las citas se mantienen.`;
+        return `${label}: ${restriction.occupancy} reservas con aforo ${restriction.maxCapacity}. Las citas se mantienen.`;
     }
     return label;
 }

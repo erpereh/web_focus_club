@@ -71,7 +71,7 @@ export interface StatisticsInput {
     /** Capacity exceptions of the periods (aforo por fecha); other days use siteConfig.maxCapacity. */
     capacityByDate?: CapacityByDate;
     blockedSlots: readonly BlockedSlot[];
-    /** Counters of the next days, to detect drift against approved appointments. */
+    /** Counters of the next days, to detect drift against pending and approved appointments. */
     upcomingOccupancy: readonly SlotOccupancy[];
     /** Server count of every pending request (any date). */
     pendingApprovalCount: number | null;
@@ -367,7 +367,7 @@ function occupancyFrame(
 function seatsByBlock(items: readonly Located[]): Map<string, number> {
     const seats = new Map<string, number>();
     for (const item of items) {
-        if (item.appointment.status !== 'approved' || !item.duration) continue;
+        if (!['pending', 'approved'].includes(item.appointment.status) || !item.duration) continue;
         for (const time of getCanonicalSlotBlocks(item.time, item.duration)) {
             const key = slotOccupancyKey(item.date, time);
             seats.set(key, (seats.get(key) ?? 0) + 1);
@@ -736,7 +736,7 @@ export function calculateStatistics(input: StatisticsInput): StatisticsResult {
     const byHour: OccupancyStats['byHour'] = [];
     const sessionsStarting = new Map<string, number>();
     for (const item of current) {
-        if (item.appointment.status !== 'approved') continue;
+        if (!['pending', 'approved'].includes(item.appointment.status)) continue;
         const key = `${weekdayIndex(item.date)}|${Number(item.time.slice(0, 2))}`;
         sessionsStarting.set(key, (sessionsStarting.get(key) ?? 0) + 1);
     }
@@ -784,7 +784,7 @@ export function calculateStatistics(input: StatisticsInput): StatisticsResult {
         return {
             key: bucket.key,
             label: bucket.label,
-            reservedSeatHours: items.filter((item) => item.appointment.status === 'approved').reduce((sum, item) => sum + item.duration, 0) / 60,
+            reservedSeatHours: items.filter((item) => ['pending', 'approved'].includes(item.appointment.status)).reduce((sum, item) => sum + item.duration, 0) / 60,
             cancelledSeatHours: items.filter((item) => item.appointment.status === 'cancelled').reduce((sum, item) => sum + item.duration, 0) / 60,
             rate: occupancyRate(items, frame, inBucket),
         };
@@ -811,7 +811,7 @@ export function calculateStatistics(input: StatisticsInput): StatisticsResult {
             .slice(0, 6),
     };
 
-    // ---------------- occupancy drift in the next days (counters vs approved appointments)
+    // ---------------- occupancy drift in the next days (counters vs pending/approved appointments)
     const driftEnd = addDays(todayKey, UPCOMING_OCCUPANCY_CHECK_DAYS);
     const upcomingApproved = located.filter((item) => item.date >= todayKey && item.date <= driftEnd);
     const expectedSeats = seatsByBlock(upcomingApproved);
@@ -852,7 +852,7 @@ export function calculateStatistics(input: StatisticsInput): StatisticsResult {
     add({
         id: 'occupancy-drift', severity: 'critical', count: occupancyDrift.length,
         title: 'Descuadres de aforo',
-        description: `Franjas de los próximos ${UPCOMING_OCCUPANCY_CHECK_DAYS} días cuyo contador no coincide con las citas aprobadas.`,
+        description: `Franjas de los próximos ${UPCOMING_OCCUPANCY_CHECK_DAYS} días cuyo contador no coincide con las citas pendientes y aprobadas.`,
         link: { tab: 'availability' },
     });
     add({

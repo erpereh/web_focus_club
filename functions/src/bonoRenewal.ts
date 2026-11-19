@@ -1,3 +1,4 @@
+import { runAppointmentTransaction } from "./appointmentTransaction.js";
 import { createHash } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
 import { type CallableRequest, HttpsError } from "firebase-functions/v2/https";
@@ -346,7 +347,7 @@ export function createBonoRenewalHandlers(deps: BonoRenewalDeps) {
       db.collection("appointments").doc(renewalAppointmentId(renewalId, item.key)),
     ]));
 
-    const result = await db.runTransaction(async (transaction) => {
+    const result = await runAppointmentTransaction(db, async (transaction) => {
       const [renewalSnap, bonoSnap, userSnap, ...existingSnaps] = await Promise.all([
         transaction.get(renewalRef),
         transaction.get(bonoRef),

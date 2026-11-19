@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require("./helpers/pendingOccupancy.cjs");
 // Per-date capacity ("aforo por fecha"): helpers, the three admin callables and
 // every booking path that must honour the effective capacity of its date.
 const assert = require("node:assert/strict");
@@ -112,7 +113,7 @@ function baseDocuments(extra = {}) {
 }
 
 function setup(extra = {}, now = NOW) {
-  const db = new FakeFirestore(baseDocuments(extra));
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments(extra)));
   const deps = {
     db,
     requireAdmin: async (uid) => {
@@ -397,13 +398,10 @@ test("approval: refused at the day's capacity, approved over it only with explic
   const approve = (extra = {}) => ctx.status.updateAppointmentStatusFromAdmin(callable("admin", {
     appointmentId: "p1", status: "approved", expectedStatus: "pending", ...extra,
   }));
-  const refused = await rejectsWithReason(approve(), "slot_full");
-  assert.equal(refused.details.maxCapacity, 2);
-  assert.equal(refused.details.overridable, true);
-  const result = await approve({ allowOverCapacity: true });
-  assert.equal(result.overCapacity, true);
-  assert.equal(logs(ctx.db, "appointment_approved_over_capacity")[0].maxCapacity, 2);
-  assert.equal(count(ctx.db, "10:00"), 3);
+  const result=await approve();
+  assert.equal(result.overCapacity,false);
+  assert.equal(logs(ctx.db,"appointment_approved_over_capacity").length,0);
+  assert.equal(count(ctx.db,"10:00"),3);
 });
 
 test("approval: a raised day admits seats over the global capacity without override", async () => {
@@ -427,8 +425,8 @@ test("concurrency: two approvals for the last seat of a capacity-2 day, only one
     appointmentId: id, status: "approved", expectedStatus: "pending",
   })).then(() => "ok", (error) => error.details?.reason);
   const results = await Promise.all([approve("p1"), approve("p2")]);
-  assert.deepEqual(results.sort(), ["ok", "slot_full"]);
-  assert.equal(count(ctx.db, "10:00"), 2);
+  assert.deepEqual(results.sort(), ["ok", "ok"]);
+  assert.equal(count(ctx.db, "10:00"), 3);
 });
 
 // -------------------------------------------------- reschedule / proposals
@@ -539,14 +537,10 @@ test("series approval: each occurrence is checked against its own day's capacity
     "appointments/occ-0": occurrence(0, DAY),
     "appointments/occ-1": occurrence(1, NEXT_WEEK),
   });
-  const { error } = await confirm(
-    (input) => ctx.series.approveRecurringAppointmentSeriesFromAdmin(callable("admin", input)),
-    { seriesId: "series-1" },
-    "admin_override_required",
-  );
-  assert.deepEqual(error.details.restrictions.map((item) => [item.date, item.occupancy, item.maxCapacity]), [[NEXT_WEEK, 2, 2]]);
-  assert.equal(count(ctx.db, "10:00"), 4);
-  assert.equal(count(ctx.db, "10:00", NEXT_WEEK), 3);
+  await ctx.series.approveRecurringAppointmentSeriesFromAdmin(callable("admin",{seriesId:"series-1"}));
+  assert.equal(count(ctx.db,"10:00"),4);
+  assert.equal(count(ctx.db,"10:00",NEXT_WEEK),3);
+  assert.equal(ctx.db.doc("appointment_recurrences/series-1").status,"approved");
 });
 
 test("recurring reschedule: added seats are checked against the target day's capacity", () => {

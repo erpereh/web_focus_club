@@ -1,3 +1,4 @@
+import { runAppointmentTransaction } from "./appointmentTransaction.js";
 import type { Firestore } from "firebase-admin/firestore";
 import { type CallableRequest, HttpsError } from "firebase-functions/v2/https";
 import { getMadridDateKey, madridCivilSlotToInstant } from "./appointmentLifecycle.js";
@@ -90,7 +91,7 @@ export async function loadDateCapacities(
 
 // ------------------------------------------------------- reduction warnings
 
-/** An upcoming block whose approved seats exceed the capacity being set. Nothing is cancelled. */
+/** An upcoming block whose pending and approved seats exceed the capacity being set. Nothing is cancelled. */
 export interface CapacityReductionRestriction {
   date: string;
   time: string;
@@ -100,7 +101,7 @@ export interface CapacityReductionRestriction {
 }
 
 /**
- * Upcoming blocks of the target dates that already hold more approved seats
+ * Upcoming blocks of the target dates that already hold more pending and approved seats
  * than their new capacity. `occupancyDocs` are `slot_occupancy` documents read
  * in the same transaction; corrupt counters are ignored here (they are reported
  * by the booking paths, never treated as seats).
@@ -141,7 +142,7 @@ export function requireCapacityReductionAcknowledgement(
     "failed-precondition",
     changed
       ? "La ocupación ha cambiado. Revisa las franjas afectadas y vuelve a confirmar."
-      : "Hay franjas con más citas aprobadas que el nuevo aforo. Las citas existentes se mantienen; confirma para guardar igualmente.",
+      : "Hay franjas con más citas pendientes y aprobadas que el nuevo aforo. Las citas existentes se mantienen; confirma para guardar igualmente.",
     { reason: CAPACITY_REDUCTION_CONFIRMATION_REQUIRED, restrictions, fingerprint, changed },
   );
 }
@@ -223,7 +224,7 @@ export function createCapacityAdminHandlers(deps: CapacityAdminDeps) {
     const requestId = parseRequestId(data.requestId);
     const payloadHash = bookingPayloadHash({ kind: "capacity_exceptions", dates, maxCapacity });
 
-    return db.runTransaction(async (transaction) => {
+    return runAppointmentTransaction(db, async (transaction) => {
       const marker = await readIdempotencyMarker(transaction, db, { requestId, adminUid, kind: "capacity_exceptions", payloadHash });
       if (marker.previous) return { ...marker.previous, replayed: true };
 
@@ -278,7 +279,7 @@ export function createCapacityAdminHandlers(deps: CapacityAdminDeps) {
     const requestId = parseRequestId(data.requestId);
     const payloadHash = bookingPayloadHash({ kind: "capacity_exceptions_delete", dates });
 
-    return db.runTransaction(async (transaction) => {
+    return runAppointmentTransaction(db, async (transaction) => {
       const marker = await readIdempotencyMarker(transaction, db, { requestId, adminUid, kind: "capacity_exceptions_delete", payloadHash });
       if (marker.previous) return { ...marker.previous, replayed: true };
 
@@ -327,7 +328,7 @@ export function createCapacityAdminHandlers(deps: CapacityAdminDeps) {
     const nowDate = getNowDate();
     const today = getMadridDateKey(nowDate);
 
-    return db.runTransaction(async (transaction) => {
+    return runAppointmentTransaction(db, async (transaction) => {
       const marker = await readIdempotencyMarker(transaction, db, { requestId, adminUid, kind: "max_capacity", payloadHash });
       if (marker.previous) return { ...marker.previous, replayed: true };
 

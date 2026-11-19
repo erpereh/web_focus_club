@@ -3,29 +3,40 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function releaseIsOpen() {
+      let gate = /databases/$(database)/documents/system_controls/release;
+      return !exists(gate) || get(gate).data.phase == 'open';
+    }
+
+    // Operator controls, deferred events and migration receipts are IAM-only.
+    match /system_controls/{document=**} { allow read, write: if false; }
+    match /release_operations/{document=**} { allow read, write: if false; }
+    match /release_deferred_events/{document=**} { allow read, write: if false; }
+    match /slot_occupancy_migrations/{document=**} { allow read, write: if false; }
+
     // USERS
     match /users/{uid} {
       allow read: if (isVerified() && request.auth.uid == uid) || isAdmin();
       // Registration creates the profile before email verification.
-      allow create: if createsOwnUserProfile(uid) || isAdmin();
-      allow update: if (isVerified() && request.auth.uid == uid && onlyOwnUserProfileFieldsChanged()) || isAdmin();
-      allow delete: if isAdmin();
+      allow create: if releaseIsOpen() && (createsOwnUserProfile(uid) || isAdmin());
+      allow update: if releaseIsOpen() && ((isVerified() && request.auth.uid == uid && onlyOwnUserProfileFieldsChanged()) || isAdmin());
+      allow delete: if releaseIsOpen() && (isAdmin());
 
       match /fcmTokens/{token} {
         allow read: if (isVerified() && request.auth.uid == uid) || isAdmin();
-        allow create, update: if (isVerified() && request.auth.uid == uid && isValidOwnFcmToken(token)) || isAdmin();
-        allow delete: if (isVerified() && request.auth.uid == uid) || isAdmin();
+        allow create, update: if releaseIsOpen() && ((isVerified() && request.auth.uid == uid && isValidOwnFcmToken(token)) || isAdmin());
+        allow delete: if releaseIsOpen() && ((isVerified() && request.auth.uid == uid) || isAdmin());
       }
 
       // Customer notification history. Written only by Cloud Functions; the
       // owner may mark entries as read or delete them from the app.
       match /notifications/{notificationId} {
         allow read: if (isVerified() && request.auth.uid == uid) || isAdmin();
-        allow update: if isVerified()
+        allow update: if releaseIsOpen() && (isVerified()
           && request.auth.uid == uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt'])
-          && request.resource.data.read is bool;
-        allow delete: if isVerified() && request.auth.uid == uid;
+          && request.resource.data.read is bool);
+        allow delete: if releaseIsOpen() && (isVerified() && request.auth.uid == uid);
         allow create: if false;
       }
     }
@@ -40,10 +51,10 @@ service cloud.firestore {
 
       // The charge decision of a cancellation is financial: only Cloud Functions
       // write it, in the same transaction that keeps or refunds the minutes.
-      allow update: if (isAdmin() && appointmentFinanceUnchanged() && recurringAppointmentClientUpdateAllowed() && cancellationChargeUnchanged())
+      allow update: if releaseIsOpen() && ((isAdmin() && appointmentFinanceUnchanged() && recurringAppointmentClientUpdateAllowed() && cancellationChargeUnchanged())
         || (isTrainer()
           && isAssignedTrainer(resource)
-          && onlyTrainerNotesChanged());
+          && onlyTrainerNotesChanged()));
       // Recurring occurrences are deleted through deleteAppointmentsFromAdmin,
       // which refunds the minutes and keeps the series metadata in sync.
       allow delete: if false;
@@ -63,13 +74,13 @@ service cloud.firestore {
     // TRAINERS
     match /trainers/{trainerId} {
       allow read: if isVerified() || isAdmin();
-      allow write: if isAdmin();
+      allow write: if releaseIsOpen() && (isAdmin());
     }
 
     // BLOCKED SLOTS
     match /blocked_slots/{slotId} {
       allow read: if isVerified() || isAdmin();
-      allow write: if isAdmin();
+      allow write: if releaseIsOpen() && (isAdmin());
     }
 
     // SLOT OCCUPANCY
@@ -83,20 +94,20 @@ service cloud.firestore {
     // SERVICES
     match /services/{serviceId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if releaseIsOpen() && (isAdmin());
     }
 
     // TESTIMONIALS
     match /testimonials/{testimonialId} {
       allow read: if true;
-      allow create: if isAdmin() || (isVerified() && isValidUserTestimonialCreate());
-      allow update, delete: if isAdmin();
+      allow create: if releaseIsOpen() && (isAdmin() || (isVerified() && isValidUserTestimonialCreate()));
+      allow update, delete: if releaseIsOpen() && (isAdmin());
     }
 
     // CMS / SITE CONTENT
     match /site_content/{docId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if releaseIsOpen() && (isAdmin());
     }
 
     // CAPACITY EXCEPTIONS (aforo por fecha)
@@ -115,10 +126,10 @@ service cloud.firestore {
     // editable by admins from the panel.
     match /site_config/{docId} {
       allow read: if true;
-      allow create: if isAdmin()
-        && !request.resource.data.keys().hasAny(['maxCapacity', 'capacityExceptionsEnabled', 'automaticMinuteRefundsEnabled']);
-      allow update: if isAdmin()
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['maxCapacity', 'capacityExceptionsEnabled', 'automaticMinuteRefundsEnabled']);
+      allow create: if releaseIsOpen() && (isAdmin()
+        && !request.resource.data.keys().hasAny(['maxCapacity', 'capacityExceptionsEnabled', 'automaticMinuteRefundsEnabled', 'maintenanceMode', 'minAndroidBuild', 'minIosBuild']));
+      allow update: if releaseIsOpen() && (isAdmin()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['maxCapacity', 'capacityExceptionsEnabled', 'automaticMinuteRefundsEnabled', 'maintenanceMode', 'minAndroidBuild', 'minIosBuild']));
       allow delete: if false;
     }
 
@@ -131,30 +142,30 @@ service cloud.firestore {
     // ACTIVITY LOGS
     match /activity_logs/{logId} {
       allow read: if isAdmin();
-      allow create: if isAdmin();
+      allow create: if releaseIsOpen() && (isAdmin());
     }
 
     // MEDIA LIBRARY
     match /media_folders/{folderId} {
       allow read: if isVerified() || isAdmin();
-      allow write: if isAdmin();
+      allow write: if releaseIsOpen() && (isAdmin());
     }
 
     match /media_files/{fileId} {
       allow read: if isVerified() || isAdmin();
-      allow write: if isAdmin();
+      allow write: if releaseIsOpen() && (isAdmin());
     }
 
     // GALLERY ITEMS
     match /gallery_items/{itemId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if releaseIsOpen() && (isAdmin());
     }
 
     // SYSTEM CONFIG
     match /system_config/{docId} {
       allow read: if isVerified() || isAdmin();
-      allow write: if isAdmin();
+      allow write: if releaseIsOpen() && (isAdmin());
     }
 
     // SUPPORT CHAT

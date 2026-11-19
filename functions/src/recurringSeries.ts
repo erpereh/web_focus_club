@@ -1,3 +1,4 @@
+import { runAppointmentTransaction } from "./appointmentTransaction.js";
 import { createFinanceContextReader, refundAppointmentMinutesInTransaction, BonoLedger } from "./appointmentFinance.js";
 import { FieldValue, Firestore, Transaction } from "firebase-admin/firestore";
 import { CallableRequest, HttpsError } from "firebase-functions/v2/https";
@@ -327,7 +328,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         .where("userId", "==", input.userId)
         .where("estado", "==", "activo");
 
-      const result = await db.runTransaction(async (transaction) => {
+      const result = await runAppointmentTransaction(db, async (transaction) => {
         const marker = await readIdempotencyMarker(transaction, db, { requestId, adminUid, kind: "series", payloadHash });
         if (marker.previous) return { ...marker.previous, replayed: true };
         const [
@@ -620,7 +621,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
         .where("userId", "==", userId)
         .where("estado", "==", "activo");
 
-      const result = await db.runTransaction(async (transaction) => {
+      const result = await runAppointmentTransaction(db, async (transaction) => {
         const [
           userSnap,
           siteConfigSnap,
@@ -800,7 +801,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
       const sessionType = isRecord(request.data) ? optionalText(request.data, "sessionType", 180) : "";
 
       const seriesRef = db.collection("appointment_recurrences").doc(seriesId);
-      const result = await db.runTransaction(async (transaction) => {
+      const result = await runAppointmentTransaction(db, async (transaction) => {
         const seriesSnap = await transaction.get(seriesRef);
         if (!seriesSnap.exists) {
           throwHttps("failed-precondition", "No se ha encontrado la serie indicada.");
@@ -867,7 +868,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           siteConfigSnap,
           occupancySnaps,
           bonoSnap,
-          capacityExceptions,
+          _capacityExceptions,
         ] = await Promise.all([
           transaction.get(blockedSlotsQuery),
           transaction.get(userAppointmentsQuery),
@@ -924,23 +925,15 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
           if (!doesSessionFitWithinSchedule(config, occurrence.slot.time, durationMinutes)) {
             throwHttps("failed-precondition", "Una cita de la serie queda fuera del horario disponible.");
           }
-          const counts = occurrence.keys.map((key) => {
+          occurrence.keys.forEach((key) => {
             if (blockedKeys.has(key)) throwHttps("failed-precondition", "Una franja de la serie esta bloqueada.");
             if (userSlotKeys.has(key) || internalKeys.has(key)) {
               throwHttps("failed-precondition", "Una franja de la serie entra en conflicto con otra cita.");
             }
             internalKeys.add(key);
-            return assertOccupancyCount(occupancyByKey.get(key));
+            assertOccupancyCount(occupancyByKey.get(key));
           });
-          const maxCapacity = resolveMaxCapacity(config, capacityExceptions, occurrence.slot.date);
-          if (counts.some((current) => current + 1 > maxCapacity)) {
-            restrictions.push({
-              ...occurrence.slot,
-              reason: "slot_full",
-              occupancy: Math.max(...counts),
-              maxCapacity,
-            });
-          }
+
         });
 
         const now = nowDate.toISOString();
@@ -1106,7 +1099,7 @@ export function createRecurringSeriesHandlers(deps: RecurringSeriesDeps) {
     requireOwner?: string;
   }) {
     const seriesRef = db.collection("appointment_recurrences").doc(input.seriesId);
-    const result = await db.runTransaction(async (transaction) => {
+    const result = await runAppointmentTransaction(db, async (transaction) => {
       const seriesSnap = await transaction.get(seriesRef);
       if (!seriesSnap.exists) {
         throwHttps("failed-precondition", "No se ha encontrado la serie indicada.");

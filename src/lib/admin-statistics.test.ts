@@ -277,7 +277,10 @@ describe('calculateStatistics', () => {
 
     it('detects capacity counters that disagree with approved appointments in the next days', () => {
         const { occupancyDrift, review } = calculateStatistics(fixture());
-        expect(occupancyDrift).toEqual([{ date: '2026-10-28', time: '10:15', recorded: 2, expected: 1 }]);
+        expect(occupancyDrift).toEqual([
+            ...['12:00', '12:15', '12:30', '12:45'].map(time => ({ date: '2026-10-25', time, recorded: 0, expected: 1 })),
+            { date: '2026-10-28', time: '10:15', recorded: 2, expected: 1 },
+        ]);
         expect(review.map((item) => item.id)).toEqual([
             'pending-approval', 'unassigned', 'occupancy-drift', 'expiring', 'low-minutes', 'multiple-bonos', 'retention',
         ]);

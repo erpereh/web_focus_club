@@ -18,7 +18,7 @@ export interface AdminOverrideConfirmModalProps {
     totalSessions?: number;
     /** Qué se confirma: crear (por defecto), modificar, aprobar o reducir el aforo. Solo cambia los textos. */
     mode?: AdminOverrideMode;
-    /** La cita modificada sigue pendiente: aún no ocupa plaza. */
+    /** La cita modificada sigue pendiente y reserva plaza. */
     pendingNote?: boolean;
     saving: boolean;
     error?: string;
@@ -30,12 +30,12 @@ const TITLES: Record<AdminOverrideMode, [single: string, series: string]> = {
     create: ['La cita tiene restricciones', 'La serie tiene restricciones'],
     reschedule: ['La nueva franja tiene restricciones', 'La nueva programación tiene restricciones'],
     approve: ['La aprobación supera el aforo', 'La aprobación de la serie supera el aforo'],
-    capacity: ['El nuevo aforo es menor que las citas aprobadas', 'El nuevo aforo es menor que las citas aprobadas'],
+    capacity: ['El nuevo aforo es menor que las reservas existentes', 'El nuevo aforo es menor que las reservas existentes'],
 };
 
 function describeOverride(mode: AdminOverrideMode, isSeries: boolean, affected: number, total: number): string {
     if (mode === 'capacity') {
-        return `${affected === 1 ? 'Hay 1 franja' : `Hay ${affected} franjas`} con más citas aprobadas que el nuevo aforo. Las citas existentes no se cancelan ni se modifican; solo se impedirán nuevas reservas hasta que haya plaza.`;
+        return `${affected === 1 ? 'Hay 1 franja' : `Hay ${affected} franjas`} con más citas pendientes y aprobadas que el nuevo aforo. Las citas existentes no se cancelan ni se modifican; solo se impedirán nuevas reservas hasta que haya plaza.`;
     }
     if (!isSeries) {
         if (mode === 'reschedule') return 'La franja elegida no cumple las reglas normales de reserva. Puedes guardar el cambio igualmente como administrador.';
@@ -136,7 +136,7 @@ export function AdminOverrideConfirmModal({
 
                     {pendingNote && (
                         <p className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-[var(--color-text-secondary)]">
-                            La cita sigue pendiente: no ocupa plaza hasta que se apruebe, y al aprobarla se volverá a pedir confirmación si la franja sigue completa.
+                            La cita seguirá pendiente y reservará plaza al guardar este cambio. Aprobarla conservará esa misma plaza.
                         </p>
                     )}
 

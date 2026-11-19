@@ -1,3 +1,4 @@
+import { runAppointmentTransaction } from "./appointmentTransaction.js";
 import { createFinanceContextReader, refundAppointmentMinutesInTransaction, BonoLedger } from "./appointmentFinance.js";
 import { FieldValue, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { HttpsError, type CallableRequest } from "firebase-functions/v2/https";
@@ -316,8 +317,8 @@ function buildAbsoluteOccupancyWrites(input: {
  * `slot_full` restrictions of the target sessions, for the admin to confirm.
  * Only seats the change adds count (blocks with a positive delta ending over
  * capacity); `occupancy` is the count without this appointment, so the prompt
- * reads "quedaría en occupancy + 1". A pending appointment takes no seat: its
- * target is flagged when it is already full.
+ * reads "quedaría en occupancy + 1". Pending and approved appointments
+ * already reserve their original blocks.
  */
 function collectCapacityRestrictions(input: {
   sessions: Array<{ slot: TimeSlot; keys: string[] }>;
@@ -468,7 +469,7 @@ async function rescheduleAppointmentFromAdmin(
     }
 
     let oldKeys: string[] = [];
-    if (slotChanged && appointment.status === "approved") {
+    if (slotChanged) {
       if (!currentSlot || !isSlot(currentSlot)) {
         throwHttps("failed-precondition", "La cita aprobada no tiene una franja valida.", "invalid_current_slot");
       }
@@ -483,7 +484,7 @@ async function rescheduleAppointmentFromAdmin(
     oldKeys.forEach((key) => occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) - 1));
     targetKeys.forEach((key) => occupancyDelta.set(
       key,
-      (occupancyDelta.get(key) ?? 0) + (appointment.status === "approved" ? 1 : 0),
+      (occupancyDelta.get(key) ?? 0) + 1,
     ));
     const occupancyKeysToRead = [...occupancyDelta.keys()].sort();
 
@@ -619,13 +620,13 @@ async function rescheduleAppointmentFromAdmin(
     const now = transactionNow.toISOString();
     // Every hard rule passed: a full target is only accepted with the admin's explicit confirmation.
     const adminOverride = authorizeAdminOverride({
-      restrictions: futureTargetConfig
+      restrictions: slotChanged && config
         ? collectCapacityRestrictions({
           sessions: [{ slot: input.slot, keys: targetKeys }],
           deltaByKey: occupancyDelta,
           currentByKey: occupancyByKey,
-          capacityFor: (date) => resolveMaxCapacity(futureTargetConfig, targetCapacityExceptions, date),
-          consumesCapacity: appointment.status === "approved",
+          capacityFor: (date) => resolveMaxCapacity(config!, targetCapacityExceptions, date),
+          consumesCapacity: true,
         })
         : [],
       request: overrideRequest,
@@ -891,7 +892,7 @@ async function replaceRecurringSeriesScheduleFromAdmin(
         throwHttps("failed-precondition", "Una cita futura de la serie contiene datos no validos.", "invalid_occurrence_data");
       }
       assertFutureReservation(occurrence.data, series.bonoId, seriesDuration);
-      const oldKeys = isPendingSeries ? [] : occupancyKeys(slot, duration);
+      const oldKeys = occupancyKeys(slot, duration);
       if (!isPendingSeries && oldKeys.length === 0) {
         throwHttps("failed-precondition", "Una cita futura no tiene bloques de ocupacion validos.", "invalid_occupancy");
       }
@@ -962,7 +963,7 @@ async function replaceRecurringSeriesScheduleFromAdmin(
       occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) - 1);
     }));
     desired.forEach((occurrence) => occurrence.keys.forEach((key) => {
-      occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) + (isPendingSeries ? 0 : 1));
+      occupancyDelta.set(key, (occupancyDelta.get(key) ?? 0) + 1);
     }));
     const occupancyKeysToRead = [...occupancyDelta.keys()].sort();
     const occupancyRefs = occupancyKeysToRead.map((key) => deps.db.collection("slot_occupancy").doc(key));
@@ -1050,7 +1051,7 @@ async function replaceRecurringSeriesScheduleFromAdmin(
         deltaByKey: occupancyDelta,
         currentByKey: occupancyByKey,
         capacityFor: (date) => resolveMaxCapacity(config, capacityExceptions, date),
-        consumesCapacity: !isPendingSeries,
+        consumesCapacity: true,
       }),
       request: overrideRequest,
       status: isPendingSeries ? "pending" : "approved",
@@ -1256,7 +1257,7 @@ async function returnRecurringSeriesToPendingFromAdmin(
   }
 
   const seriesRef = deps.db.collection("appointment_recurrences").doc(input.seriesId);
-  return deps.db.runTransaction(async (transaction: Transaction) => {
+  return runAppointmentTransaction(deps.db, async (transaction: Transaction) => {
     const seriesSnap = await transaction.get(seriesRef);
     if (!seriesSnap.exists) {
       throwHttps("failed-precondition", "No se ha encontrado la serie indicada.", "series_not_found");

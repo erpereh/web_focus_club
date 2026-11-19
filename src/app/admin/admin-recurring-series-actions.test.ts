@@ -22,7 +22,7 @@ describe('Admin recurring series actions', () => {
       source.indexOf("appointment.status === 'approved' && !appointment.recurrenceSeriesId"),
     );
     expect(approvedActions).toContain('Poner serie pendiente');
-    expect(source).toContain('Se liberarán las plazas reservadas, pero los minutos seguirán reservados.');
+    expect(source).toContain('Las plazas y los minutos seguirán reservados.');
     expect(source).toContain('returnRecurringSeriesToPendingFromAdminFS(seriesReturnPendingId)');
     expect(source).toContain("seriesActionBusy ? 'Guardando...' : 'Poner serie pendiente'");
   });

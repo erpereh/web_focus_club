@@ -1,3 +1,5 @@
+> **Publicación coordinada de noviembre de 2026:** seguir únicamente [el procedimiento integrado de aforo y devoluciones](despliegue-integrado-aforo-devoluciones.md). Las órdenes de publicación y cifras históricas de este documento se conservan como referencia anterior; no ejecutarlas para esta entrega.
+
 # Checklist de publicación a producción: notificaciones
 
 Este documento está igual en `web_focus_club/docs/` y en `app_focus_club/docs/`. Cubre la publicación del sistema de notificaciones al cliente (contrato en `web_focus_club/docs/notifications-contract.md`) y el endurecimiento previo a producción.

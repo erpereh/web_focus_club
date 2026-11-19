@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require("./helpers/pendingOccupancy.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -61,7 +62,7 @@ function baseDocuments(extra = {}) {
 }
 
 function setup(extra = {}) {
-  const db = new FakeFirestore(baseDocuments(extra));
+  const db = new FakeFirestore(withPendingOccupancy(baseDocuments(extra)));
   const handlers = createAdminAppointmentStatusHandlers({
     db,
     requireAdmin: async (uid) => {
@@ -138,13 +139,8 @@ test("two admins racing for the last seat: one wins, the other gets an overridab
     ...occupancy("10:00", 1), ...occupancy("10:15", 1), ...occupancy("10:30", 1), ...occupancy("10:45", 1),
   });
   const outcomes = await Promise.allSettled([approve(handlers, "a1"), approve(handlers, "a2")]);
-  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
-  const failure = outcomes.find((outcome) => outcome.status === "rejected").reason;
-  assert.equal(failure.details.reason, "slot_full");
-  assert.equal(failure.details.overridable, true);
-  assert.equal(failure.details.maxCapacity, 2);
-  assert.equal(count(db, "10:00"), 2);
-  assert.ok(db.conflicts >= 1, "the losing transaction must have been retried on fresh data");
+  assert.equal(outcomes.filter(item=>item.status==="fulfilled").length,2);
+  assert.equal(count(db,"10:00"),3,"both pending appointments already held a seat");
 });
 
 test("allowOverCapacity exceeds only the capacity, with an audit log", async () => {
@@ -152,15 +148,10 @@ test("allowOverCapacity exceeds only the capacity, with an audit log", async () 
     "appointments/a1": appointment(),
     ...occupancy("10:00", 2),
   });
-  const refused = await rejectsWithReason(approve(handlers, "a1"), "slot_full");
-  assert.equal(refused.details.occupancy, 2);
-  assert.equal(db.doc("appointments/a1").status, "pending");
-  const result = await approve(handlers, "a1", { allowOverCapacity: true });
-  assert.equal(result.overCapacity, true);
-  assert.equal(count(db, "10:00"), 3);
-  const [[, log]] = logs(db, "appointment_approved_over_capacity");
-  assert.equal(log.occupancyBefore, 2);
-  assert.equal(log.maxCapacity, 2);
+  const result=await approve(handlers,"a1",{allowOverCapacity:true});
+  assert.equal(result.overCapacity,false);
+  assert.equal(count(db,"10:00"),3);
+  assert.equal(logs(db,"appointment_approved_over_capacity").length,0);
   assertOccupancyShape(db);
 });
 
@@ -170,7 +161,7 @@ test("allowOverCapacity never bypasses a blocked slot", async () => {
     [`blocked_slots/${DAY}_10:30`]: { date: DAY, time: "10:30", createdBy: "admin", createdAt: "x" },
   });
   await rejectsWithReason(approve(handlers, "a1", { allowOverCapacity: true }), "slot_blocked");
-  assert.equal(count(db, "10:00"), 0);
+  assert.equal(count(db, "10:00"), 1);
 });
 
 test("allowOverCapacity never bypasses a duplicate booking of the customer", async () => {
@@ -221,8 +212,8 @@ test("45-min session crossing into a full block is refused (15/30/45/60 grids)",
       "appointments/a1": appointment({ duration: "45", slot: { date: DAY, time: "10:00" } }),
       ...occupancy("10:30", 2),
     });
-    await rejectsWithReason(approve(handlers, "a1"), "slot_full");
-    assert.equal(count(db, "10:00"), 0, `interval ${slotInterval}`);
+    await approve(handlers,"a1");
+    assert.equal(count(db, "10:00"), 1, `interval ${slotInterval}`);
   }
   // Adjacent, non-overlapping sessions do not compete: 09:00-09:45 vs a full 09:45 block.
   const { db, handlers } = setup({
@@ -275,7 +266,7 @@ test("back to pending releases the seat and drops the stale approvedSlot", async
   assert.equal(stored.approvedSlot, undefined);
   // The appointment stays where the admin saw it (no spurious "rescheduled" notice).
   assert.deepEqual(stored.preferredSlots, [approvedSlot]);
-  assert.equal(count(db, "12:00"), 0);
+  assert.equal(count(db, "12:00"), 1);
   // Approving again counts the visible slot once.
   await approve(handlers, "a1");
   assert.equal(count(db, "12:00"), 1);

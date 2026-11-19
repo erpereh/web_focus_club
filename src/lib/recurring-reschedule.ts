@@ -103,8 +103,8 @@ export interface RescheduleCalendarContext {
 
 /**
  * Builds the purely visual adjustments used while an appointment is being moved.
- * Excluded pending appointments stop conflicting with themselves but never receive
- * occupancy credit because pending appointments do not consume global capacity.
+ * Excluded pending and approved appointments receive occupancy credit for
+ * the blocks they already reserve.
  */
 export function buildRescheduleCalendarContext(
     appointments: Appointment[],
@@ -127,7 +127,7 @@ export function buildRescheduleCalendarContext(
             });
         }
 
-        if (excludedAppointmentIds.has(appointment.id) && appointment.status === 'approved') {
+        if (excludedAppointmentIds.has(appointment.id) && (appointment.status === 'pending' || appointment.status === 'approved')) {
             getCanonicalSlotBlocks(slot.time, duration).forEach((time) => {
                 const key = slotOccupancyKey(slot.date, time);
                 occupancyCreditsByKey.set(key, (occupancyCreditsByKey.get(key) ?? 0) + 1);

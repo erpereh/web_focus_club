@@ -1,3 +1,4 @@
+import { runAppointmentTransaction } from "./appointmentTransaction.js";
 import { bonoEffectiveMinutes } from "./bonoMinutes.js";
 import { type Firestore } from "firebase-admin/firestore";
 import { type CallableRequest, HttpsError } from "firebase-functions/v2/https";
@@ -157,7 +158,7 @@ export function createCustomerBookingHandlers(deps: CustomerBookingDeps) {
         .where("userId", "==", userId)
         .where("estado", "==", "activo");
 
-      const appointmentId = await db.runTransaction(async (transaction) => {
+      const appointmentId = await runAppointmentTransaction(db, async (transaction) => {
         const [userSnap, bonosSnap, config, customerAppointments] = await Promise.all([
           transaction.get(userRef),
           transaction.get(bonosQuery),

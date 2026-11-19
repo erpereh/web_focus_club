@@ -118,7 +118,7 @@ function evaluateOccurrence(input: {
         0,
         (input.occupancy[key] ?? 0) - (input.occupancyCreditsByKey.get(key) ?? 0),
     ));
-    if (!input.allowFullCapacity && effectiveCounts.some((count) => count >= maxCapacity)) {
+    if (!input.allowFullCapacity && effectiveCounts.some((count, index) => count >= maxCapacity && (input.occupancyCreditsByKey.get(keys[index]) ?? 0) === 0)) {
         return {
             availability: 'full',
             problemDate: input.date,

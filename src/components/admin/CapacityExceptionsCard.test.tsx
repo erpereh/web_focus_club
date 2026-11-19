@@ -68,9 +68,9 @@ describe('CapacityExceptionsCard', () => {
         fireEvent.click(screen.getByRole('button', { name: /Guardar aforo/ }));
 
         const dialog = await screen.findByRole('alertdialog');
-        expect(dialog).toHaveTextContent('El nuevo aforo es menor que las citas aprobadas');
+        expect(dialog).toHaveTextContent('El nuevo aforo es menor que las reservas existentes');
         expect(dialog).toHaveTextContent('no se cancelan ni se modifican');
-        expect(dialog).toHaveTextContent('3 aprobadas con aforo 1');
+        expect(dialog).toHaveTextContent('3 reservas con aforo 1');
         fireEvent.click(screen.getByRole('button', { name: 'Confirmar' }));
 
         await waitFor(() => expect(upsert).toHaveBeenCalledTimes(2));

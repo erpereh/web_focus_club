@@ -61,7 +61,7 @@ test("customers may delete only their own notification history", () => {
   const block = rules.match(/match \/notifications\/\{notificationId\} \{([\s\S]*?)\n\s*\}/);
   assert.ok(block, "users/{uid}/notifications rules not found");
   const body = block[1];
-  assert.match(body, /allow delete: if isVerified\(\) && request\.auth\.uid == uid;/);
+  assert.match(body, /allow delete: if releaseIsOpen\(\) && \(isVerified\(\) && request\.auth\.uid == uid\);/);
   assert.match(body, /allow create: if false;/);
   assert.doesNotMatch(body, /allow (write|delete)[^;]*isAdmin/);
   // Backend records stay closed to clients (no rule = denied).

@@ -415,7 +415,7 @@ const indexSource = fs.readFileSync(path.join(__dirname, "../src/index.ts"), "ut
 const seriesSource = fs.readFileSync(path.join(__dirname, "../src/recurringSeries.ts"), "utf8");
 const recurringSource = seriesSource.slice(seriesSource.indexOf("createRecurringAppointmentsFromAdmin:"));
 
-assert.match(recurringSource, /db\.runTransaction/);
+assert.match(recurringSource, /runAppointmentTransaction/);
 assert.match(recurringSource, /planRecurringAppointments/);
 assert.match(recurringSource, /appointment_recurrences/);
 assert.match(recurringSource, /recurring_appointments_created/);
@@ -465,7 +465,7 @@ const maxCheckAt = recurringSource.indexOf("occurrenceDates.length > MAX_RECURRI
 const occupancyKeysAt = recurringSource.indexOf("collectRecurringOccupancyKeys");
 const occupancyRefsAt = recurringSource.indexOf("occupancyRefs");
 const blockedSlotsAt = recurringSource.indexOf("blocked_slots");
-const runTransactionAt = recurringSource.indexOf("db.runTransaction");
+const runTransactionAt = recurringSource.indexOf("runAppointmentTransaction");
 assert.ok(maxCheckAt > 0, "callable must reject series longer than MAX_RECURRING_OCCURRENCES");
 assert.ok(maxCheckAt < occupancyKeysAt, "MAX 20 must be checked before occupancy keys");
 assert.ok(maxCheckAt < occupancyRefsAt || occupancyRefsAt < 0, "MAX 20 must be checked before occupancyRefs");

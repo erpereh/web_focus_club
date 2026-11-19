@@ -1,3 +1,4 @@
+import { runAppointmentTransaction } from "../appointmentTransaction.js";
 import { hasFullMinuteRefund } from "../refundAccounting.js";
 import { getAppointmentEffectiveSlot } from "../appointmentLifecycle.js";
 import { type CustomerAppointmentEvent } from "../email/templates/index.js";
@@ -206,7 +207,7 @@ export function createNotificationHandlers(deps: NotificationHandlerDeps) {
       })), now);
       for (const bonoId of overdue) {
         const ref = db.collection("bonos").doc(bonoId);
-        await db.runTransaction(async (transaction) => {
+        await runAppointmentTransaction(db, async (transaction) => {
           const current = await transaction.get(ref);
           const estado = current.exists ? (current.data() as NotifiableBono).estado : undefined;
           if (estado !== "activo" && estado !== "agotado") return;

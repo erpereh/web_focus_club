@@ -77,7 +77,7 @@ describe('recurring reschedule UI helpers', () => {
         expect([...excluded]).toEqual(['p0', 'p1', 'p2']);
         const context = buildRescheduleCalendarContext(pendingSeries, 'user-1', excluded);
         expect(context.userBookedSlotKeys.size).toBe(0);
-        expect(context.occupancyCreditsByKey.size).toBe(0);
+        expect(context.occupancyCreditsByKey.size).toBe(12);
     });
 
     it('builds only the new UI scopes without changing the slot', () => {
@@ -150,7 +150,7 @@ describe('recurring reschedule UI helpers', () => {
         const context = buildRescheduleCalendarContext([pending], pending.userId, new Set([pending.id]));
 
         expect(context.userBookedSlotKeys.size).toBe(0);
-        expect(context.occupancyCreditsByKey.size).toBe(0);
+        expect(context.occupancyCreditsByKey.size).toBe(4);
     });
 
     it('keeps other pending and approved appointments from the same customer as conflicts', () => {

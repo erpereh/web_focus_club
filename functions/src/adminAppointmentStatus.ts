@@ -1,3 +1,4 @@
+import { runAppointmentTransaction } from "./appointmentTransaction.js";
 import { FieldValue, Timestamp, type DocumentReference, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { HttpsError } from "firebase-functions/v2/https";
 import {
@@ -645,6 +646,7 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
             now: nowDate,
             customerAppointments,
             excludeAppointmentIds: [appointmentId],
+            ownApprovedOccupancyKeys: new Set(appointmentOccupancyKeys(appointment)),
             trainer,
             trainerAppointments,
           };
@@ -798,7 +800,7 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
       ? undefined
       : parseIdList(data.deleteAppointmentIds, { allowEmpty: true });
 
-    return db.runTransaction(async (transaction) => {
+    return runAppointmentTransaction(db, async (transaction) => {
       const nowDate = deps.getNowDate();
       const now = nowDate.toISOString();
       const documents = buildBlockedSlotDocuments({
@@ -870,7 +872,7 @@ export function createAdminAppointmentStatusHandlers(deps: AdminAppointmentStatu
     }
 
     const bonoRef = db.collection("bonos").doc(requestId);
-    return db.runTransaction(async (transaction) => {
+    return runAppointmentTransaction(db, async (transaction) => {
       const [existing, userSnap, activeSnap] = await Promise.all([
         transaction.get(bonoRef),
         transaction.get(db.collection("users").doc(userId)),

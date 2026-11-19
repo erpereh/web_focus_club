@@ -1,3 +1,4 @@
+import { runAppointmentTransaction } from "./appointmentTransaction.js";
 import { createHash } from "node:crypto";
 import { FieldValue, Timestamp, type DocumentReference, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { bonoBaseMinutes, bonoEffectiveMinutes, validBonoMinutes, type BonoMinutes } from "./bonoMinutes.js";
@@ -154,7 +155,7 @@ export function selectRefundDestination(bonos: RefundBono[], userId: string, now
 /** One receipt, balance, extra capacity and source projections commit together.
  * Flag and review authorization are re-read inside this very transaction. */
 export async function settleMinuteRefund(db: Firestore, id: string, now?: Date): Promise<{ credited: number; state: RefundState; wakeAt?: string }> {
-  return db.runTransaction(async (tx) => {
+  return runAppointmentTransaction(db, async (tx) => {
     const ref = db.collection(REFUNDS).doc(id);
     const [snap, config] = await Promise.all([tx.get(ref), tx.get(db.collection("site_config").doc("main"))]);
     if (!snap.exists) return { credited: 0, state: "settled" as const };
@@ -247,7 +248,7 @@ export async function drainMinuteRefunds(db: Firestore, userId: string, now?: Da
   const accountRef = db.collection(REFUND_ACCOUNTS).doc(userId);
   const account = await accountRef.get();
   if (Number(account.data()?.pendingMinutes ?? 0) <= 0) {
-    if (account.data()?.nextAttemptAt) await db.runTransaction(async (tx) => {
+    if (account.data()?.nextAttemptAt) await runAppointmentTransaction(db, async (tx) => {
       const current = await tx.get(accountRef);
       if (Number(current.data()?.pendingMinutes ?? 0) <= 0) tx.set(accountRef, { nextAttemptAt: null }, { merge: true });
     });
@@ -269,7 +270,7 @@ export async function drainMinuteRefunds(db: Firestore, userId: string, now?: Da
       if (result.wakeAt && (!wakeAt || result.wakeAt < wakeAt)) wakeAt = result.wakeAt;
       if (["waiting_bono", "blocked", "paused", "awaiting_review"].includes(result.state)) { halted = true; break; }
     }
-    await db.runTransaction(async (tx) => {
+    await runAppointmentTransaction(db, async (tx) => {
       const current = await tx.get(accountRef);
       if (Number(current.data()?.generation ?? 0) !== generation) return;
       const continuation = debts.size > REFUND_BATCH && credited > 0 && !halted && Number(current.data()?.pendingMinutes ?? 0) > 0;
@@ -302,7 +303,7 @@ export async function recoverDueMinuteRefunds(db: Firestore, now?: Date): Promis
 
 export async function wakeMinuteRefunds(db: Firestore, userId: string, now = new Date()): Promise<void> {
   const ref = db.collection(REFUND_ACCOUNTS).doc(userId);
-  await db.runTransaction(async (tx) => {
+  await runAppointmentTransaction(db, async (tx) => {
     const account = await tx.get(ref);
     if (Number(account.data()?.pendingMinutes ?? 0) <= 0) return;
     const config = await tx.get(db.collection("site_config").doc("main"));

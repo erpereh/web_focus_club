@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require("./helpers/pendingOccupancy.cjs");
 // Cancellations with and without charge: the admin decides, in one
 // transaction, whether the consumed minutes stay consumed. A charge must never
 // be undone later by the trigger, a deletion or a retry.
@@ -49,7 +50,7 @@ function occupancy(count) {
 }
 
 function setup(extra = {}) {
-  const db = new FakeFirestore({
+  const db = new FakeFirestore(withPendingOccupancy({
     "site_config/main": { startHour: 7, endHour: 22, slotInterval: 15, maxCapacity: 4 },
     "users/admin": { role: "admin", email: "admin@example.com" },
     "users/user-1": { uid: "user-1", name: "Lucía", email: "lucia@example.com" },
@@ -59,7 +60,7 @@ function setup(extra = {}) {
       fechaExpiracion: "2026-12-31T22:59:59.000Z", historial: [],
     },
     ...extra,
-  });
+  }));
   const handlers = createAdminAppointmentStatusHandlers({
     db,
     requireAdmin: async (uid) => {

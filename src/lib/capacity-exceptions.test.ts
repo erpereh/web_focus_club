@@ -80,7 +80,7 @@ describe('capacity exceptions (aforo por fecha)', () => {
         });
         expect(prompt?.fingerprint).toBe('fp');
         expect(describeAdminRestriction(prompt!.restrictions[0]))
-            .toBe('Más citas aprobadas que el nuevo aforo: 3 aprobadas con aforo 2. Las citas se mantienen.');
+            .toBe('Más reservas que el nuevo aforo: 3 reservas con aforo 2. Las citas se mantienen.');
         expect(parseAdminOverridePrompt({ reason: 'slot_full', fingerprint: 'fp', restrictions: [] })).toBeUndefined();
     });
 });

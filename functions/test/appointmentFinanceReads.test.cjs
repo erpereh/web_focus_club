@@ -1,3 +1,4 @@
+const { withPendingOccupancy } = require("./helpers/pendingOccupancy.cjs");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { createFinanceContextReader, resolveRefundTarget } = require("../lib/appointmentFinance.js");
@@ -19,7 +20,7 @@ function fixture(count = 40) {
 const handlers = (db) => createAdminAppointmentStatusHandlers({ db, requireAdmin: async () => undefined, getNowDate: () => NOW });
 
 test("forty deletions read each financial resource once and accumulate every refund without loading history", async () => {
-  const db = new FakeFirestore(fixture());
+  const db = new FakeFirestore(withPendingOccupancy(fixture()));
   const ids = Array.from({ length: 40 }, (_, i) => `a${i}`);
   const result = await handlers(db).deleteAppointmentsFromAdmin(callable("admin", { appointmentIds: ids }));
   assert.equal(result.refundedIds.length, 40);
@@ -38,7 +39,7 @@ test("forty deletions read each financial resource once and accumulate every ref
 });
 
 test("a retried deletion rebuilds the financial cache and uses the latest balance", async () => {
-  const db = new FakeFirestore(fixture(2));
+  const db = new FakeFirestore(withPendingOccupancy(fixture(2)));
   let injected = false;
   db.beforeCommit = async () => {
     if (injected) return;
@@ -53,11 +54,11 @@ test("a retried deletion rebuilds the financial cache and uses the latest balanc
 });
 
 test("parallel readers keep separate users and all active bonos, including ambiguous and replaced cases", async () => {
-  const db = new FakeFirestore({
+  const db = new FakeFirestore(withPendingOccupancy({
     "bonos/old": { userId: "u", estado: "agotado", replacedByBonoId: "current", minutosTotales: 600, minutosRestantes: 0, historial: ["large"] },
     "bonos/current": { userId: "u", estado: "activo", sesionesTotales: 10, sesionesRestantes: 3, modalidad: "30min", fechaExpiracion: "2028-01-01T00:00:00Z" },
     "bonos/other": { userId: "v", estado: "activo", minutosTotales: 600, minutosRestantes: 600 },
-  });
+  }));
   await db.runTransaction(async (tx) => {
     const read = createFinanceContextReader(tx, db);
     const [a, b, other] = await Promise.all([read({ userId: "u", bonoId: "old" }), read({ userId: "u", bonoId: "old" }), read({ userId: "v", bonoId: "old" })]);

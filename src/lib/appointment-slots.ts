@@ -62,7 +62,7 @@ export function getSlotAvailability(input: {
     ));
     const occupancy = Math.max(0, ...effectiveCounts);
 
-    if (effectiveCounts.some((count) => count >= input.maxCapacity)) {
+    if (effectiveCounts.some((count, index) => count >= input.maxCapacity && (input.occupancyCreditsByKey?.get(coveredKeys[index]) ?? 0) === 0)) {
         return { disabled: true, reason: 'slot_full', occupancy };
     }
 

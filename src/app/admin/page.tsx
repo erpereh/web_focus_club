@@ -6658,10 +6658,10 @@ export default function AdminPage() {
                                           // Si deleteOnBlock está activo, buscar citas afectadas
                                           if (deleteOnBlock) {
                                             if (affectedAppointments.length > 0) {
-                                              const approvedOnes = affectedAppointments.filter(a => a.status === 'approved');
+                                              const approvedOnes = affectedAppointments.filter(a => a.status === 'pending' || a.status === 'approved');
                                               let msg = `Se eliminarán ${affectedAppointments.length} cita(s) en estas franjas.`;
                                               if (approvedOnes.length > 0) {
-                                                msg += `\n\n⚠️ ATENCIÓN: ${approvedOnes.length} cita(s) APROBADA(S) serán eliminadas:\n`;
+                                                msg += `\n\n⚠️ ATENCIÓN: ${approvedOnes.length} cita(s) PENDIENTE(S) O APROBADA(S) serán eliminadas:\n`;
                                                 msg += approvedOnes.map(a => `  - ${a.name} (${a.approvedSlot?.time || a.preferredSlots?.[0]?.time || '?'})`).join('\n');
                                               }
                                               msg += '\n\n¿Continuar con el bloqueo y eliminación?';
@@ -7470,14 +7470,15 @@ export default function AdminPage() {
                             <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Modo Mantenimiento</h2>
                           </div>
                           <p className="text-sm text-[var(--color-text-secondary)] max-w-3xl">
-                            Bloquea temporalmente la web pública y el portal de clientes con una pantalla de mantenimiento. El panel de administración seguirá disponible desde la URL <span className="text-[var(--color-text-primary)] font-medium">/admin</span>.
+                            Durante el mantenimiento se bloquean los cambios en la web, las apps y el panel. La administración permite consultar los datos. El cierre y la reapertura se gestionan con el procedimiento de publicación revisado.
                           </p>
                         </div>
 
                         <button
                           type="button"
+                          disabled
+                          title="El mantenimiento se gestiona con el procedimiento de publicación auditado."
                           onClick={() => setMaintenanceConfirmValue(!siteConfig.maintenanceMode)}
-                          disabled={savingMaintenance}
                           className={cn(
                             'px-5 py-2.5 rounded-xl font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed',
                             siteConfig.maintenanceMode
@@ -8060,7 +8061,7 @@ export default function AdminPage() {
                                 <span>
                                   Contador de aforo desincronizado en {drift.slice(0, 4).map(({ time, status }) => (
                                     status.mismatch
-                                      ? `${time} (registrado ${status.mismatch.registered}, citas aprobadas ${status.mismatch.approved})`
+                                      ? `${time} (registrado ${status.mismatch.registered}, citas pendientes y aprobadas ${status.mismatch.expected})`
                                       : `${time} (contador inválido)`
                                   )).join(', ')}{drift.length > 4 ? '…' : ''}. La disponibilidad mostrada es la que aplicará el servidor; revisa la conciliación de aforo.
                                 </span>
@@ -8821,7 +8822,7 @@ export default function AdminPage() {
                         Volver serie a pendiente
                       </h2>
                       <p className="mt-3 text-sm leading-relaxed text-[var(--color-text-secondary)]">
-                        ¿Quieres volver esta serie a pendiente? Se liberarán las plazas reservadas, pero los minutos seguirán reservados.
+                        ¿Quieres volver esta serie a pendiente? Las plazas y los minutos seguirán reservados.
                       </p>
                       {seriesReturnPendingError && (
                         <p role="alert" className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
