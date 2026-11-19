@@ -11,8 +11,9 @@
       "name": "Functions shared",
       "command": "npm --prefix functions test",
       "status": "passed",
-      "structuredTests": 482,
-      "legacyAssertionScripts": 6
+      "structuredTests": 538,
+      "legacyAssertionScripts": 6,
+      "lastVerifiedAt": "2026-11-19T12:00:58.772Z"
     },
     {
       "name": "Firestore emulator",
@@ -105,8 +106,8 @@
   ],
   "evidence": {
     "functions": {
-      "path": "release/test-logs/focus-functions-final.log",
-      "sha256": "9baaedebaf8c5f8b46676074255fb43f16942c855460b2a4cd598157765147d2"
+      "path": "release/test-logs/focus-index-fix-functions.log",
+      "sha256": "a4b9179ccd11aee96e6bdb7b4f78719c826fd0657507f905521fc532889eef16"
     },
     "emulator": {
       "path": "release/test-logs/focus-emulator-final.log",
@@ -144,5 +145,21 @@
       "path": "release/test-logs/focus-lint-final.log",
       "sha256": "724986d6c8d2f748471f69c44eb90fd2740a65887b44bd6ec5c5d9bcb0ea9ea5"
     }
-  }
+  },
+  "followupValidations": [
+    {
+      "name": "Firestore index verifier HTTP 400 correction",
+      "verifiedAt": "2026-11-19T12:00:58.772Z",
+      "productionWrites": false,
+      "newRegressionTests": 56,
+      "fullFunctionsStructuredTests": 538,
+      "legacyAssertionScripts": 6,
+      "liveReadOnlyVerification": {
+        "compositeIndexes": 15,
+        "fieldOverrides": 2,
+        "fieldIndexes": 8
+      },
+      "bootstrapPackagesRetained": 10
+    }
+  ]
 }

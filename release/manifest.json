@@ -1309,6 +1309,10 @@
       "sha256": "e1aa7ac05eb5e8922f59682828f4d1fba08616965183f0fe460183c899a22088"
     },
     {
+      "path": "scripts/firestore-index-verifier.cjs",
+      "sha256": "3d9e10b8cc4b2b9666563dff89e55945ccbb622b8a8a2b3898b5f558ce99136f"
+    },
+    {
       "path": "scripts/migrate-to-storage.cjs",
       "sha256": "89258159579963d75a147a8b06ddb8cdca41b25716e800d0370a5cb415af8ebc"
     },
@@ -1330,7 +1334,7 @@
     },
     {
       "path": "scripts/release-controls.cjs",
-      "sha256": "05637862fd559387243aba953e2aa4c48a4b62bd13906f50c5fa4273a85a0dbb"
+      "sha256": "df73e7ffa0864d944510a6e1fb783a2fb5cc0c2cd93b7cf0ba671b0879126d4d"
     },
     {
       "path": "scripts/reorganize-cms-media.cjs",
@@ -2434,7 +2438,7 @@
     },
     {
       "path": "functions/package.json",
-      "sha256": "639d10d6e6d5857369b6828e7414210fe37c6fa18b3d9e8b61fd48df4eb96453"
+      "sha256": "dc1a358bd3ee67715d520d4a26b42d11e44e422bc03e6fd044865aef8a47f807"
     },
     {
       "path": "functions/package-lock.json",
@@ -2466,7 +2470,7 @@
     },
     {
       "path": "release/test-results.json",
-      "sha256": "25863b14d6f46c707229869f0e7a686a5c56435ac81a493be7a1f418ab2366e8"
+      "sha256": "90ea7f1d84b76ddf1c4eba468274fc393c1e57b2b47c1c3b266fa4fbece5a9cb"
     },
     {
       "path": "release/bootstrap/1e047758874a1474ce33/firebase.json",
@@ -8249,5 +8253,5 @@
     ],
     "rulesetName": "projects/focus-club-f73b8/rulesets/7f6240e5-dfe7-4a2a-95f3-c673448fa6f3"
   },
-  "manifestHash": "958d1cf025c3c848e1f44430c36d1cb7cbb34df481744c6d2c83760a4b8989a7"
+  "manifestHash": "73c2d68b0f33047fd1ba70ff01be2ea066431e2424e0f6d7f2f9e595d7eb0ba3"
 }

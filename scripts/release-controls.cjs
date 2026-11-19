@@ -2,6 +2,7 @@
 const c = require('./release-common.cjs');
 const { fs, path, root, arg, flag, hash, readJson, writeJson, initialize, googleGet, deployedFunctions, assertManifest } = c;
 const { zipFiles } = require('./prepare-coordinated-release.cjs');
+const { verifyFirestoreIndexes } = require('./firestore-index-verifier.cjs');
 const CONTROL = 'system_controls/release', QUEUE = 'system_controls/deferred';
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const httpsUrl = (value) => { try { return new URL(value).protocol === 'https:'; } catch { return false; } };
@@ -42,25 +43,7 @@ async function verifyRules(credential, project, expectedFile) {
   if (source !== fs.readFileSync(expectedFile, 'utf8')) throw new Error('Las reglas publicadas no coinciden con las revisadas.');
 }
 async function verifyIndexes(credential, project) {
-  let pageToken, indexes = [];
-  do {
-    const result = await googleGet(credential, `https://firestore.googleapis.com/v1/projects/${project}/databases/(default)/collectionGroups/-/indexes?pageSize=1000${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`);
-    indexes.push(...(result.indexes ?? [])); pageToken = result.nextPageToken;
-  } while (pageToken);
-  const definition = (index) => JSON.stringify({ collection: index.collectionGroup ?? index.name.split('/collectionGroups/')[1].split('/')[0],
-    scope: index.queryScope, fields: index.fields.filter((field) => field.fieldPath !== '__name__').map(field=>({fieldPath:field.fieldPath,mode:field.order??field.arrayConfig})) });
-  const ready = new Set(indexes.filter((index) => index.state === 'READY').map(definition));
-  const missing = readJson(path.join(root, 'firestore.indexes.json')).indexes.filter((index) => !ready.has(definition(index)));
-  if (missing.length) throw new Error(`${missing.length} índices todavía no están disponibles. Esperar antes de continuar.`);
-  for (const field of readJson(path.join(root, 'firestore.indexes.json')).fieldOverrides ?? []) {
-    const actual = await googleGet(credential, `https://firestore.googleapis.com/v1/projects/${project}/databases/(default)/collectionGroups/${encodeURIComponent(field.collectionGroup)}/fields/${encodeURIComponent(field.fieldPath)}`);
-    const available = new Set((actual.indexConfig?.indexes ?? []).filter((index) => index.state === 'READY')
-      .flatMap((index) => index.fields.filter((item) => item.fieldPath === field.fieldPath)
-        .map((item) => `${index.queryScope}:${item.order ?? item.arrayConfig}`)));
-    if (field.indexes.some((index) => !available.has(`${index.queryScope}:${index.order ?? index.arrayConfig}`))) {
-      throw new Error(`Índice de campo todavía no disponible: ${field.collectionGroup}.${field.fieldPath}.`);
-    }
-  }
+  return verifyFirestoreIndexes((url) => googleGet(credential, url), project, readJson(path.join(root, 'firestore.indexes.json')));
 }
 async function verifyHosting(credential, project) {
   const result = await googleGet(credential, `https://firebasehosting.googleapis.com/v1beta1/sites/${project}/releases?pageSize=1`);
@@ -158,7 +141,11 @@ async function main() {
       }
       console.log('Etapa autorizada por el estado de la publicación.');return;
     }
-    if (command === 'verify-indexes') { await verifyIndexes(credential, project); console.log('Índices disponibles.'); return; }
+    if (command === 'verify-indexes') {
+      const checked = await verifyIndexes(credential, project);
+      console.log(`Índices disponibles: ${checked.compositeIndexes} compuestos, ${checked.fieldOverrides} field overrides y ${checked.fieldIndexes} índices de campo.`);
+      return;
+    }
     if (command === 'verify-bootstrap') {
       await verifyFunctions(credential, project, manifest, 'bootstrap');
       await verifyRules(credential, project, path.join(root, 'release/bootstrap/firestore.rules'));
