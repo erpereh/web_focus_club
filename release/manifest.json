@@ -1293,6 +1293,10 @@
       "sha256": "1e31e60d3b4ee380365d5bc4208630fc1835132d91be80f6b110671b960656f9"
     },
     {
+      "path": "scripts/bootstrap-resume.cjs",
+      "sha256": "0b8eabe40adc9a8bc0b72c0943d66bc4b10aa8974108a7ee4d7d4b7af9df3362"
+    },
+    {
       "path": "scripts/build-static.js",
       "sha256": "4c3c628b7800f56aaaafdd229ce4fa8bfbe4c3060695ceee19fb2e96f6bd2893"
     },
@@ -1306,7 +1310,7 @@
     },
     {
       "path": "scripts/deploy-release.ps1",
-      "sha256": "e1aa7ac05eb5e8922f59682828f4d1fba08616965183f0fe460183c899a22088"
+      "sha256": "6ba052739c238878111adf1bff6a243c67152a41e9d76107aa49b7fae4ff80c3"
     },
     {
       "path": "scripts/firestore-index-verifier.cjs",
@@ -1317,8 +1321,12 @@
       "sha256": "89258159579963d75a147a8b06ddb8cdca41b25716e800d0370a5cb415af8ebc"
     },
     {
+      "path": "scripts/portal-bootstrap-repair.cjs",
+      "sha256": "a7ddf425d08dbdc512a4b6bb87c86e7bb07e3893444db95a7373c5716ed2e518"
+    },
+    {
       "path": "scripts/prepare-coordinated-release.cjs",
-      "sha256": "7b667dfd3c6eb2e55c2072639ab689975d92efc71807ffcf42aeb336f3c1428b"
+      "sha256": "2652cd9a5e1fc71ba96df122eb24db615435cf674a87f8be3040aa0fa6c817d8"
     },
     {
       "path": "scripts/reconcile-minute-refunds.cjs",
@@ -1334,7 +1342,7 @@
     },
     {
       "path": "scripts/release-controls.cjs",
-      "sha256": "df73e7ffa0864d944510a6e1fb783a2fb5cc0c2cd93b7cf0ba671b0879126d4d"
+      "sha256": "b7a279d3b69a78c23f035275abe6bb53510f48d840a68a84e41fac003d44025e"
     },
     {
       "path": "scripts/reorganize-cms-media.cjs",
@@ -2438,7 +2446,7 @@
     },
     {
       "path": "functions/package.json",
-      "sha256": "dc1a358bd3ee67715d520d4a26b42d11e44e422bc03e6fd044865aef8a47f807"
+      "sha256": "bbb23df02604c396b68a80cb755adc57eba5ce590b66c59240e92a21f0521741"
     },
     {
       "path": "functions/package-lock.json",
@@ -2462,7 +2470,7 @@
     },
     {
       "path": "docs/despliegue-integrado-aforo-devoluciones.md",
-      "sha256": "74cc0a28b9afc805c608a009c6a2d4cef9fd2be811770ba4d718f757f55fb8e9"
+      "sha256": "f45681f39d053476d46c9c1d4b0eda08897debd751882d186585f366b8fc4fa8"
     },
     {
       "path": "release/auditoria-historica.md",
@@ -2470,7 +2478,7 @@
     },
     {
       "path": "release/test-results.json",
-      "sha256": "90ea7f1d84b76ddf1c4eba468274fc393c1e57b2b47c1c3b266fa4fbece5a9cb"
+      "sha256": "0b7940d602228d5690e4644a686a8024b24aba22c79cd44c962611a2f942255a"
     },
     {
       "path": "release/bootstrap/1e047758874a1474ce33/firebase.json",
@@ -7458,7 +7466,7 @@
     },
     {
       "path": "release/bootstrap/feaf41d65ada677f809c/functions/lib/index.js",
-      "sha256": "9f3e8ce4e8b1325633cba5c6dd6fcfc4c032392b60aeacf2ac69241ffbc4fcd6"
+      "sha256": "6a431c96a425b53c5db8e84d36ca92a4b53b70abe58240acd331d6de11d80cb5"
     },
     {
       "path": "release/bootstrap/feaf41d65ada677f809c/functions/lib/releaseMaintenance.js",
@@ -7474,7 +7482,7 @@
     },
     {
       "path": "release/bootstrap/feaf41d65ada677f809c/functions/src/index.ts",
-      "sha256": "5ae825b4c7b782557002bc9e0c29f67229663f0ebfc2dd697b732343f72cc07d"
+      "sha256": "27236f91d7055b7039f9ee4ad43e0a6d3dcccbb9d445084840ab6f676d9d569f"
     },
     {
       "path": "release/bootstrap/feaf41d65ada677f809c/functions/src/releaseMaintenance.ts",
@@ -8148,7 +8156,143 @@
             }
           }
         ],
-        "compiled": true
+        "compiled": true,
+        "amendments": [
+          {
+            "id": "portal-delete-own-account-without-legacy-make-v1",
+            "reason": "Remove obsolete discovery-time Make dependency; preserve captured account deletion and maintenance.",
+            "originalSourceHash": "feaf41d65ada677f809c84bd595837fc5714346817e1e59dbabff8db1ca9db97",
+            "beforeInputs": [
+              {
+                "path": "release/bootstrap/feaf41d65ada677f809c/functions/lib/index.js",
+                "sha256": "9f3e8ce4e8b1325633cba5c6dd6fcfc4c032392b60aeacf2ac69241ffbc4fcd6"
+              },
+              {
+                "path": "release/bootstrap/feaf41d65ada677f809c/functions/lib/releaseMaintenance.js",
+                "sha256": "849716f657adf4fb98aa7826ceb2b1bc8d52e281599ecef48fa3d8a450aada54"
+              },
+              {
+                "path": "release/bootstrap/feaf41d65ada677f809c/functions/package-lock.json",
+                "sha256": "2ebbeab714b929e5f1569fc49a0ab6da8aa02254fa1b78f108bfb057f0d06d87"
+              },
+              {
+                "path": "release/bootstrap/feaf41d65ada677f809c/functions/package.json",
+                "sha256": "72fc325c135dbaa4f39715be71520fb740b0dd0857ffefaec1f6415c0f1d2d4f"
+              },
+              {
+                "path": "release/bootstrap/feaf41d65ada677f809c/functions/src/index.ts",
+                "sha256": "5ae825b4c7b782557002bc9e0c29f67229663f0ebfc2dd697b732343f72cc07d"
+              },
+              {
+                "path": "release/bootstrap/feaf41d65ada677f809c/functions/src/releaseMaintenance.ts",
+                "sha256": "de1eab8e152b03374badb3ba6587621c5e3a54f13c404bb12d6c781172e2b186"
+              },
+              {
+                "path": "release/bootstrap/feaf41d65ada677f809c/functions/tsconfig.json",
+                "sha256": "9b52c7ccedd96db4f289af050a810a0d1400b7f4afebf08a79e4872f5279fb94"
+              }
+            ],
+            "afterInputs": [
+              {
+                "path": "release/bootstrap/feaf41d65ada677f809c/functions/lib/index.js",
+                "sha256": "6a431c96a425b53c5db8e84d36ca92a4b53b70abe58240acd331d6de11d80cb5"
+              },
+              {
+                "path": "release/bootstrap/feaf41d65ada677f809c/functions/lib/releaseMaintenance.js",
+                "sha256": "849716f657adf4fb98aa7826ceb2b1bc8d52e281599ecef48fa3d8a450aada54"
+              },
+              {
+                "path": "release/bootstrap/feaf41d65ada677f809c/functions/package-lock.json",
+                "sha256": "2ebbeab714b929e5f1569fc49a0ab6da8aa02254fa1b78f108bfb057f0d06d87"
+              },
+              {
+                "path": "release/bootstrap/feaf41d65ada677f809c/functions/package.json",
+                "sha256": "72fc325c135dbaa4f39715be71520fb740b0dd0857ffefaec1f6415c0f1d2d4f"
+              },
+              {
+                "path": "release/bootstrap/feaf41d65ada677f809c/functions/src/index.ts",
+                "sha256": "27236f91d7055b7039f9ee4ad43e0a6d3dcccbb9d445084840ab6f676d9d569f"
+              },
+              {
+                "path": "release/bootstrap/feaf41d65ada677f809c/functions/src/releaseMaintenance.ts",
+                "sha256": "de1eab8e152b03374badb3ba6587621c5e3a54f13c404bb12d6c781172e2b186"
+              },
+              {
+                "path": "release/bootstrap/feaf41d65ada677f809c/functions/tsconfig.json",
+                "sha256": "9b52c7ccedd96db4f289af050a810a0d1400b7f4afebf08a79e4872f5279fb94"
+              }
+            ],
+            "preservedDeclarations": [
+              {
+                "name": "Bono",
+                "sha256": "3f5188f17af30a01ee764871202f22d7ed12ae2df82c0feda219366220cd437a"
+              },
+              {
+                "name": "UserProfile",
+                "sha256": "365a7717427bd8340c7dc269b808d31e535019fae0cd783ebca865954eba799e"
+              },
+              {
+                "name": "anonymizeAppointmentsForDeletedUser",
+                "sha256": "36fa4c9349b5d4a07c1b7237b42528220731453bd0eec9d3cf036c3fcfb7b416"
+              },
+              {
+                "name": "anonymizeBonosForDeletedUser",
+                "sha256": "461d900a202dfb0e0c946b94da761be7fe5e445c0b3ebbe1158627a58543522a"
+              },
+              {
+                "name": "anonymizeHistoryEntry",
+                "sha256": "dda450ac4a2fdc7ed9da6952373b6943cccc1e7c5ad0a01a83b60bc13c3f4e6a"
+              },
+              {
+                "name": "commitUpdatesInBatches",
+                "sha256": "047efdbd4493f80cfcab214eded5ed649ec563e757c13e5fba5adc430ff5be6f"
+              },
+              {
+                "name": "db",
+                "sha256": "b8d90bb97dfa7accd3913b74b6ed74fee26f47c4e9d53a988dc3f0a6b959b1a8"
+              },
+              {
+                "name": "deleteOwnAccount",
+                "sha256": "d287f9c86be51807c8e1e00147581de37e7f4b47a173b1315b5cefa014559d1a"
+              },
+              {
+                "name": "deleteUserAvatarFiles",
+                "sha256": "898b5394ec3a6c4bcd8ca0bec72a348bfc7ee5e890a63c2b1109fa9e6164de21"
+              },
+              {
+                "name": "deletedHistoryDescription",
+                "sha256": "9092a3c4115cd0f5c2a2d477231562f3f6c753fe87c7e673a80ad049636f7ea7"
+              },
+              {
+                "name": "deletedUserName",
+                "sha256": "8c7237f5038c6183fbdba9adbfade89c1ae134fab13d6e0b83757b3ae8b78953"
+              },
+              {
+                "name": "handleDeleteOwnAccount",
+                "sha256": "534363b720ea31b08919918656053930d46b57dd8a2d708a61794f4a4b0664b2"
+              },
+              {
+                "name": "region",
+                "sha256": "d156b6577f63d611af2f664580cb27ca169c4932130781aebac1c74fc99e7e60"
+              },
+              {
+                "name": "requireAuthUid",
+                "sha256": "6a93214ef5d2649dec4a30b1a64a959a23759bfd7145bd1b1ac4a7c3e919ddf5"
+              },
+              {
+                "name": "stringOrEmpty",
+                "sha256": "5a78f4be0152b9b2a4ba5bfb67e4e4ecdaf00fa93876540d223e1e6a7d2df7ef"
+              }
+            ],
+            "discovery": {
+              "endpoints": [
+                "deleteOwnAccount"
+              ],
+              "params": [],
+              "secretBindings": []
+            }
+          }
+        ]
       },
       {
         "config": "release/bootstrap/ddc5657a8be986cc0fad/firebase.json",
@@ -8253,5 +8397,5 @@
     ],
     "rulesetName": "projects/focus-club-f73b8/rulesets/7f6240e5-dfe7-4a2a-95f3-c673448fa6f3"
   },
-  "manifestHash": "73c2d68b0f33047fd1ba70ff01be2ea066431e2424e0f6d7f2f9e595d7eb0ba3"
+  "manifestHash": "aa5cb2fbc938d050f9861825e9cef578bd6f206c1ba71a3ae29c17247d1ead7e"
 }

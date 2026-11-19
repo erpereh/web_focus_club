@@ -5,6 +5,7 @@ const { spawnSync } = require('node:child_process');
 const c = require('./release-common.cjs');
 const { fs, path, root, arg, flag, hash, readJson, writeJson, initialize, googleGet, deployedFunctions } = c;
 const { exportedFunctionNames } = require('../functions/scripts/deploy-filter.cjs');
+const { specializePortalBootstrap, repairPortalBootstrap } = require('./portal-bootstrap-repair.cjs');
 const ts = c.requireFunctions('typescript');
 const RELEASE_ID = 'occupancy-v2-refunds-20261118';
 
@@ -96,6 +97,11 @@ async function main() {
     inputs, bootstrap: { captured: false, artifacts: [], webFunctions: [] },
   };
   const previousManifest = fs.existsSync(path.join(output, 'manifest.json')) ? readJson(path.join(output, 'manifest.json')) : undefined;
+  if (flag('--repair-portal-bootstrap')) {
+    if (!flag('--offline') || !previousManifest?.bootstrap?.captured) throw new Error('La reparación exige --offline y la captura existente.');
+    const { manifestHash, ...body } = previousManifest;
+    if (hash(JSON.stringify(body)) !== manifestHash) throw new Error('La huella del manifiesto anterior no coincide.');
+  }
   if (!flag('--offline') && !previousManifest?.bootstrap?.captured) {
     const { db, credential } = await initialize(project);
     try {
@@ -125,12 +131,13 @@ async function main() {
           if (!target.startsWith(functionsFolder + path.sep)) throw new Error('Ruta de extracción fuera del artefacto.');
           fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, data, { flag: 'wx' });
         }
-        const entry = path.join(functionsFolder, 'src/index.ts');
-        fs.writeFileSync(entry, wrapBootstrap(fs.readFileSync(entry, 'utf8')));
-        const maintenance = fs.readFileSync(path.join(root, 'functions/src/releaseMaintenance.ts'), 'utf8').replace('REQUIRE_OCCUPANCY_V2 = true', 'REQUIRE_OCCUPANCY_V2 = false');
-        fs.writeFileSync(path.join(functionsFolder, 'src/releaseMaintenance.ts'), maintenance);
         const portal = group.functions.includes('deleteOwnAccount');
         if (portal && group.functions.length !== 1) throw new Error('Codebases mezclados en una captura.');
+        const entry = path.join(functionsFolder, 'src/index.ts');
+        const wrapped = wrapBootstrap(fs.readFileSync(entry, 'utf8'));
+        fs.writeFileSync(entry, portal ? specializePortalBootstrap(wrapped).source : wrapped);
+        const maintenance = fs.readFileSync(path.join(root, 'functions/src/releaseMaintenance.ts'), 'utf8').replace('REQUIRE_OCCUPANCY_V2 = true', 'REQUIRE_OCCUPANCY_V2 = false');
+        fs.writeFileSync(path.join(functionsFolder, 'src/releaseMaintenance.ts'), maintenance);
         writeJson(path.join(folder, 'firebase.json'), { functions: { source: 'functions', ...(portal ? { codebase: 'portal' } : {}) } });
         manifest.bootstrap.artifacts.push({ config: path.relative(root, path.join(folder, 'firebase.json')).replaceAll('\\','/'), functions: group.functions.sort(), portal, originalSourceHash: digest, sourceVersions: group.sourceVersions });
       }
@@ -150,7 +157,11 @@ async function main() {
   } else if (previousManifest?.bootstrap?.captured) {
     manifest.bootstrap = previousManifest.bootstrap;
   }
-  if (!flag('--skip-bootstrap-build')) for (const artifact of manifest.bootstrap.artifacts) {
+  if (flag('--repair-portal-bootstrap')) {
+    repairPortalBootstrap(previousManifest);
+    console.log('Paquete portal reparado y descubierto sin secretos. Los otros paquetes se conservan. Ninguna lectura o escritura remota.');
+  }
+  if (!flag('--repair-portal-bootstrap') && !flag('--skip-bootstrap-build')) for (const artifact of manifest.bootstrap.artifacts) {
     const folder = path.resolve(root, path.dirname(artifact.config), 'functions');
     fs.writeFileSync(path.join(folder,'src/releaseMaintenance.ts'),fs.readFileSync(path.join(root,'functions/src/releaseMaintenance.ts'),'utf8').replace('REQUIRE_OCCUPANCY_V2 = true','REQUIRE_OCCUPANCY_V2 = false'));
     const lock = path.join(folder, 'package-lock.json');

@@ -11,9 +11,9 @@
       "name": "Functions shared",
       "command": "npm --prefix functions test",
       "status": "passed",
-      "structuredTests": 538,
+      "structuredTests": 581,
       "legacyAssertionScripts": 6,
-      "lastVerifiedAt": "2026-11-19T12:00:58.772Z"
+      "lastVerifiedAt": "2026-11-19T20:39:22.370Z"
     },
     {
       "name": "Firestore emulator",
@@ -56,14 +56,15 @@
       "command": "npm --prefix ../app_focus_club/functions test",
       "status": "passed",
       "tests": 2,
-      "exports": "deleteOwnAccount"
+      "exports": "deleteOwnAccount",
+      "lastVerifiedAt": "2026-11-19T20:39:22.370Z"
     },
     {
       "name": "Release guards",
       "command": "node --test functions/test/releaseTools.test.cjs",
       "status": "passed",
       "tests": 8,
-      "note": "Already included in the 482 shared tests; repeated after final operator-tool changes."
+      "note": "Included in the complete shared Functions suite."
     },
     {
       "name": "ESLint changed TypeScript",
@@ -106,8 +107,8 @@
   ],
   "evidence": {
     "functions": {
-      "path": "release/test-logs/focus-index-fix-functions.log",
-      "sha256": "a4b9179ccd11aee96e6bdb7b4f78719c826fd0657507f905521fc532889eef16"
+      "path": "release/test-logs/focus-bootstrap-repair-functions.log",
+      "sha256": "9a02e7807861fe99fa04d02f632a8ca9e572172c524f35f9d9f5c5baa07ce003"
     },
     "emulator": {
       "path": "release/test-logs/focus-emulator-final.log",
@@ -134,8 +135,8 @@
       "sha256": "900c0eafc1d3eed377dce949d392a4b0b75b816eec80f9a4ba22a17fca02da24"
     },
     "portal": {
-      "path": "release/test-logs/focus-portal-final.log",
-      "sha256": "c7c71e865d651d5a1ef89bc9f63084c5ddae4f3f09da703c6e9c90cc1cc4ce72"
+      "path": "release/test-logs/focus-bootstrap-repair-portal.log",
+      "sha256": "e374e740f2b38643ca1ccc69ba934c80a1d476b88f1f803ec8d78822de36e725"
     },
     "releaseTools": {
       "path": "release/test-logs/focus-release-tools-final.log",
@@ -144,6 +145,10 @@
     "lint": {
       "path": "release/test-logs/focus-lint-final.log",
       "sha256": "724986d6c8d2f748471f69c44eb90fd2740a65887b44bd6ec5c5d9bcb0ea9ea5"
+    },
+    "bootstrapRepair": {
+      "path": "release/bootstrap-repair-audit.json",
+      "sha256": "2c44eeef1a6e2a18555d2ace80ec91c42bec06e804d41a1e7372608cfe1c0bc3"
     }
   },
   "followupValidations": [
@@ -160,6 +165,37 @@
         "fieldIndexes": 8
       },
       "bootstrapPackagesRetained": 10
+    },
+    {
+      "name": "Portal Bootstrap obsolete Make dependency removal and verified partial resume",
+      "verifiedAt": "2026-11-19T20:39:22.370Z",
+      "productionWrites": false,
+      "deploymentsPerformed": false,
+      "newRegressionTests": 43,
+      "fullFunctionsStructuredTests": 581,
+      "legacyAssertionScripts": 6,
+      "portalTests": 2,
+      "powerShellMockedDeploymentTests": 6,
+      "realSdkDiscovery": {
+        "endpoints": [
+          "deleteOwnAccount"
+        ],
+        "params": [],
+        "secretBindings": []
+      },
+      "bootstrapRepairIdempotent": true,
+      "bootstrapPackagesRetained": 10,
+      "unchangedOtherBootstrapInputs": 1248,
+      "changedBootstrapInputs": [
+        "release/bootstrap/feaf41d65ada677f809c/functions/src/index.ts",
+        "release/bootstrap/feaf41d65ada677f809c/functions/lib/index.js"
+      ],
+      "liveReadOnlyBootstrapPlan": {
+        "verifiedFunctions": 51,
+        "pendingFunctions": 8,
+        "batches": 4,
+        "rules": "pending"
+      }
     }
   ]
 }

@@ -91,6 +91,40 @@ Esta fase conserva la lógica económica desplegada. Es imprescindible para impe
 
 Consultar `release/manifest.json`, apartado `bootstrap.artifacts`, para la lista exacta por paquete. No sustituir estos paquetes por la versión definitiva ni mezclar sus funciones. El script conserva el codebase `portal` para `deleteOwnAccount`.
 
+### Continuar un Bootstrap parcialmente publicado
+
+No repetir la publicación completa. El paquete portal capturado contenía puntos de entrada móviles antiguos ajenos a `deleteOwnAccount`; uno declaraba el secreto retirado `MAKE_RESERVATION_WEBHOOK_URL`. El descubrimiento de parámetros del paquete precede al filtro de Functions. La corrección conserva literalmente el manejador de borrado y sus dependencias, mantiene el bloqueo preparatorio y expone únicamente `deleteOwnAccount`, sin secretos. No crear un secreto de Make para superar el aviso.
+
+La reparación local reproducible es `node scripts/prepare-coordinated-release.cjs --project focus-club-f73b8 --out release --offline --repair-portal-bootstrap`. Ya está aplicada al paquete entregado: no es un paso de despliegue. Conserva los diez paquetes, las versiones capturadas y el identificador original del release. Solo recompila portal, registra las huellas anteriores y posteriores en `bootstrap.artifacts[].amendments` y guarda la copia anterior en `release/test-logs`. Para posteriores cambios de herramientas o resultados, regenerar con `--offline --refresh-manifest --skip-bootstrap-build`, sin recompilar los otros paquetes.
+
+```powershell
+node scripts/release-controls.cjs preflight --project $proyectoFocus --manifest release/manifest.json
+Comprobar-Focus
+node scripts/release-controls.cjs plan-bootstrap-resume --project $proyectoFocus --manifest release/manifest.json
+Comprobar-Focus
+.\scripts\deploy-release.ps1 -Stage Bootstrap -Resume
+Comprobar-Focus
+node scripts/release-controls.cjs verify-bootstrap --project $proyectoFocus --manifest release/manifest.json
+Comprobar-Focus
+node scripts/release-controls.cjs status --project $proyectoFocus
+Comprobar-Focus
+```
+
+`plan-bootstrap-resume` solo lee producción y guarda pruebas locales. Comprueba estado ACTIVE, región, runtime, codebase, etiquetas, tráfico y las huellas de los archivos del ZIP real. Una Function se omite únicamente si coincide con su paquete revisado. Una versión original capturada queda pendiente; una versión desconocida o reglas no revisadas detienen el procedimiento. La caché se vincula a la generación inmutable de la fuente y a las huellas del paquete, por lo que cambiar el manifiesto global no obliga a republicar Functions intactas. No ejecutar dos continuaciones simultáneas.
+
+`-Resume` vuelve a comprobar las pendientes antes de cada tanda de máximo cinco. Si Firebase falla o se pierde su respuesta, se detiene; repetir el mismo comando vuelve a comprobar qué se publicó realmente. Las reglas preparatorias se publican solo cuando ya no quedan Functions pendientes, y se omiten si ya coinciden. No cerrar el mantenimiento hasta superar `verify-bootstrap` y la revisión de ejecuciones anteriores.
+
+En la lectura del 19 de noviembre de 2026 quedaron acreditadas 51 de las 59 Functions y seguían pendientes estas ocho, en cuatro tandas. El plan remoto manda si el estado cambia:
+
+| Paquete | Functions pendientes |
+|---|---|
+| `7baa344656ed5bbbdd19` | `appointmentRemindersScheduled`, `assignBonoFromAdmin`, `onAppointmentCreated`, `onAppointmentDeleted`, `reconcileSlotOccupancyFromApprovedAppointments` |
+| `feaf41d65ada677f809c` | `portal:deleteOwnAccount` |
+| `ddc5657a8be986cc0fad` | `returnRecurringSeriesToPendingFromAdmin` |
+| `defb142255660627c8f2` | `onAppointmentCustomerNotification` |
+
+`syncAppointmentWithGoogleCalendar` ya coincide con el paquete revisado y no debe repetirse. Las reglas todavía eran las originales. Esta continuación termina el Bootstrap; no adelanta las Functions definitivas, la reconciliación, el cambio mínimo de apps, la activación automática ni las compensaciones históricas.
+
 **Antes de cerrar:** comprobar en Cloud Logging que han terminado las ejecuciones de las revisiones anteriores al bootstrap, incluidas llamadas antiguas y tareas programadas. El máximo observado en la captura fue 60 segundos; el cierre vuelve a leer los límites reales y exige al menos el máximo más 30 segundos desde la última actualización. Esa espera es una precaución adicional; la confirmación de revisión de ejecuciones sigue siendo obligatoria. Las ejecuciones anteriores al bootstrap carecen de los nuevos registros de admisión.
 
 ## 3. Abrir la ventana de mantenimiento y congelar las escrituras

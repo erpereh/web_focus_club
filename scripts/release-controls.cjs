@@ -3,6 +3,7 @@ const c = require('./release-common.cjs');
 const { fs, path, root, arg, flag, hash, readJson, writeJson, initialize, googleGet, deployedFunctions, assertManifest } = c;
 const { zipFiles } = require('./prepare-coordinated-release.cjs');
 const { verifyFirestoreIndexes } = require('./firestore-index-verifier.cjs');
+const { planBootstrapResume } = require('./bootstrap-resume.cjs');
 const CONTROL = 'system_controls/release', QUEUE = 'system_controls/deferred';
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const httpsUrl = (value) => { try { return new URL(value).protocol === 'https:'; } catch { return false; } };
@@ -21,6 +22,7 @@ async function verifyFunctions(credential, project, manifest, phase) {
     const fn = functions.find((candidate) => candidate.name.endsWith('/' + item.name));
     if (fn?.state !== 'ACTIVE' || !fn.name.includes('/locations/europe-west1/') || fn.serviceConfig?.allTrafficOnLatestRevision !== true
       || fn.labels?.focus_release !== manifest.releaseId || fn.labels?.focus_phase !== item.phase) throw new Error(`Versión incorrecta, tráfico antiguo o función no activa: ${item.name}`);
+    if (item.name === 'deleteOwnAccount' && (fn.serviceConfig?.secretEnvironmentVariables ?? []).length) throw new Error('deleteOwnAccount no debe vincular secretos.');
     const source = fn.buildConfig?.source?.storageSource;
     const identity = JSON.stringify(source);
     if (cache.functions[item.name] === identity) return;
@@ -41,6 +43,22 @@ async function verifyRules(credential, project, expectedFile) {
   const ruleset = await googleGet(credential, `https://firebaserules.googleapis.com/v1/${release.rulesetName}`);
   const source = ruleset.source.files.find((file) => file.name.endsWith('.rules'))?.content;
   if (source !== fs.readFileSync(expectedFile, 'utf8')) throw new Error('Las reglas publicadas no coinciden con las revisadas.');
+}
+async function bootstrapResumePlan(credential, project, manifest) {
+  const cachePath = path.join(root, 'release/verification-bootstrap-resume.json');
+  const cache = fs.existsSync(cachePath) ? readJson(cachePath) : {};
+  const result = await planBootstrapResume({ manifest, functions: await deployedFunctions(credential, project), cache,
+    readArchive: async source => zipFiles(await googleGet(credential, `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(source.bucket)}/o/${encodeURIComponent(source.object)}?alt=media&generation=${encodeURIComponent(source.generation)}`, true)),
+    readRules: async () => {
+      const release = await googleGet(credential, `https://firebaserules.googleapis.com/v1/projects/${project}/releases/cloud.firestore`);
+      const ruleset = await googleGet(credential, `https://firebaserules.googleapis.com/v1/${release.rulesetName}`);
+      return ruleset.source.files.find(file => file.name.endsWith('.rules'))?.content;
+    },
+    originalRules: fs.readFileSync(path.join(root, 'release/bootstrap/previous-firestore.rules'), 'utf8'),
+    bootstrapRules: fs.readFileSync(path.join(root, 'release/bootstrap/firestore.rules'), 'utf8'),
+  });
+  writeJson(cachePath, cache, false);
+  return result;
 }
 async function verifyIndexes(credential, project) {
   return verifyFirestoreIndexes((url) => googleGet(credential, url), project, readJson(path.join(root, 'firestore.indexes.json')));
@@ -95,13 +113,14 @@ async function drain(db, manifest) {
 }
 async function main() {
   const command = process.argv[2];
-  const readOnly = ['status', 'preflight', 'assert-stage', 'verify-bootstrap', 'verify-release', 'verify-before-open', 'verify-indexes'].includes(command);
+  const readOnly = ['status', 'preflight', 'assert-stage', 'plan-bootstrap-resume', 'verify-bootstrap', 'verify-release', 'verify-before-open', 'verify-indexes'].includes(command);
   const mutations = ['maintenance-close', 'maintenance-open', 'drain-deferred', 'set-minimum-builds', 'enable-automatic-refunds', 'disable-automatic-refunds', 'resolve-completed-operation'];
   if (!readOnly && !mutations.includes(command)) throw new Error('Orden de control no válida.');
   const project = readOnly ? arg('--project') : arg('--confirm-project');
   if (project !== 'focus-club-f73b8') throw new Error('Indica explícitamente el proyecto focus-club-f73b8.');
   const manifest = !['status', 'disable-automatic-refunds'].includes(command) ? readJson(arg('--manifest') ?? path.join(root, 'release/manifest.json')) : undefined;
   if (manifest) assertManifest(manifest);
+  if (readOnly) c.readonlyFirestore();
   const { db, credential } = await initialize(project);
   try {
     const gateRef = db.doc(CONTROL), configRef = db.collection('site_config').doc('main');
@@ -145,6 +164,13 @@ async function main() {
       const checked = await verifyIndexes(credential, project);
       console.log(`Índices disponibles: ${checked.compositeIndexes} compuestos, ${checked.fieldOverrides} field overrides y ${checked.fieldIndexes} índices de campo.`);
       return;
+    }
+    if (command === 'plan-bootstrap-resume') {
+      const gate = (await gateRef.get()).data(), config = (await configRef.get()).data();
+      if (config?.automaticMinuteRefundsEnabled === true || gate?.occupancyVersion === 2 || (gate?.phase && gate.phase !== 'open')) {
+        throw new Error('No se puede continuar Bootstrap con funciones activadas o mantenimiento cerrado.');
+      }
+      console.log(JSON.stringify(await bootstrapResumePlan(credential, project, manifest), null, 2)); return;
     }
     if (command === 'verify-bootstrap') {
       await verifyFunctions(credential, project, manifest, 'bootstrap');

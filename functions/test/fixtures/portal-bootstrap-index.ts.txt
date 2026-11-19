@@ -1,0 +1,166 @@
+import {defineSecret} from "firebase-functions/params";
+import { guardCallable } from "./releaseMaintenance.js";
+import { setGlobalOptions as setReleaseOptions } from "firebase-functions/v2";
+import { initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore, QueryDocumentSnapshot } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
+import { onCall, HttpsError, CallableRequest } from "firebase-functions/v2/https";
+
+setReleaseOptions({ labels: { focus_release: "occupancy-v2-refunds-20261118", focus_phase: "bootstrap" } });
+
+initializeApp();
+
+const db = getFirestore();
+
+const region = "europe-west1";
+
+const deletedUserName = "Usuario eliminado";
+
+const deletedHistoryDescription = "Historial anonimizado por eliminación de cuenta";
+
+interface UserProfile {
+  uid: string;
+  email: string;
+  name: string;
+  phone?: string;
+  role?: string;
+}
+
+interface Bono {
+  userId: string;
+  tamano: number;
+  minutosTotales: number;
+  minutosRestantes: number;
+  fechaAsignacion: string;
+  fechaExpiracion: string;
+  estado: string;
+  historial?: Record<string, unknown>[];
+  asignadoPor?: string;
+  createdAt?: string;
+}
+
+export const deleteOwnAccount = onCall({region}, guardCallable(db, "deleteOwnAccount", handleDeleteOwnAccount));
+
+async function handleDeleteOwnAccount(request: CallableRequest<unknown>) {
+  const uid = requireAuthUid(request.auth?.uid);
+  const userRef = db.collection("users").doc(uid);
+  const userSnapshot = await userRef.get();
+  const userData = userSnapshot.data() as Partial<UserProfile> | undefined;
+  const email = stringOrEmpty(userData?.email) || stringOrEmpty(request.auth?.token.email);
+  const name = stringOrEmpty(userData?.name);
+  const nowIso = new Date().toISOString();
+
+  await anonymizeAppointmentsForDeletedUser(uid, nowIso);
+  await anonymizeBonosForDeletedUser(uid, nowIso);
+  await deleteUserAvatarFiles(uid);
+  await db.recursiveDelete(userRef);
+  await db.collection("activity_logs").add({
+    action: "user_deleted_own_account",
+    uid,
+    email,
+    name,
+    createdAt: nowIso,
+  });
+  await getAuth().deleteUser(uid);
+
+  return {ok: true};
+}
+
+function requireAuthUid(uid?: string): string {
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "Authentication is required.");
+  }
+  return uid;
+}
+
+async function anonymizeAppointmentsForDeletedUser(
+  uid: string,
+  nowIso: string,
+): Promise<void> {
+  const snapshot = await db.collection("appointments")
+    .where("userId", "==", uid)
+    .get();
+  await commitUpdatesInBatches(snapshot.docs, () => ({
+    name: deletedUserName,
+    email: "",
+    phone: "",
+    reason: "",
+    deletedUser: true,
+    deletedUserUid: uid,
+    updatedAt: nowIso,
+  }));
+}
+
+async function anonymizeBonosForDeletedUser(
+  uid: string,
+  nowIso: string,
+): Promise<void> {
+  const snapshot = await db.collection("bonos")
+    .where("userId", "==", uid)
+    .get();
+  await commitUpdatesInBatches(snapshot.docs, (doc) => {
+    const bono = doc.data() as Bono;
+    const update: Record<string, unknown> = {
+      name: deletedUserName,
+      email: "",
+      phone: "",
+      deletedUser: true,
+      deletedUserUid: uid,
+      updatedAt: nowIso,
+    };
+    if (Array.isArray(bono.historial)) {
+      update.historial = bono.historial.map(anonymizeHistoryEntry);
+    }
+    return update;
+  });
+}
+
+function anonymizeHistoryEntry(entry: unknown): unknown {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return entry;
+  }
+  const record = entry as Record<string, unknown>;
+  if (typeof record.descripcion !== "string") {
+    return record;
+  }
+  return {
+    ...record,
+    descripcion: deletedHistoryDescription,
+  };
+}
+
+async function commitUpdatesInBatches(
+  docs: QueryDocumentSnapshot[],
+  buildUpdate: (doc: QueryDocumentSnapshot) => Record<string, unknown>,
+): Promise<void> {
+  let batch = db.batch();
+  let pendingWrites = 0;
+
+  for (const doc of docs) {
+    batch.update(doc.ref, buildUpdate(doc));
+    pendingWrites += 1;
+    if (pendingWrites === 450) {
+      await batch.commit();
+      batch = db.batch();
+      pendingWrites = 0;
+    }
+  }
+
+  if (pendingWrites > 0) {
+    await batch.commit();
+  }
+}
+
+async function deleteUserAvatarFiles(uid: string): Promise<void> {
+  await getStorage().bucket().deleteFiles({
+    prefix: `user-avatars/${uid}/`,
+  });
+}
+
+function stringOrEmpty(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+const makeReservationWebhookUrl = defineSecret("MAKE_RESERVATION_WEBHOOK_URL");
+export const approveAppointment = onCall({region, secrets: [makeReservationWebhookUrl]}, async () => { await fetch(makeReservationWebhookUrl.value()); });
