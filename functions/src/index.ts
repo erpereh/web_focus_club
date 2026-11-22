@@ -1898,6 +1898,8 @@ export const onAppointmentCustomerNotification = onDocumentWritten(
   {
     document: "appointments/{appointmentId}",
     region: REGION,
+    memory: "512MiB",
+    concurrency: 8,
     secrets: [BREVO_API_KEY],
   },
   guardBackground(db, "onAppointmentCustomerNotification", async (event) => {
@@ -2009,7 +2011,7 @@ export const retryNotificationDeliveriesScheduled = onSchedule(
 // run while frozen; it admits only operator-approved recovery for this epoch.
 export const onReleaseDeferredEventWritten = onDocumentWritten(
   { document: "release_deferred_events/{jobId}", region: REGION, timeoutSeconds: 540,
-    secrets: [BREVO_API_KEY, GOOGLE_CALENDAR_ID], retry: true },
+    memory: "512MiB", secrets: [BREVO_API_KEY, GOOGLE_CALENDAR_ID], retry: true },
   createReleaseRecoveryHandler(db, () => ({
     onAppointmentCreated, onAppointmentApproved, onAppointmentDeleted,
     onAppointmentCustomerNotification, onBonoCustomerNotification,

@@ -137,6 +137,11 @@ export function guardBackground<TEvent, TResult>(
     const identity = serialized.id ?? serialized.scheduleTime ?? JSON.stringify(serialized);
     const eventKey = createHash("sha256").update(`${name}:${identity}`).digest("hex");
     const operationId = randomUUID();
+    const admission = {
+      ...(typeof serialized.id === "string" ? { eventId: serialized.id } : {}),
+      ...(process.env.K_REVISION ? { revision: process.env.K_REVISION } : {}),
+      eventKey,
+    };
     const admitted = await db.runTransaction(async (tx) => {
       const control = (await tx.get(db.collection("system_controls").doc("release"))).data() as ReleaseControl | undefined;
       const recovering = Boolean(control?.releaseId && recovery.getStore() === control.releaseId);
@@ -152,10 +157,14 @@ export function guardBackground<TEvent, TResult>(
       }
       tx.create(db.collection("release_operations").doc(operationId), {
         operation: name, state: "active", releaseId: control?.releaseId ?? "bootstrap", startedAt: new Date().toISOString(),
+        ...admission,
       });
       return true;
     });
     if (!admitted) return undefined;
+    info("Release background operation admitted", {
+      releaseOperationId: operationId, releaseOperationState: "admitted", operation: name, ...admission,
+    });
     try { return await handler(event); }
     catch (error) {
       // Closing the gate can abort an already-admitted financial transaction.

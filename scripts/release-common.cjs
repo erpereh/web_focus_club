@@ -15,13 +15,20 @@ function writeJson(file, value, exclusive = true) {
   fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n', { flag: exclusive ? 'wx' : 'w' });
 }
 function readonlyFirestore() {
+  const runTransaction = sdk.Firestore.prototype.runTransaction;
+  Object.defineProperty(sdk.Firestore.prototype, 'runTransaction', {
+    value(callback, options) {
+      if (options?.readOnly !== true) throw new Error('Read-only: runTransaction requires readOnly: true');
+      return runTransaction.call(this, callback, { readOnly: true, ...(options.readTime ? { readTime: options.readTime } : {}) });
+    }, configurable: false, writable: false,
+  });
   for (const [prototype, methods] of [
     [sdk.DocumentReference.prototype, ['set', 'update', 'delete', 'create']],
     [sdk.CollectionReference.prototype, ['add']],
     [sdk.Transaction.prototype, ['set', 'update', 'delete', 'create']],
     [sdk.WriteBatch.prototype, ['set', 'update', 'delete', 'create', 'commit']],
     [sdk.BulkWriter.prototype, ['set', 'update', 'delete', 'create', 'flush', 'close']],
-    [sdk.Firestore.prototype, ['runTransaction', 'batch', 'bulkWriter', 'recursiveDelete']],
+    [sdk.Firestore.prototype, ['batch', 'bulkWriter', 'recursiveDelete']],
   ]) for (const method of methods) Object.defineProperty(prototype, method, {
     value() { throw new Error(`Read-only: ${method} is disabled`); }, configurable: false, writable: false,
   });

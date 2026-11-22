@@ -310,7 +310,7 @@
     },
     {
       "path": "functions/src/index.ts",
-      "sha256": "f20471ddd28911c17389c85be803c4e76dd2006514ad02742b20e0cc0763d732"
+      "sha256": "57fbafcc575aff74775f54a3f616a703c58d72d771c2e18389268499e1f01427"
     },
     {
       "path": "functions/src/minuteRefundAdmin.ts",
@@ -394,7 +394,7 @@
     },
     {
       "path": "functions/src/releaseMaintenance.ts",
-      "sha256": "bdf60edf9fd66f91bdbb1f4660d7e445ab498727d58494bc12f5c31212da5f65"
+      "sha256": "0d713b208f1ef13757eaae3e28b66c75e9bf4df341f31477bdf7a3edfd64a9b8"
     },
     {
       "path": "functions/src/seriesMetadata.ts",
@@ -554,7 +554,7 @@
     },
     {
       "path": "functions/lib/index.js",
-      "sha256": "be0fa27d9cd26820e2231461faf5529c2a0f8846cf907b815e45029d72142bac"
+      "sha256": "c6bde07517d950308d89c67ee7cb345768d61ab60017fe84acc6ab4571057138"
     },
     {
       "path": "functions/lib/minuteRefundAdmin.js",
@@ -638,7 +638,7 @@
     },
     {
       "path": "functions/lib/releaseMaintenance.js",
-      "sha256": "d9e0b7d713352030336efc132bae242895e5402d0190252b7bcd7d701ca3693a"
+      "sha256": "a9233d029703521526963d0c5b98f9d912b937b567b264775506a25dad5da845"
     },
     {
       "path": "functions/lib/seriesMetadata.js",
@@ -1294,7 +1294,7 @@
     },
     {
       "path": "scripts/bootstrap-resume.cjs",
-      "sha256": "0b8eabe40adc9a8bc0b72c0943d66bc4b10aa8974108a7ee4d7d4b7af9df3362"
+      "sha256": "3c9940e73104ebf8cb8971b48d6e13ce7558de2eb65600e740a9bac1cc9672aa"
     },
     {
       "path": "scripts/build-static.js",
@@ -1310,11 +1310,19 @@
     },
     {
       "path": "scripts/deploy-release.ps1",
-      "sha256": "6ba052739c238878111adf1bff6a243c67152a41e9d76107aa49b7fae4ff80c3"
+      "sha256": "75c2b68bfd8709e850d1056b5970da82708e0c51e5f0ddba46341e7c92bf8bdc"
     },
     {
       "path": "scripts/firestore-index-verifier.cjs",
       "sha256": "3d9e10b8cc4b2b9666563dff89e55945ccbb622b8a8a2b3898b5f558ce99136f"
+    },
+    {
+      "path": "scripts/functions-resume.cjs",
+      "sha256": "caf6e93309b5e340db1a35d11ffe936a6077166e9a88a75f63e891149cc4e81f"
+    },
+    {
+      "path": "scripts/interrupted-operations.cjs",
+      "sha256": "aee03d23c3a1a38023e476ea6ac5c9dff72b62ef42c6a556e477f4ef4b45d1a7"
     },
     {
       "path": "scripts/migrate-to-storage.cjs",
@@ -1338,11 +1346,11 @@
     },
     {
       "path": "scripts/release-common.cjs",
-      "sha256": "4df3a488b6845fcd185d1db719f1db46e5e8e8d3b2434e46dbc6379981bf20d7"
+      "sha256": "abeb4f5d23604b54b5656d2961fcef0dda9f4b1d93db992fcd9d93a133839919"
     },
     {
       "path": "scripts/release-controls.cjs",
-      "sha256": "b7a279d3b69a78c23f035275abe6bb53510f48d840a68a84e41fac003d44025e"
+      "sha256": "dcf23c6502bfc2183994df62e5764aecc80f92ff61537cdf0f05d6c5f7ddcb74"
     },
     {
       "path": "scripts/reorganize-cms-media.cjs",
@@ -2446,7 +2454,7 @@
     },
     {
       "path": "functions/package.json",
-      "sha256": "bbb23df02604c396b68a80cb755adc57eba5ce590b66c59240e92a21f0521741"
+      "sha256": "d907196fd0df1a8c24aeda2ff43f494ad029554f90c4e997939c40b0a8573259"
     },
     {
       "path": "functions/package-lock.json",
@@ -2470,7 +2478,7 @@
     },
     {
       "path": "docs/despliegue-integrado-aforo-devoluciones.md",
-      "sha256": "f45681f39d053476d46c9c1d4b0eda08897debd751882d186585f366b8fc4fa8"
+      "sha256": "afe6cd5bfba104702949f8f079170f8ac13c45203c8ec4ffaf9b248f2ef7bafc"
     },
     {
       "path": "release/auditoria-historica.md",
@@ -2478,7 +2486,7 @@
     },
     {
       "path": "release/test-results.json",
-      "sha256": "0b7940d602228d5690e4644a686a8024b24aba22c79cd44c962611a2f942255a"
+      "sha256": "76734db9e2652d4f7058e0aef312c3e14437b23a46a5cd397df4cb67aa651f94"
     },
     {
       "path": "release/bootstrap/1e047758874a1474ce33/firebase.json",
@@ -8397,5 +8405,5 @@
     ],
     "rulesetName": "projects/focus-club-f73b8/rulesets/7f6240e5-dfe7-4a2a-95f3-c673448fa6f3"
   },
-  "manifestHash": "aa5cb2fbc938d050f9861825e9cef578bd6f206c1ba71a3ae29c17247d1ead7e"
+  "manifestHash": "6db1b85da990413478eb717b5c97c57c9e8df396824867f013e010356ff91c8e"
 }

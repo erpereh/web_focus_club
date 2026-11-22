@@ -11,16 +11,17 @@
       "name": "Functions shared",
       "command": "npm --prefix functions test",
       "status": "passed",
-      "structuredTests": 581,
+      "structuredTests": 592,
       "legacyAssertionScripts": 6,
-      "lastVerifiedAt": "2026-11-19T20:39:22.370Z"
+      "lastVerifiedAt": "2026-11-22T21:38:22.970Z"
     },
     {
       "name": "Firestore emulator",
       "command": "npm --prefix functions run test:emulator",
       "status": "passed",
-      "tests": 78,
-      "project": "demo-focus-club"
+      "tests": 83,
+      "project": "demo-focus-club",
+      "lastVerifiedAt": "2026-11-22T21:38:22.970Z"
     },
     {
       "name": "Web",
@@ -107,12 +108,12 @@
   ],
   "evidence": {
     "functions": {
-      "path": "release/test-logs/focus-bootstrap-repair-functions.log",
-      "sha256": "9a02e7807861fe99fa04d02f632a8ca9e572172c524f35f9d9f5c5baa07ce003"
+      "path": "release/test-logs/focus-incident-functions.log",
+      "sha256": "4e1026a3c0762d0634f5a0c6140e6a306b7733ba05ef1aa4c45fc05c75e100b9"
     },
     "emulator": {
-      "path": "release/test-logs/focus-emulator-final.log",
-      "sha256": "157a70cc38ed317ca73d096c126ba758be639ae41da1ceda7b951bc0494997ab"
+      "path": "release/test-logs/focus-incident-emulator.log",
+      "sha256": "17eb21ea007ac0d6e904005e548c268dc3df81463b03e5ca506713e5c112509a"
     },
     "web": {
       "path": "release/test-logs/focus-web-final.log",
@@ -195,6 +196,39 @@
         "pendingFunctions": 8,
         "batches": 4,
         "rules": "pending"
+      }
+    },
+    {
+      "name": "November 22 interrupted operations and final Functions resume",
+      "verifiedAt": "2026-11-22T21:38:22.970Z",
+      "productionWrites": false,
+      "deploymentsPerformed": false,
+      "fullFunctionsStructuredTests": 592,
+      "legacyAssertionScripts": 6,
+      "emulatorTests": 83,
+      "newFunctionsTests": 11,
+      "newEmulatorTests": 5,
+      "bootstrapPackagesRetained": 10,
+      "liveReadOnlyEvidence": {
+        "phase": "draining",
+        "epoch": 1,
+        "interruptedOperations": 9,
+        "terminatedInstances": 8,
+        "completeNotices": 7,
+        "followUpNotices": 2,
+        "bootstrapFunctions": 59,
+        "finalFunctionsPublished": 0,
+        "finalFunctionsPending": 69,
+        "finalBatchesPending": 15
+      },
+      "localSdkDiscovery": {
+        "onAppointmentCustomerNotification": {
+          "memoryMb": 512,
+          "concurrency": 8
+        },
+        "onReleaseDeferredEventWritten": {
+          "memoryMb": 512
+        }
       }
     }
   ]

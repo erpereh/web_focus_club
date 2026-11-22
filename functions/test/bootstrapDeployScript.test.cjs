@@ -6,20 +6,23 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const pwshAvailable = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.ToString()'], { encoding: 'utf8' }).status === 0;
 const literal = value => "'" + value.replaceAll("'", "''") + "'";
-function runScenario({ complete = false, resume = true, lostResponse = false, readFailure = false, stage = 'Bootstrap' } = {}) {
+function runScenario({ complete = false, resume = true, lostResponse = false, readFailure = false, noProgress = false, stage = 'Bootstrap' } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-bootstrap-script-test-'));
   try {
-    fs.mkdirSync(path.join(directory, 'scripts')); fs.mkdirSync(path.join(directory, 'release'));
-    fs.copyFileSync(path.resolve(__dirname, '../../scripts/deploy-release.ps1'), path.join(directory, 'scripts/deploy-release.ps1'));
-    fs.writeFileSync(path.join(directory, 'release/manifest.json'), JSON.stringify({ bootstrap: { artifacts: [] } }));
+    const projectDirectory = path.join(directory, 'web_focus_club');
+    fs.mkdirSync(projectDirectory);
+    fs.mkdirSync(path.join(directory, 'app_focus_club'));
+    const scriptPath = path.join(projectDirectory, 'scripts/deploy-release.ps1');
+    fs.mkdirSync(path.join(projectDirectory, 'scripts'));
+    fs.copyFileSync(path.resolve(__dirname, '../../scripts/deploy-release.ps1'), scriptPath);
     const plan = pending => ({ verifiedFunctions: pending ? ['alreadyPublished'] : ['alreadyPublished', 'deleteOwnAccount'], pendingFunctions: pending ? ['deleteOwnAccount'] : [],
-      batches: pending ? [{ config: 'release/bootstrap/portal/firebase.json', portal: true, functions: ['deleteOwnAccount'] }] : [], rules: { status: complete ? 'verified' : 'pending' } });
+      batches: pending ? [{ config: 'release/bootstrap/portal/firebase.json', portal: true, codebase: 'portal', functions: ['deleteOwnAccount'] }] : [], rules: { status: complete ? 'verified' : 'pending' } });
     const command = `
       $global:LASTEXITCODE=0; $global:published=${complete ? '$true' : '$false'}; $global:invocations=@(); $global:lostResponse=${lostResponse ? '$true' : '$false'}
       function global:node {
         param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Items)
         $global:LASTEXITCODE=0
-        if ($Items[1] -eq 'plan-bootstrap-resume') {
+        if ($Items[1] -in @('plan-bootstrap-resume', 'plan-functions-resume')) {
           ${readFailure ? '$global:LASTEXITCODE=9; return' : ''}
           if ($global:published) { ${literal(JSON.stringify(plan(false)))} } else { ${literal(JSON.stringify(plan(true)))} }
         }
@@ -28,12 +31,12 @@ function runScenario({ complete = false, resume = true, lostResponse = false, re
         param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Items)
         $global:invocations += ($Items -join ' '); $global:LASTEXITCODE=0
         if (($Items -join ' ').Contains('functions:portal:deleteOwnAccount')) {
-          $global:published=$true
+          ${noProgress ? '$global:published=$false' : '$global:published=$true'}
           if ($global:lostResponse) { $global:lostResponse=$false; $global:LASTEXITCODE=7 }
         }
       }
-      try { & ${literal(path.join(directory, 'scripts/deploy-release.ps1'))} -Stage ${stage} ${resume ? '-Resume' : ''} } catch { Write-Host ('ERROR=' + $_.Exception.Message) }
-      ${lostResponse ? `try { & ${literal(path.join(directory, 'scripts/deploy-release.ps1'))} -Stage Bootstrap -Resume } catch { Write-Host ('RETRY_ERROR=' + $_.Exception.Message) }` : ''}
+      try { & ${literal(scriptPath)} -Stage ${stage} ${resume ? '-Resume' : ''} } catch { Write-Host ('ERROR=' + $_.Exception.Message) }
+      ${lostResponse ? `try { & ${literal(scriptPath)} -Stage ${stage} -Resume } catch { Write-Host ('RETRY_ERROR=' + $_.Exception.Message) }` : ''}
       Write-Host ('CALLS=' + (ConvertTo-Json -Compress -InputObject @($global:invocations)))
     `;
     const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8', timeout: 30_000 });
@@ -58,4 +61,15 @@ test('PowerShell lost response stops, then retry skips the function that actuall
 });
 test('PowerShell read failure stops before any deploy', { skip: !pwshAvailable }, () => { const result = runScenario({ readFailure: true }); assert.deepEqual(result.calls, []); assert.match(result.output, /ERROR=.*9/); });
 test('PowerShell requires Resume for a partial Bootstrap', { skip: !pwshAvailable }, () => { const result = runScenario({ resume: false }); assert.deepEqual(result.calls, []); assert.match(result.output, /parcialmente publicado/); });
-test('PowerShell Resume cannot be used to bypass final stage controls', { skip: !pwshAvailable }, () => { const result = runScenario({ stage: 'Functions' }); assert.deepEqual(result.calls, []); assert.match(result.output, /solo se admite para Bootstrap/); });
+test('PowerShell Resume cannot be used to bypass Hosting controls', { skip: !pwshAvailable }, () => { const result = runScenario({ stage: 'Hosting' }); assert.deepEqual(result.calls, []); assert.match(result.output, /solo se admite para Bootstrap y Functions/); });
+test('PowerShell Functions Resume verifies published batches and uses the portal codebase', { skip: !pwshAvailable }, () => {
+  const result = runScenario({ stage: 'Functions', lostResponse: true });
+  assert.match(result.output, /ERROR=.*7/);
+  assert.doesNotMatch(result.output, /RETRY_ERROR/);
+  assert.deepEqual(result.calls, ['deploy --project focus-club-f73b8 --only functions:portal:deleteOwnAccount']);
+});
+test('PowerShell Functions Resume stops if a successful CLI exit does not publish a reviewed revision', { skip: !pwshAvailable }, () => {
+  const result = runScenario({ stage: 'Functions', noProgress: true });
+  assert.equal(result.calls.length, 1);
+  assert.match(result.output, /No se ha acreditado la tanda anterior/);
+});

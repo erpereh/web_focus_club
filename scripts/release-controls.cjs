@@ -4,6 +4,8 @@ const { fs, path, root, arg, flag, hash, readJson, writeJson, initialize, google
 const { zipFiles } = require('./prepare-coordinated-release.cjs');
 const { verifyFirestoreIndexes } = require('./firestore-index-verifier.cjs');
 const { planBootstrapResume } = require('./bootstrap-resume.cjs');
+const { planFunctionsResume } = require('./functions-resume.cjs');
+const incident = require('./interrupted-operations.cjs');
 const CONTROL = 'system_controls/release', QUEUE = 'system_controls/deferred';
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const httpsUrl = (value) => { try { return new URL(value).protocol === 'https:'; } catch { return false; } };
@@ -11,17 +13,25 @@ const httpsUrl = (value) => { try { return new URL(value).protocol === 'https:';
 async function verifyFunctions(credential, project, manifest, phase) {
   if (!manifest.bootstrap.captured || manifest.bootstrap.artifacts.some(item => !item.compiled)) throw new Error('Falta capturar y compilar la versión preparatoria real.');
   const functions = await deployedFunctions(credential, project);
-  const expected = phase === 'bootstrap'
-    ? manifest.bootstrap.artifacts.flatMap((artifact) => artifact.functions.map((name) => ({ name, prefix: path.dirname(artifact.config) + '/functions/', phase: 'bootstrap' })))
-    : [...manifest.webFunctions.map((name) => ({ name, prefix: 'functions/', phase: 'final' })),
-      { name: 'deleteOwnAccount', prefix: '../app_focus_club/functions/', phase: 'final' }];
+  if (phase === 'final') {
+    const plan = await functionsResumePlan(credential, project, manifest, functions);
+    if (plan.pendingFunctions.length) throw new Error(`Functions definitivas pendientes: ${plan.pendingFunctions.join(', ')}.`);
+    return functions;
+  }
+  const expected = manifest.bootstrap.artifacts.flatMap(artifact => artifact.functions.map(name => ({
+    name, prefix: path.posix.dirname(artifact.config) + '/functions/', codebase: artifact.portal ? 'portal' : 'default',
+  })));
+  if (functions.length !== expected.length) throw new Error('El inventario remoto no coincide con el Bootstrap revisado.');
   const cachePath = path.join(root, `release/verification-${phase}.json`);
   const cache = fs.existsSync(cachePath) ? readJson(cachePath) : { functions: {} };
   if (cache.manifestHash !== manifest.manifestHash) cache.functions = {};
   for (let start = 0; start < expected.length; start += 5) await Promise.all(expected.slice(start, start + 5).map(async (item) => {
-    const fn = functions.find((candidate) => candidate.name.endsWith('/' + item.name));
-    if (fn?.state !== 'ACTIVE' || !fn.name.includes('/locations/europe-west1/') || fn.serviceConfig?.allTrafficOnLatestRevision !== true
-      || fn.labels?.focus_release !== manifest.releaseId || fn.labels?.focus_phase !== item.phase) throw new Error(`Versión incorrecta, tráfico antiguo o función no activa: ${item.name}`);
+    const fn = functions.find(candidate => candidate.name === `projects/${project}/locations/europe-west1/functions/${item.name}`);
+    if (fn?.state !== 'ACTIVE' || fn.buildConfig?.runtime !== 'nodejs22' || fn.serviceConfig?.allTrafficOnLatestRevision !== true
+      || (fn.labels?.['firebase-functions-codebase'] ?? 'default') !== item.codebase
+      || fn.labels?.focus_release !== manifest.releaseId || fn.labels?.focus_phase !== 'bootstrap') {
+      throw new Error(`Versión incorrecta, tráfico antiguo o función no activa: ${item.name}`);
+    }
     if (item.name === 'deleteOwnAccount' && (fn.serviceConfig?.secretEnvironmentVariables ?? []).length) throw new Error('deleteOwnAccount no debe vincular secretos.');
     const source = fn.buildConfig?.source?.storageSource;
     const identity = JSON.stringify(source);
@@ -43,6 +53,38 @@ async function verifyRules(credential, project, expectedFile) {
   const ruleset = await googleGet(credential, `https://firebaserules.googleapis.com/v1/${release.rulesetName}`);
   const source = ruleset.source.files.find((file) => file.name.endsWith('.rules'))?.content;
   if (source !== fs.readFileSync(expectedFile, 'utf8')) throw new Error('Las reglas publicadas no coinciden con las revisadas.');
+}
+async function verifyRunRevision(credential, project, service, revision, limits) {
+  const url = `https://run.googleapis.com/v2/projects/${project}/locations/europe-west1/services/${service}`;
+  const [run, deployed] = await Promise.all([googleGet(credential, url), googleGet(credential, url + '/revisions/' + revision)]);
+  const traffic = (run.trafficStatuses ?? []).filter(target => Number(target.percent) > 0);
+  if (run.generation !== run.observedGeneration || run.latestReadyRevision?.split('/').at(-1) !== revision
+    || traffic.length !== 1 || traffic[0].percent !== 100 || traffic[0].revision?.split('/').at(-1) !== revision
+    || deployed.containers?.[0]?.resources?.limits?.memory !== limits.memory
+    || (limits.concurrency !== undefined && deployed.maxInstanceRequestConcurrency !== limits.concurrency)) {
+    throw new Error(`Cloud Run no acredita el tráfico y los recursos esperados para ${service}.`);
+  }
+}
+
+async function functionsResumePlan(credential, project, manifest, functions) {
+  const cachePath = path.join(root, 'release/verification-functions-resume.json');
+  const cache = fs.existsSync(cachePath) ? readJson(cachePath) : {};
+  const result = await planFunctionsResume({
+    manifest, functions, cache,
+    readArchive: async source => zipFiles(await googleGet(credential, `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(source.bucket)}/o/${encodeURIComponent(source.object)}?alt=media&generation=${encodeURIComponent(source.generation)}`, true)),
+    verifyRuntime: (fn, limits) => verifyRunRevision(credential, project, fn.name.split('/').at(-1).toLowerCase(), fn.serviceConfig.revision, limits),
+  });
+  writeJson(cachePath, cache, false);
+  return result;
+}
+
+async function verifyIncidentBootstrap(credential, project, manifest) {
+  const functions = await verifyFunctions(credential, project, manifest, 'bootstrap');
+  const target = functions.find(fn => fn.name.endsWith('/' + incident.FUNCTION_NAME));
+  if (target?.serviceConfig?.revision !== incident.REVISION || target?.serviceConfig?.timeoutSeconds !== 60
+    || target.eventTrigger?.retryPolicy !== 'RETRY_POLICY_DO_NOT_RETRY') throw new Error('La revisión Bootstrap del incidente ha cambiado.');
+  await verifyRunRevision(credential, project, incident.SERVICE, incident.REVISION, { memory: '256Mi', concurrency: 80 });
+  await verifyRules(credential, project, path.join(root, 'release/bootstrap/firestore.rules'));
 }
 async function bootstrapResumePlan(credential, project, manifest) {
   const cachePath = path.join(root, 'release/verification-bootstrap-resume.json');
@@ -111,15 +153,50 @@ async function drain(db, manifest) {
   }
   throw new Error('La recuperación no ha terminado. Se conserva el trabajo y el mantenimiento permanece cerrado.');
 }
+async function freezeMaintenance(db, releaseId) {
+  await db.runTransaction(async tx => {
+    const gateRef = db.doc(CONTROL);
+    const [gate, config, active] = await Promise.all([
+      tx.get(gateRef), tx.get(db.doc('site_config/main')),
+      tx.get(db.collection('release_operations').where('state', '==', 'active').limit(1)),
+    ]);
+    if (gate.get('releaseId') !== releaseId || !['draining', 'frozen'].includes(gate.get('phase'))
+      || config.get('maintenanceMode') !== true || config.get('automaticMinuteRefundsEnabled') === true || !active.empty) {
+      throw new Error('No se puede congelar el mantenimiento.');
+    }
+    if (gate.get('phase') === 'draining') tx.set(gateRef, { phase: 'frozen', frozenAt: new Date().toISOString() }, { merge: true });
+  });
+}
+async function assertReopenState(tx, db, manifest) {
+  const [gateSnap, config, queue, active] = await Promise.all([
+    tx.get(db.doc(CONTROL)), tx.get(db.doc('site_config/main')), tx.get(db.doc(QUEUE)),
+    tx.get(db.collection('release_operations').where('state', '==', 'active').limit(1)),
+  ]);
+  const gate = gateSnap.data();
+  if (gate?.phase !== 'frozen' || gate.releaseId !== manifest.releaseId || gate.occupancyVersion !== 2
+    || !gate.occupancyAuditHash || gate.occupancyVerifiedEpoch !== gate.epoch || Number(queue.get('pending') ?? 0) !== 0
+    || !active.empty || config.get('automaticMinuteRefundsEnabled') === true) {
+    throw new Error('No se cumplen las condiciones de reapertura. Mantener cerrado.');
+  }
+}
 async function main() {
   const command = process.argv[2];
-  const readOnly = ['status', 'preflight', 'assert-stage', 'plan-bootstrap-resume', 'verify-bootstrap', 'verify-release', 'verify-before-open', 'verify-indexes'].includes(command);
-  const mutations = ['maintenance-close', 'maintenance-open', 'drain-deferred', 'set-minimum-builds', 'enable-automatic-refunds', 'disable-automatic-refunds', 'resolve-completed-operation'];
+  const readOnly = ['status', 'preflight', 'assert-stage', 'plan-bootstrap-resume', 'plan-functions-resume', 'audit-interrupted-operations',
+    'verify-bootstrap', 'verify-release', 'verify-before-open', 'verify-indexes'].includes(command);
+  const mutations = ['maintenance-close', 'maintenance-open', 'drain-deferred', 'set-minimum-builds', 'enable-automatic-refunds',
+    'disable-automatic-refunds', 'resolve-completed-operation', 'resolve-interrupted-operations'];
   if (!readOnly && !mutations.includes(command)) throw new Error('Orden de control no válida.');
   const project = readOnly ? arg('--project') : arg('--confirm-project');
   if (project !== 'focus-club-f73b8') throw new Error('Indica explícitamente el proyecto focus-club-f73b8.');
   const manifest = !['status', 'disable-automatic-refunds'].includes(command) ? readJson(arg('--manifest') ?? path.join(root, 'release/manifest.json')) : undefined;
   if (manifest) assertManifest(manifest);
+  const auditOutput = command === 'audit-interrupted-operations' ? arg('--out') : undefined;
+  if (command === 'audit-interrupted-operations' && !auditOutput) throw new Error('Indica --out para guardar el informe.');
+  const reportPath = arg('--reviewed-report');
+  if (command === 'resolve-interrupted-operations' && !reportPath) throw new Error('Indica --reviewed-report con el informe revisado.');
+  const reviewedReport = command === 'resolve-interrupted-operations' ? readJson(reportPath) : undefined;
+  const approval = { approvedHash: arg('--approved-report-hash'), reviewerUid: arg('--reviewer-uid'), acknowledged: flag('--acknowledge-unresolved-notices') };
+  if (command === 'resolve-interrupted-operations') incident.assertReviewedReport(reviewedReport, approval.approvedHash, approval.reviewerUid, approval.acknowledged, manifest);
   if (readOnly) c.readonlyFirestore();
   const { db, credential } = await initialize(project);
   try {
@@ -172,6 +249,28 @@ async function main() {
       }
       console.log(JSON.stringify(await bootstrapResumePlan(credential, project, manifest), null, 2)); return;
     }
+    if (command === 'plan-functions-resume') {
+      const [gate, config] = await Promise.all([gateRef.get(), configRef.get()]);
+      if (gate.get('phase') !== 'frozen' || gate.get('releaseId') !== manifest.releaseId || config.get('maintenanceMode') !== true
+        || config.get('automaticMinuteRefundsEnabled') === true) throw new Error('La continuación definitiva exige mantenimiento congelado y devoluciones automáticas desactivadas.');
+      console.log(JSON.stringify(await functionsResumePlan(credential, project, manifest, await deployedFunctions(credential, project)), null, 2));
+      return;
+    }
+    if (command === 'audit-interrupted-operations' || command === 'resolve-interrupted-operations') {
+      const readLogs = () => incident.readIncidentLogs(credential, project);
+      const verifyBootstrap = () => verifyIncidentBootstrap(credential, project, manifest);
+      if (command === 'audit-interrupted-operations') {
+        if (fs.existsSync(auditOutput)) throw new Error('El informe ya existe. Indica otra ruta para conservar la evidencia.');
+        await verifyBootstrap();
+        const report = await incident.auditInterruptedOperations(db, manifest, readLogs);
+        writeJson(auditOutput, report);
+        console.log(JSON.stringify({ report: path.resolve(auditOutput), reportHash: report.reportHash, operations: report.operations.length,
+          completeNotices: report.completeNotices, followUpNotices: report.followUpNotices }, null, 2));
+      } else {
+        console.log(JSON.stringify(await incident.resolveInterruptedOperations(db, manifest, reviewedReport, { ...approval, readLogs, verifyBootstrap }), null, 2));
+      }
+      return;
+    }
     if (command === 'verify-bootstrap') {
       await verifyFunctions(credential, project, manifest, 'bootstrap');
       await verifyRules(credential, project, path.join(root, 'release/bootstrap/firestore.rules'));
@@ -212,11 +311,7 @@ async function main() {
         if (!flag('--wait') || Date.now() > deadline) throw new Error('Quedan operaciones admitidas. No se presume que hayan terminado. Mantener cerrado y revisar status.');
         await sleep(2000);
       }
-      await db.runTransaction(async (tx) => {
-        const [gate, active] = await Promise.all([tx.get(gateRef), tx.get(db.collection('release_operations').where('state','==','active').limit(1))]);
-        if (gate.data()?.releaseId !== manifest.releaseId || gate.data()?.phase === 'open' || !active.empty) throw new Error('No se puede congelar el mantenimiento.');
-        tx.set(gateRef, { phase: 'frozen', frozenAt: new Date().toISOString() }, { merge: true });
-      });
+      await freezeMaintenance(db, manifest.releaseId);
       console.log('Mantenimiento congelado. No hay operaciones admitidas en ejecución.'); return;
     }
     if(command==='resolve-completed-operation'){
@@ -242,15 +337,13 @@ async function main() {
     if (['verify-before-open', 'maintenance-open'].includes(command)) {
       await verifyFinal(credential, project, manifest);
       await db.runTransaction(async (tx) => {
-        const [gate, config, queue, active] = await Promise.all([tx.get(gateRef), tx.get(configRef), tx.get(db.doc(QUEUE)), tx.get(db.collection('release_operations').where('state','==','active').limit(1))]);
-        if (gate.data()?.phase !== 'frozen' || gate.data()?.releaseId !== manifest.releaseId || gate.data()?.occupancyVersion !== 2 || !gate.data()?.occupancyAuditHash || gate.data()?.occupancyVerifiedEpoch !== gate.data()?.epoch
-          || Number(queue.data()?.pending ?? 0) !== 0 || !active.empty || config.data()?.automaticMinuteRefundsEnabled === true) throw new Error('No se cumplen las condiciones de reapertura. Mantener cerrado.');
+        await assertReopenState(tx, db, manifest);
         if (command === 'maintenance-open') {
           tx.set(gateRef, { phase: 'open', openedAt: new Date().toISOString() }, { merge: true });
           tx.set(configRef, { maintenanceMode: false }, { merge: true });
           tx.create(db.collection('release_control_audits').doc(),{command:'maintenance-open',releaseId:manifest.releaseId,manifestHash:manifest.manifestHash,at:new Date().toISOString()});
         }
-      });
+      }, command === 'verify-before-open' ? { readOnly: true } : undefined);
       console.log(command === 'maintenance-open' ? 'Operaciones reabiertas. Devoluciones automáticas desactivadas.' : 'Condiciones de reapertura comprobadas.'); return;
     }
     if (command === 'set-minimum-builds') {
@@ -284,4 +377,4 @@ async function main() {
   } finally { await db.terminate(); }
 }
 if (require.main === module) main().catch((error) => { console.error(error.message); process.exitCode = 1; });
-module.exports = { verifyFunctions, verifyIndexes, verifyHosting, verifyRules, drain, main };
+module.exports = { verifyFunctions, verifyIndexes, verifyHosting, verifyRules, drain, freezeMaintenance, assertReopenState, main };

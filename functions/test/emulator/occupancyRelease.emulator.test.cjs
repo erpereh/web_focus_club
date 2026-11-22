@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
 const test = require('node:test');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
@@ -14,6 +16,10 @@ const { runAppointmentTransaction } = require('../../lib/appointmentTransaction.
 const { guardCallable, guardBackground, createReleaseRecoveryHandler } = require('../../lib/releaseMaintenance.js');
 const { auditSlotOccupancy, applyReviewedSlotOccupancyAudit, verifySlotOccupancyAudit } = require('../../lib/slotOccupancyAudit.js');
 const { getMadridDateKey } = require('../../lib/appointmentLifecycle.js');
+const { CASES, auditInterruptedOperations, resolveInterruptedOperations, FUNCTION_NAME } = require('../../../scripts/interrupted-operations.cjs');
+const { freezeMaintenance } = require('../../../scripts/release-controls.cjs');
+const { hash } = require('../../../scripts/release-common.cjs');
+const { incidentLogs } = require('../fixtures/interruptedOperationLogs.cjs');
 const DAY = getMadridDateKey(new Date(Date.now() + 10 * 86400000));
 const request = (uid, data) => ({ auth: { uid, token: { email_verified: true, email: `${uid}@example.com` } }, data });
 const booking = createCustomerBookingHandlers({ db, getNowDate: () => new Date() });
@@ -40,6 +46,125 @@ async function reset() {
 }
 test.beforeEach(reset);
 test.after(async () => db.terminate());
+
+const incidentManifest = { projectId, releaseId: 'occupancy-v2-refunds-20261118', manifestHash: 'new-reviewed-manifest' };
+async function seedIncident() {
+  const writes = {
+    'system_controls/release': { phase: 'draining', releaseId: incidentManifest.releaseId, epoch: 1,
+      closedAt: '2026-11-22T21:10:05.322Z', manifestHash: 'old-reviewed-manifest' },
+    'system_controls/deferred': { pending: 2 },
+    'site_config/main': { maintenanceMode: true, automaticMinuteRefundsEnabled: false },
+    'appointments/unchanged': { userId: 'u1', status: 'approved' },
+  };
+  for (const item of CASES) {
+    writes['release_operations/' + item.id] = { operation: FUNCTION_NAME, state: 'active', releaseId: 'bootstrap', startedAt: item.startedAt };
+    if (item.notice !== 'complete') continue;
+    const key = 'appt:' + item.eventId;
+    const id = hash(key);
+    writes['notification_deliveries/' + id] = { uid: 'u1', dedupeKey: key, status: 'complete',
+      channels: { history: { status: 'sent' }, email: { status: 'sent' }, push: { status: 'sent' } } };
+    writes['email_dispatches/' + hash(key + ':email')] = { status: 'sent', messageId: '<sent-fixture>' };
+    writes['push_dispatches/' + hash(key + ':push')] = { status: 'sent' };
+    writes['users/u1/notifications/' + id] = { type: 'appointment_status' };
+  }
+  await seed(writes);
+  return Object.keys(writes).filter(key => key !== 'system_controls/release' && !key.startsWith('release_operations/'));
+}
+const readIncidentLogs = async () => incidentLogs();
+const approveIncident = report => ({
+  approvedHash: report.reportHash, reviewerUid: 'admin', acknowledged: true,
+  readLogs: readIncidentLogs, verifyBootstrap: async () => {},
+});
+
+test('incident resolution preserves deliveries and finances, closes atomically, and permits freezing', async () => {
+  const preservedPaths = [...await seedIncident(), 'bonos/u1'];
+  const before = await db.getAll(...preservedPaths.map(key => db.doc(key)));
+  await assert.rejects(freezeMaintenance(db, incidentManifest.releaseId), /congelar/);
+  const report = await auditInterruptedOperations(db, incidentManifest, readIncidentLogs);
+  assert.deepEqual([report.completeNotices, report.followUpNotices], [7, 2]);
+  const results = await Promise.all([1, 2].map(() => resolveInterruptedOperations(db, incidentManifest, report, approveIncident(report))));
+  assert.deepEqual(results.map(result => result.alreadyResolved).sort(), [false, true]);
+  assert.equal((await db.collection('release_operations').where('state', '==', 'active').get()).size, 0);
+  assert.equal((await db.collection('release_operations').where('state', '==', 'interrupted').get()).size, 9);
+  const receipts = await db.collection('release_control_audits').where('reportHash', '==', report.reportHash).get();
+  assert.equal(receipts.size, 9);
+  assert.ok(receipts.docs.every(receipt => receipt.get('replayed') === false && receipt.get('reviewerUid') === 'admin'));
+  assert.equal(receipts.docs.filter(receipt => receipt.get('evidence.notice') === 'follow_up').length, 2);
+  await freezeMaintenance(db, incidentManifest.releaseId);
+  assert.equal((await read('system_controls/release')).phase, 'frozen');
+  assert.equal((await resolveInterruptedOperations(db, incidentManifest, report, approveIncident(report))).alreadyResolved, true);
+  const after = await db.getAll(...preservedPaths.map(key => db.doc(key)));
+  assert.deepEqual(after.map(snap => snap.updateTime), before.map(snap => snap.updateTime));
+  const callable = guardCallable(db, 'createAppointment', () => { throw new Error('Must remain locked'); });
+  await assert.rejects(callable({}), error => error.details?.reason === 'maintenance');
+});
+
+test('stale incident evidence never retires a subset or writes receipts', async () => {
+  await seedIncident();
+  const report = await auditInterruptedOperations(db, incidentManifest, readIncidentLogs);
+  await db.doc('email_dispatches/' + hash('appt:' + CASES[0].eventId + ':email')).update({ note: 'evidence changed' });
+  await assert.rejects(resolveInterruptedOperations(db, incidentManifest, report, approveIncident(report)), /evidencia cambió/);
+  assert.equal((await db.collection('release_operations').where('state', '==', 'active').get()).size, 9);
+  assert.equal((await db.collection('release_control_audits').get()).size, 0);
+  await assert.rejects(resolveInterruptedOperations(db, incidentManifest, { ...report, followUpNotices: 0 }, approveIncident(report)), /informe íntegro/);
+  await assert.rejects(resolveInterruptedOperations(db, incidentManifest, report, { ...approveIncident(report), reviewerUid: 'u1' }), /administrador/);
+});
+
+test('an unrelated active operation or a new ambiguous delivery blocks incident resolution', async () => {
+  await seedIncident();
+  const report = await auditInterruptedOperations(db, incidentManifest, readIncidentLogs);
+  await db.doc('release_operations/unrelated').set({ state: 'active', operation: 'other' });
+  await assert.rejects(resolveInterruptedOperations(db, incidentManifest, report, approveIncident(report)), /conjunto/);
+  await db.doc('release_operations/unrelated').delete();
+  const unresolved = CASES.find(item => item.notice === 'follow_up');
+  await db.doc('notification_deliveries/' + hash('appt:' + unresolved.eventId)).set({ status: 'pending' });
+  await assert.rejects(resolveInterruptedOperations(db, incidentManifest, report, approveIncident(report)), /Apareció evidencia/);
+  assert.equal((await db.collection('release_control_audits').get()).size, 0);
+});
+
+test('new background admissions record enough identity to correlate a terminated instance', async () => {
+  const previousRevision = process.env.K_REVISION;
+  process.env.K_REVISION = 'reviewed-cloud-run-revision';
+  try {
+    const handler = guardBackground(db, FUNCTION_NAME, async () => {
+      const active = await db.collection('release_operations').where('state', '==', 'active').get();
+      assert.equal(active.size, 1);
+      assert.equal(active.docs[0].get('eventId'), 'stable-cloud-event');
+      assert.equal(active.docs[0].get('eventKey'), hash(FUNCTION_NAME + ':stable-cloud-event'));
+      assert.equal(active.docs[0].get('revision'), 'reviewed-cloud-run-revision');
+    });
+    await handler({ id: 'stable-cloud-event' });
+    assert.equal((await db.collection('release_operations').get()).size, 0);
+  } finally {
+    if (previousRevision === undefined) delete process.env.K_REVISION;
+    else process.env.K_REVISION = previousRevision;
+  }
+});
+
+test('reopening verification can run with the read-only protection and leaves the gate frozen', async () => {
+  await seed({
+    'system_controls/release': { phase: 'frozen', releaseId: 'test-release', epoch: 1,
+      occupancyVersion: 2, occupancyVerifiedEpoch: 1, occupancyAuditHash: 'verified-audit' },
+    'system_controls/deferred': { pending: 0 },
+  });
+  const commonPath = require.resolve('../../../scripts/release-common.cjs');
+  const controlsPath = require.resolve('../../../scripts/release-controls.cjs');
+  const source = `
+    const assert = require('node:assert/strict');
+    const common = require(${JSON.stringify(commonPath)});
+    const { assertReopenState } = require(${JSON.stringify(controlsPath)});
+    common.readonlyFirestore();
+    (async () => {
+      const { db } = await common.initialize(${JSON.stringify(projectId)});
+      try {
+        await db.runTransaction(tx => assertReopenState(tx, db, { releaseId: 'test-release' }), { readOnly: true });
+        assert.throws(() => db.runTransaction(async () => {}), /requires readOnly/);
+        await assert.rejects(db.runTransaction(async tx => tx.set(db.doc('system_controls/release'), { phase: 'open' }), { readOnly: true }), /Read-only/);
+      } finally { await db.terminate(); }
+    })().catch(error => { console.error(error); process.exitCode = 1; });`;
+  await promisify(execFile)(process.execPath, ['-e', source], { timeout: 20_000 });
+  assert.equal((await read('system_controls/release')).phase, 'frozen');
+});
 
 test('legacy mobile payload creates a pending seat; approval and retries keep exactly that seat', async () => {
   const legacy = guardCallable(db, 'createAppointment', booking.createAppointment);

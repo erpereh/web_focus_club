@@ -140,13 +140,44 @@ Continuar únicamente con `phase: frozen`, ninguna operación activa y devolucio
 
 Las reglas bloquean escrituras directas de clientes, entrenadores y administradores, incluyendo contadores y configuración. Las Functions bloquean también las apps antiguas que no muestran la pantalla de mantenimiento y el borrado de cuenta del codebase `portal`. Las lecturas siguen disponibles; las consultas administrativas de devoluciones y la vista previa de renovación conservan acceso. El operador conserva las acciones expresas de este procedimiento mediante IAM. No se debe cambiar `maintenanceMode` directamente desde la consola o el panel para abrir: ese campo visual no sustituye el bloqueo privado.
 
+### Incidente del 22 de noviembre: nueve concesiones interrumpidas
+
+El cierre de la época 1 quedó en `draining` después de ocho terminaciones por memoria de la revisión Bootstrap de `onAppointmentCustomerNotification`. El informe acredita siete entregas completas y conserva los dos avisos restantes para seguimiento. Las dos concesiones de una instancia compartida se correlacionan a nivel de instancia. El registro antiguo no asigna inequívocamente el ID del evento a cada concesión.
+
+En la época 1, sustituir el comando de cierre anterior por esta secuencia. Usar el informe entregado con el manifiesto actual o generar uno nuevo con otra ruta.
+
+```powershell
+$marcaIncidenteFocus = Get-Date -Format 'yyyyMMdd-HHmmss'
+$informeIncidenteFocus = "release/incident-audit-$marcaIncidenteFocus.json"
+node scripts/release-controls.cjs audit-interrupted-operations --project $proyectoFocus --manifest release/manifest.json --out $informeIncidenteFocus
+Comprobar-Focus
+Get-Content -Raw -LiteralPath $informeIncidenteFocus
+```
+
+Revisar las nueve concesiones, las siete entregas y los dos avisos pendientes de revisión. El informe vincula las versiones exactas de los documentos y los identificadores de las entradas de Cloud Logging.
+
+```powershell
+$revisorFocus = Read-Host 'UID del administrador que revisó la auditoría de incidente'
+$hashIncidenteFocus = Read-Host 'reportHash aprobado del informe de incidente'
+node scripts/release-controls.cjs resolve-interrupted-operations --confirm-project $proyectoFocus --manifest release/manifest.json --reviewed-report $informeIncidenteFocus --approved-report-hash $hashIncidenteFocus --reviewer-uid $revisorFocus --acknowledge-unresolved-notices
+Comprobar-Focus
+node scripts/release-controls.cjs maintenance-close --confirm-project $proyectoFocus --manifest release/manifest.json --wait
+Comprobar-Focus
+node scripts/release-controls.cjs status --project $proyectoFocus
+Comprobar-Focus
+```
+
+La resolución vuelve a leer Cloud Logging, verifica las versiones de Firestore y marca las nueve concesiones como `interrupted` en una sola transacción con nueve recibos de auditoría. Los recibos identifican los dos avisos pendientes de seguimiento. La resolución conserva las concesiones y las entregas, sin reproducir eventos. Si se pierde la respuesta, repetir el comando con el mismo informe acredita los recibos ya confirmados. Si cambia una evidencia, detenerse y generar un informe nuevo para revisarlo. Seguir con el paso 4 únicamente cuando el estado sea `frozen` y no queden operaciones activas.
+
 ## 4. Publicar las Functions definitivas en tandas de máximo cinco
 
 ```powershell
-.\scripts\deploy-release.ps1 -Stage Functions
+node scripts/release-controls.cjs plan-functions-resume --project $proyectoFocus --manifest release/manifest.json
+Comprobar-Focus
+.\scripts\deploy-release.ps1 -Stage Functions -Resume
 ```
 
-El script ejecuta **exactamente** las tandas siguientes, deteniéndose ante cualquier fallo. Las órdenes de esta tabla documentan la expansión del script; no volver a ejecutarlas si el script ya terminó. Todas llevan `firebase deploy --project focus-club-f73b8 --only 'FILTRO'`.
+La tabla muestra el orden cuando todavía quedan las 69 Functions. `-Resume` comprueba las fuentes publicadas, omite las versiones definitivas acreditadas y vuelve a agrupar las pendientes en tandas de hasta cinco por codebase. Si falla una publicación, repetir el comando con `-Resume` vuelve a calcular las pendientes. Si aparecen fuentes desconocidas o la última tanda no queda acreditada, el script se detiene.
 
 | Tanda | Functions concretas | Filtro de publicación |
 |---|---|---|

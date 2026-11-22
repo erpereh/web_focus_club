@@ -68,4 +68,4 @@ async function planBootstrapResume({ manifest, functions, readArchive, readRules
     verifiedFunctions: [...verified].sort(), pendingFunctions: [...pending].sort(), artifacts, batches,
     rules: { status: rules === bootstrapRules ? 'verified' : 'pending', config: 'release/bootstrap/firebase.json' } };
 }
-module.exports = { planBootstrapResume, sourceIdentity };
+module.exports = { planBootstrapResume, sourceIdentity, matchesFiles };

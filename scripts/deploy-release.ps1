@@ -6,7 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-if ($Resume -and $Stage -ne 'Bootstrap') { throw '-Resume solo se admite para Bootstrap.' }
+if ($Resume -and $Stage -notin @('Bootstrap', 'Functions')) { throw '-Resume solo se admite para Bootstrap y Functions.' }
 $raizFocus = Split-Path -Parent $PSScriptRoot
 $proyectoFocus = 'focus-club-f73b8'
 Push-Location -LiteralPath $raizFocus
@@ -28,7 +28,6 @@ try {
     }
     & node scripts/release-controls.cjs assert-stage --project $proyectoFocus --manifest release/manifest.json --stage $Stage
     Comprobar-SalidaFocus
-    $manifiestoFocus = Get-Content -Raw -LiteralPath 'release/manifest.json' | ConvertFrom-Json
     switch ($Stage) {
         'Bootstrap' {
             & node scripts/release-controls.cjs preflight --project $proyectoFocus --manifest release/manifest.json
@@ -59,12 +58,34 @@ try {
             Comprobar-SalidaFocus
         }
         'Functions' {
-            Publicar-TandasFocus -Configuracion 'firebase.json' -Nombres @($manifiestoFocus.webFunctions)
-            Push-Location -LiteralPath '../app_focus_club'
-            try {
-                & firebase deploy --project $proyectoFocus --only 'functions:portal:deleteOwnAccount'
+            $tandaAnteriorFocus = @()
+            $primeraComprobacionFocus = $true
+            while ($true) {
+                $salidaPlanFocus = & node scripts/release-controls.cjs plan-functions-resume --project $proyectoFocus --manifest release/manifest.json
                 Comprobar-SalidaFocus
-            } finally { Pop-Location }
+                $planFocus = ($salidaPlanFocus -join "`n") | ConvertFrom-Json
+                $sinVerificarFocus = @($tandaAnteriorFocus | Where-Object { $_ -notin @($planFocus.verifiedFunctions) })
+                if ($sinVerificarFocus.Count -gt 0) { throw "No se ha acreditado la tanda anterior: $($sinVerificarFocus -join ', '). Revisar y continuar con -Resume." }
+                if ($primeraComprobacionFocus -and -not $Resume -and @($planFocus.verifiedFunctions).Count -gt 0 -and @($planFocus.pendingFunctions).Count -gt 0) {
+                    throw 'Functions definitivas parcialmente publicadas. Usa -Stage Functions -Resume para omitir las verificadas.'
+                }
+                $primeraComprobacionFocus = $false
+                Write-Host "Functions definitivas: $(@($planFocus.verifiedFunctions).Count) verificadas, $(@($planFocus.pendingFunctions).Count) pendientes."
+                if (@($planFocus.batches).Count -eq 0) { break }
+                $loteFocus = @($planFocus.batches)[0]
+                $tandaAnteriorFocus = @($loteFocus.functions)
+                if ($tandaAnteriorFocus.Count -lt 1 -or $tandaAnteriorFocus.Count -gt 5) { throw 'Tanda definitiva fuera del límite revisado.' }
+                if ($loteFocus.codebase -eq 'portal') {
+                    if ($tandaAnteriorFocus.Count -ne 1 -or $tandaAnteriorFocus[0] -ne 'deleteOwnAccount') { throw 'El plan portal no coincide con su único punto de entrada.' }
+                    Push-Location -LiteralPath '../app_focus_club'
+                    try {
+                        & firebase deploy --project $proyectoFocus --only 'functions:portal:deleteOwnAccount'
+                        Comprobar-SalidaFocus
+                    } finally { Pop-Location }
+                } elseif ($loteFocus.codebase -eq 'default') {
+                    Publicar-TandasFocus -Configuracion 'firebase.json' -Nombres $tandaAnteriorFocus
+                } else { throw 'Codebase no reconocido en el plan definitivo.' }
+            }
         }
         'Hosting' {
             & firebase deploy --project $proyectoFocus --only 'hosting'
