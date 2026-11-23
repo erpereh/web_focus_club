@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Bootstrap', 'Functions', 'Hosting', 'Rules')]
+    [ValidateSet('Bootstrap', 'Functions', 'Hosting', 'Rules', 'CalendarHotfix')]
     [string]$Stage,
     [switch]$Resume
 )
@@ -26,8 +26,10 @@ try {
             Comprobar-SalidaFocus
         }
     }
-    & node scripts/release-controls.cjs assert-stage --project $proyectoFocus --manifest release/manifest.json --stage $Stage
-    Comprobar-SalidaFocus
+    if ($Stage -ne 'CalendarHotfix') {
+        & node scripts/release-controls.cjs assert-stage --project $proyectoFocus --manifest release/manifest.json --stage $Stage
+        Comprobar-SalidaFocus
+    }
     switch ($Stage) {
         'Bootstrap' {
             & node scripts/release-controls.cjs preflight --project $proyectoFocus --manifest release/manifest.json
@@ -93,6 +95,17 @@ try {
         }
         'Rules' {
             & firebase deploy --project $proyectoFocus --only 'firestore:rules'
+            Comprobar-SalidaFocus
+        }
+        'CalendarHotfix' {
+            $salidaPlanFocus = & node scripts/release-controls.cjs plan-calendar-hotfix --project $proyectoFocus --manifest release/manifest.json
+            Comprobar-SalidaFocus
+            $planFocus = ($salidaPlanFocus -join "`n") | ConvertFrom-Json
+            $pendientesFocus = @($planFocus.pendingFunctions)
+            if ($pendientesFocus.Count -eq 1 -and $pendientesFocus[0] -eq 'syncAppointmentWithGoogleCalendar') {
+                Publicar-TandasFocus -Configuracion 'firebase.json' -Nombres $pendientesFocus
+            } elseif ($pendientesFocus.Count -ne 0) { throw 'El plan contiene otras Functions. Se cancela la publicación selectiva.' }
+            & node scripts/release-controls.cjs verify-calendar-hotfix --project $proyectoFocus --manifest release/manifest.json
             Comprobar-SalidaFocus
         }
     }

@@ -305,12 +305,16 @@
       "sha256": "9891fec2c7b54611b53518dfa1a4f95e9a3cdfd36ebf2b408a602969fb9af912"
     },
     {
+      "path": "functions/src/googleCalendarReconciliation.ts",
+      "sha256": "2de5eb70fdc07bfe04ff37a892c65778ce29e5ac625b1fd94d2aa68fcaa2cc18"
+    },
+    {
       "path": "functions/src/googleCalendarSync.ts",
-      "sha256": "305ee522cb96463b37ed01656af6eb9de2a397f1d5bb17c0bb9a787087bdfaa8"
+      "sha256": "b2c2aec793fe289a171894fe9ee05cce38ee104ac46ef9e02382da567c6f20f4"
     },
     {
       "path": "functions/src/index.ts",
-      "sha256": "57fbafcc575aff74775f54a3f616a703c58d72d771c2e18389268499e1f01427"
+      "sha256": "898f209ed534cd43a5cbffc40dd74c13f6fefaa099fe66545c75adfa33f20022"
     },
     {
       "path": "functions/src/minuteRefundAdmin.ts",
@@ -549,12 +553,16 @@
       "sha256": "b0d2bc4142d0c62d43f996aaeb64f22c4889ac853f8a3765758b505d972d0149"
     },
     {
+      "path": "functions/lib/googleCalendarReconciliation.js",
+      "sha256": "4626caaa3144c5e09d7f3344f07a80cc9553edf64cbb029ec35e9df8b8fa84e8"
+    },
+    {
       "path": "functions/lib/googleCalendarSync.js",
-      "sha256": "d074980467750856018848627b5f66ae746598d3ed33f47703c760d307d0bd00"
+      "sha256": "ea7fe5bcebb9a61b191c21df9783b46d98a63379864cbef355c576715b260798"
     },
     {
       "path": "functions/lib/index.js",
-      "sha256": "c6bde07517d950308d89c67ee7cb345768d61ab60017fe84acc6ab4571057138"
+      "sha256": "36e1531760243b0a648f106de710e92866e903b771abe8b613ecece1d962172a"
     },
     {
       "path": "functions/lib/minuteRefundAdmin.js",
@@ -1310,7 +1318,7 @@
     },
     {
       "path": "scripts/deploy-release.ps1",
-      "sha256": "75c2b68bfd8709e850d1056b5970da82708e0c51e5f0ddba46341e7c92bf8bdc"
+      "sha256": "4a67291e9070e16900d8b66c68a6d54c0e351637c38be3d08eb32aae8be858f2"
     },
     {
       "path": "scripts/firestore-index-verifier.cjs",
@@ -1318,11 +1326,11 @@
     },
     {
       "path": "scripts/functions-resume.cjs",
-      "sha256": "caf6e93309b5e340db1a35d11ffe936a6077166e9a88a75f63e891149cc4e81f"
+      "sha256": "d1afb510d5cab5f2156a733402999a7490979e666a70d453b4109d32308d169d"
     },
     {
       "path": "scripts/interrupted-operations.cjs",
-      "sha256": "aee03d23c3a1a38023e476ea6ac5c9dff72b62ef42c6a556e477f4ef4b45d1a7"
+      "sha256": "93644a905dd2de97e4bfb8dadc278f80d64e0c66d79a611091082fd3a1a09fe8"
     },
     {
       "path": "scripts/migrate-to-storage.cjs",
@@ -1334,7 +1342,7 @@
     },
     {
       "path": "scripts/prepare-coordinated-release.cjs",
-      "sha256": "2652cd9a5e1fc71ba96df122eb24db615435cf674a87f8be3040aa0fa6c817d8"
+      "sha256": "3af05e579868ea00d4ec6bbe269a7f30fdba631918257887f3d5e13a386a7c8b"
     },
     {
       "path": "scripts/reconcile-minute-refunds.cjs",
@@ -1350,7 +1358,7 @@
     },
     {
       "path": "scripts/release-controls.cjs",
-      "sha256": "dcf23c6502bfc2183994df62e5764aecc80f92ff61537cdf0f05d6c5f7ddcb74"
+      "sha256": "9cd28aab3ede0ea5ce0c6f1f1046f8957dde485755db1e9ee7b53fd4c0a4a25a"
     },
     {
       "path": "scripts/reorganize-cms-media.cjs",
@@ -1378,7 +1386,7 @@
     },
     {
       "path": "scripts/sync-google-calendar-appointments.cjs",
-      "sha256": "87045660233ae96c53ffbee7507d04c8bef46d76766bf299da0b407f261f2695"
+      "sha256": "0844d41bdb050c5c8f3de329ea04eb6bc193c89a1b2299c5707cdaec096b088b"
     },
     {
       "path": "scripts/update-contact-info.js",
@@ -2454,7 +2462,7 @@
     },
     {
       "path": "functions/package.json",
-      "sha256": "d907196fd0df1a8c24aeda2ff43f494ad029554f90c4e997939c40b0a8573259"
+      "sha256": "7f59be0302432814ea36e5e3d8d7f7a8ca97dec2da05e8a20455da84e3361f92"
     },
     {
       "path": "functions/package-lock.json",
@@ -2478,7 +2486,11 @@
     },
     {
       "path": "docs/despliegue-integrado-aforo-devoluciones.md",
-      "sha256": "afe6cd5bfba104702949f8f079170f8ac13c45203c8ec4ffaf9b248f2ef7bafc"
+      "sha256": "da13d7dbf12179b95bab577cf98ebcbdedd0b432fab2cf15fe9a82d5bb404072"
+    },
+    {
+      "path": "docs/google_calendar_sync.md",
+      "sha256": "71f8ed5a2f2dd14e7c0bea481fddd297e09572366769283dc8318b1d59deff15"
     },
     {
       "path": "release/auditoria-historica.md",
@@ -2486,7 +2498,7 @@
     },
     {
       "path": "release/test-results.json",
-      "sha256": "76734db9e2652d4f7058e0aef312c3e14437b23a46a5cd397df4cb67aa651f94"
+      "sha256": "56ecf0ea739b94363bbd499a1fc6bb2236454ceba085f0999d837f124bd97c3d"
     },
     {
       "path": "release/bootstrap/1e047758874a1474ce33/firebase.json",
@@ -8405,5 +8417,513 @@
     ],
     "rulesetName": "projects/focus-club-f73b8/rulesets/7f6240e5-dfe7-4a2a-95f3-c673448fa6f3"
   },
-  "manifestHash": "6db1b85da990413478eb717b5c97c57c9e8df396824867f013e010356ff91c8e"
+  "calendarHotfix": {
+    "baselineManifestHash": "6db1b85da990413478eb717b5c97c57c9e8df396824867f013e010356ff91c8e",
+    "baselineRevision": "syncappointmentwithgooglecalendar-00013-zay",
+    "baselineServingRevision": "syncappointmentwithgooglecalendar-00012-nok",
+    "baselineSource": {
+      "bucket": "gcf-v2-sources-1555015411-europe-west1",
+      "object": "syncAppointmentWithGoogleCalendar/function-source.zip",
+      "generation": "1795387601438084"
+    },
+    "baselineDefaultInputs": [
+      {
+        "path": "functions/src/adminAppointmentCreate.ts",
+        "sha256": "cd708d9ed80895b95bf7909a0833668eb0d65a8882b1ea13f1f90856e5874c5e"
+      },
+      {
+        "path": "functions/src/adminAppointmentReschedule.ts",
+        "sha256": "38a7ccf8dd8d6e28ff0c3e46af24a523d5693f4fcfbe603475f92794259ef735"
+      },
+      {
+        "path": "functions/src/adminAppointmentRuntime.ts",
+        "sha256": "601a2fa10ddf918b85f72244b76036438c44f6ac15bedcb662a37e3a50730f12"
+      },
+      {
+        "path": "functions/src/adminAppointmentStatus.ts",
+        "sha256": "76a10c1caec9ce85b6c37ed0e17fa001f4886b1a6f32f8287943c9a2014bf313"
+      },
+      {
+        "path": "functions/src/adminBookingOverrides.ts",
+        "sha256": "32fc983fb5a5e5232a269a02fc6270b418cbc05f2859f0fee4760273a372820b"
+      },
+      {
+        "path": "functions/src/adminUsers.ts",
+        "sha256": "8194c19f3d6018a5f5d280bda9e42aad7a15c733b3259b8c678c80c4810bbab6"
+      },
+      {
+        "path": "functions/src/appointmentFinance.ts",
+        "sha256": "1608db95f274c45f6eeb759bd85ab7ed692c67cfcd46496078c67c4a69cf0017"
+      },
+      {
+        "path": "functions/src/appointmentLifecycle.ts",
+        "sha256": "915f88894cc57d5028d28a51e462eac635730454f2ca2ae294b275310d2b84de"
+      },
+      {
+        "path": "functions/src/appointmentProposals.ts",
+        "sha256": "ff722c2268ab3e3fd10179dbff0dcfa1f28e6f1c452ff53b0f2fdd66e36f87e4"
+      },
+      {
+        "path": "functions/src/appointmentTransaction.ts",
+        "sha256": "51f3408ad0144bcfe763aa79722f2c198e821a2419f890c0c313e6b4859075e5"
+      },
+      {
+        "path": "functions/src/bonoMinutes.ts",
+        "sha256": "db6e8abc285295a0718ff0400c8850708cfa065b8a4b4545b975778bd8f6b884"
+      },
+      {
+        "path": "functions/src/bonoRenewal.ts",
+        "sha256": "79a2abdb3c821b95aa6d3a05ec7d2dc779727d9ecd84e4bc4e4dad84b6d21a09"
+      },
+      {
+        "path": "functions/src/bonoRenewalPlanning.ts",
+        "sha256": "cc5581fab6d7d90eca1ec8f7004930301c2331f45102a294b444e344295cf4d7"
+      },
+      {
+        "path": "functions/src/cancellationCharge.ts",
+        "sha256": "d6dd548d25cb334acbf56343c2ec778ae65685b1273dd79195176c17075f8050"
+      },
+      {
+        "path": "functions/src/capacityExceptions.ts",
+        "sha256": "dbe7a3e4ba5adb24680690fb81a69c0029b8daa4b2f0a0dccf5223cd98e60590"
+      },
+      {
+        "path": "functions/src/customerBooking.ts",
+        "sha256": "5071163b7c47ac83038d2834fa2d324bf5331ab0a93aa28b83fc16c028673cea"
+      },
+      {
+        "path": "functions/src/customerSuggestions.ts",
+        "sha256": "16354e495369936f62051a88e1fc80f809fd4b0d7199db61352d0b2bfd0a5c5a"
+      },
+      {
+        "path": "functions/src/email/brevo.ts",
+        "sha256": "f031bfb9649b28ed7a00f9c6c4544528ebfbe7dac7e42d5d4f7ef8765a3a62d0"
+      },
+      {
+        "path": "functions/src/email/dispatch.ts",
+        "sha256": "e4d9d32dc3a4b1e7b7a2b132a49326d31f038f70dac92e98bd883ee98c53807f"
+      },
+      {
+        "path": "functions/src/email/notifications.ts",
+        "sha256": "3ff880b2e8f9b3558555ddfe1e09116a201f2b15a28e7f54fc84bf541cb6bd6e"
+      },
+      {
+        "path": "functions/src/email/templates/appointment.ts",
+        "sha256": "8412a457d8ef579387ac12b52d2390e6ba88f0a52070baabff1bd7da766ddb3c"
+      },
+      {
+        "path": "functions/src/email/templates/bono.ts",
+        "sha256": "593ca267195e8be70e5034f63cf2101bd3748b7a6ce6ac7f1508fae325863513"
+      },
+      {
+        "path": "functions/src/email/templates/components.ts",
+        "sha256": "57b94191fc7e46a578c2c2375f0806d128bdd9cea47ab3a3f29082fd515d5a5d"
+      },
+      {
+        "path": "functions/src/email/templates/contact.ts",
+        "sha256": "81e753ddce2cef96d2584a44f2067b0349b2bcae8336e7be3637d5569ac0b488"
+      },
+      {
+        "path": "functions/src/email/templates/customerSuggestion.ts",
+        "sha256": "c70b400a3280c0ec5082ed8201d7c7b08fdeb805dd074c41c89303ed5ffa7ced"
+      },
+      {
+        "path": "functions/src/email/templates/index.ts",
+        "sha256": "66e94c9682a421df695ad8223c7817f03fd8d90423e42c498326fed921b83cfd"
+      },
+      {
+        "path": "functions/src/email/templates/layout.ts",
+        "sha256": "d4e89e805774ea035e6c71d5476c17156e0c734e8e05e7ee5e77f5f30f683ca9"
+      },
+      {
+        "path": "functions/src/email/templates/notice.ts",
+        "sha256": "fdb389cdd3169c6c34e918d6fb1b83d49b402ef527ed436986f3eceae1073957"
+      },
+      {
+        "path": "functions/src/email/templates/series.ts",
+        "sha256": "856679e2be85e239af48c3befd4e1185166c86ab46b3b6694de8df0e8ba538ee"
+      },
+      {
+        "path": "functions/src/email/templates/welcome.ts",
+        "sha256": "37904ee90801bdb7e932f6f512f94c5a7840ca627e88d4337d0e76599d2755bd"
+      },
+      {
+        "path": "functions/src/email/types.ts",
+        "sha256": "9891fec2c7b54611b53518dfa1a4f95e9a3cdfd36ebf2b408a602969fb9af912"
+      },
+      {
+        "path": "functions/src/googleCalendarSync.ts",
+        "sha256": "305ee522cb96463b37ed01656af6eb9de2a397f1d5bb17c0bb9a787087bdfaa8"
+      },
+      {
+        "path": "functions/src/index.ts",
+        "sha256": "57fbafcc575aff74775f54a3f616a703c58d72d771c2e18389268499e1f01427"
+      },
+      {
+        "path": "functions/src/minuteRefundAdmin.ts",
+        "sha256": "223f234b31225251ff87d840b159b29cc43c682f34858019940ad36d16756135"
+      },
+      {
+        "path": "functions/src/minuteRefundAudit.ts",
+        "sha256": "6b6fff25434ee0dfc0792095664bfeb21b988db8bd8e837b6274397afcd773f3"
+      },
+      {
+        "path": "functions/src/minuteRefunds.ts",
+        "sha256": "24e7f9b5a533742e1b4784fd17c5fdf5a2a22ca69594c6f6db56e0decbea8923"
+      },
+      {
+        "path": "functions/src/notifications/appointmentEvents.ts",
+        "sha256": "86108ca52608ce9ff539a63a77007ad34c92c4c5e9252378e3d8e627ed54531a"
+      },
+      {
+        "path": "functions/src/notifications/bonoEvents.ts",
+        "sha256": "bb9c4727581b5aae99ecb861a88f844bcbb8b08f43e0fdea09a5475f6d09619d"
+      },
+      {
+        "path": "functions/src/notifications/builders.ts",
+        "sha256": "9a006f9982b6c1d4955ec6fce17c68172b82f4ffca3df8ce93ace4aa88f0ba90"
+      },
+      {
+        "path": "functions/src/notifications/dispatcher.ts",
+        "sha256": "efb30fa024a6b0c3617af1a75ffab11e7d824100c32c537783ae65443657a9be"
+      },
+      {
+        "path": "functions/src/notifications/handlers.ts",
+        "sha256": "87e40f925bac009fc52a2d001b3aface435f46a8251c24e02489b12839b28f78"
+      },
+      {
+        "path": "functions/src/notifications/history.ts",
+        "sha256": "927b605c0908c1052c91590f2a454fb6975d1cc144d2b973e54e7256da93c103"
+      },
+      {
+        "path": "functions/src/notifications/ledger.ts",
+        "sha256": "12a7a71a30e5eb38f5d3020a9246e532cdb378da829535e7cd554a89d86e555b"
+      },
+      {
+        "path": "functions/src/notifications/outbox.ts",
+        "sha256": "71c8c85b4ab33aaff6a1c6f58ae64a4e6ee6dc04af8b4620d22013355d973f4f"
+      },
+      {
+        "path": "functions/src/notifications/push.ts",
+        "sha256": "d7fa6bf79ff9cd2c2cdd0598843077c17507c3652125ca153b91b56377505443"
+      },
+      {
+        "path": "functions/src/notifications/schedules.ts",
+        "sha256": "9eb0e688c3a3367e7b17971d881995c8aec510565acccf83d7e895bd28362186"
+      },
+      {
+        "path": "functions/src/notifications/tokens.ts",
+        "sha256": "eebf02dfd14d9fca3d8f199887fe9addf3bbee89e036581b52162036b3990e8b"
+      },
+      {
+        "path": "functions/src/notifications/types.ts",
+        "sha256": "8f3c34fb277397dbe23bf8068865705f8fb4772ce1e4b71d235b2b3da8301d57"
+      },
+      {
+        "path": "functions/src/recurringAppointments.ts",
+        "sha256": "43ab8e6201741261e6c47d5422b9a37698012ae1728d596e247faf017b11774b"
+      },
+      {
+        "path": "functions/src/recurringReschedule.ts",
+        "sha256": "6881aceb787c9d714014f310db04435b9fc3b023bc7c99d1fa0ea514a0b87968"
+      },
+      {
+        "path": "functions/src/recurringScheduleReplacement.ts",
+        "sha256": "1982b93877211021ed7547a276f9a739ce8455aeca0d8e1a1de81ed740b23cd9"
+      },
+      {
+        "path": "functions/src/recurringSeries.ts",
+        "sha256": "1170b01feff33a4407f7ecb145311e3e3db4bd41685d5bbb3a7edd6117b1b956"
+      },
+      {
+        "path": "functions/src/refundAccounting.ts",
+        "sha256": "a45b78348452c7ab84ded996cfdb58e00a888a7f371b78ebd4990f5c27d3cff8"
+      },
+      {
+        "path": "functions/src/releaseMaintenance.ts",
+        "sha256": "0d713b208f1ef13757eaae3e28b66c75e9bf4df341f31477bdf7a3edfd64a9b8"
+      },
+      {
+        "path": "functions/src/seriesMetadata.ts",
+        "sha256": "2c45dbff9015a503126eb23ff3f7a879c62d57f34d1ddef1432a99bcfe90f777"
+      },
+      {
+        "path": "functions/src/siteConfig.ts",
+        "sha256": "c74ca34f48a404c90b8666fa1addd5cbf4b37310b938092d73b5a12f03eb67b7"
+      },
+      {
+        "path": "functions/src/slotMigrations.ts",
+        "sha256": "ff6e94332b3205861a60ca30615ef5b59188fcd4e7f9d14ed441da6a5d4e14f6"
+      },
+      {
+        "path": "functions/src/slotOccupancy.ts",
+        "sha256": "37adc5045a13501d37076b0a9457a357f9438ec1f8674f7d40eac94e65d4cbeb"
+      },
+      {
+        "path": "functions/src/slotOccupancyAudit.ts",
+        "sha256": "18b75909874ec6ab336e1bba757862b5d921234517156544e7c4c58dbb77b9eb"
+      },
+      {
+        "path": "functions/src/slotValidation.ts",
+        "sha256": "0a4323b33e6a55f5df4543c8890f47f0b58e1b1c8880bfabab7dd107fd723bbc"
+      },
+      {
+        "path": "functions/src/supportChat.ts",
+        "sha256": "1b727d0e24b8f4550f0de3dd3508a93f596b1c6bbd69a56cc43ffc27cb189010"
+      },
+      {
+        "path": "functions/lib/adminAppointmentCreate.js",
+        "sha256": "6c123308de8bd276baabe40943f9bcadb9509c2891f43202cdeacaaef9fdb56d"
+      },
+      {
+        "path": "functions/lib/adminAppointmentReschedule.js",
+        "sha256": "979ea4058538b1098fa6ce04628fb54816769aa741d1113906fc80f71ecfc1e8"
+      },
+      {
+        "path": "functions/lib/adminAppointmentRuntime.js",
+        "sha256": "28e97eaf7b3d9b33daa8fc846ac5f298da7f60fc378c85af852c80ef2b5fa89e"
+      },
+      {
+        "path": "functions/lib/adminAppointmentStatus.js",
+        "sha256": "acf821773877dcb905d4f07a57bdd427353fe8ac1a0a8afe7e567485dff3877a"
+      },
+      {
+        "path": "functions/lib/adminBookingOverrides.js",
+        "sha256": "edaad3329c7b9a4d5fdf1840c874ad24623e534dff3f439c703bd818dfcd27b4"
+      },
+      {
+        "path": "functions/lib/adminUsers.js",
+        "sha256": "5c403f22a932b867396e8aa2343ba773383296c4a9793f0680a31d936ddbbf7c"
+      },
+      {
+        "path": "functions/lib/appointmentFinance.js",
+        "sha256": "f0712658b0633dd003bfa9b90980573c7a782ab29dedb07cce2f282e710e2e90"
+      },
+      {
+        "path": "functions/lib/appointmentLifecycle.js",
+        "sha256": "a0eb1cab0c49cec69d6cfd1df20cf7bca2fe3c25d9db0d0d5229717a90e19bd7"
+      },
+      {
+        "path": "functions/lib/appointmentProposals.js",
+        "sha256": "daf98d79eb3fbefd0775dce63d8c76c26b87e6d1acf13ae5da78cf7845ffd546"
+      },
+      {
+        "path": "functions/lib/appointmentTransaction.js",
+        "sha256": "aece4e597cff26876e9dc5614d62b616eb9038a12b966a1ec393ccecc4c2e05e"
+      },
+      {
+        "path": "functions/lib/bonoMinutes.js",
+        "sha256": "8fb2a432b35fd034dbbcebcd2c6bb42dee04f2dd2b634fc385d07444197daceb"
+      },
+      {
+        "path": "functions/lib/bonoRenewal.js",
+        "sha256": "02b9469cff2b4b2c527a7e299660d955aa1af3000f51cd886630564591fbf8b3"
+      },
+      {
+        "path": "functions/lib/bonoRenewalPlanning.js",
+        "sha256": "599249e97e309edab03d057ba1f0639f4c7a23107ab3ca4c344d0b1cb0304d9b"
+      },
+      {
+        "path": "functions/lib/cancellationCharge.js",
+        "sha256": "d933866e13fb2233c29ef3422005a751384b79de1b387799c2313daa27da719c"
+      },
+      {
+        "path": "functions/lib/capacityExceptions.js",
+        "sha256": "261f1d86877f15444abd9ccf69ba279cbd1ad4e0324b3e968f265e78d6d39554"
+      },
+      {
+        "path": "functions/lib/customerBooking.js",
+        "sha256": "16fb4ffa99b97ff46238530375df0c12a4b38597eb815c771638f2ea0af25f62"
+      },
+      {
+        "path": "functions/lib/customerSuggestions.js",
+        "sha256": "a680dd9ebe5376a304ca628a1ffeeb13c970b4b059b8b20e6ed472a48b8a535e"
+      },
+      {
+        "path": "functions/lib/email/brevo.js",
+        "sha256": "4bc6495eb143e3ce8ff50546899162c85e860d85ae7e8ed00d7aaa1a6fd31699"
+      },
+      {
+        "path": "functions/lib/email/dispatch.js",
+        "sha256": "2b0127adb2df14208f4b880b5d8c3338c683530437048e9f2c9330b842e4bc31"
+      },
+      {
+        "path": "functions/lib/email/notifications.js",
+        "sha256": "c730eca7bc0483cfad36cf5067e479e42a2271c631e4d8316b9b8458187e9ff4"
+      },
+      {
+        "path": "functions/lib/email/templates/appointment.js",
+        "sha256": "383d4d4bb3e7b167d1e45aa0ad4130db2189617cbf8526f8917cebcaec0d403a"
+      },
+      {
+        "path": "functions/lib/email/templates/bono.js",
+        "sha256": "701ad2c33cbb7148bf0135c8406b5a1ec89c7fc039e0e6828885487ce965543b"
+      },
+      {
+        "path": "functions/lib/email/templates/components.js",
+        "sha256": "861c628ab0cad5c3b5c3abf93861b0e8e03218acd683603960d38461a4da5c7c"
+      },
+      {
+        "path": "functions/lib/email/templates/contact.js",
+        "sha256": "30cb65315ccf566523d4c85e982ec91767a662f1f5e2dc315d0d4411bb0dda79"
+      },
+      {
+        "path": "functions/lib/email/templates/customerSuggestion.js",
+        "sha256": "e3a1e3495c6fbd01c387fd7d7b76be1990f2dc43706cdd3822ff8299a4c8d3cd"
+      },
+      {
+        "path": "functions/lib/email/templates/index.js",
+        "sha256": "a352bcf0b3d9f3d10b7b46a7d0d4137ca0bbecb16747587c30d46081314f8faf"
+      },
+      {
+        "path": "functions/lib/email/templates/layout.js",
+        "sha256": "c506faaa3779b5867e86c2e7c1b3d799125ec25cd41765edb7dfd8e48a2e0f99"
+      },
+      {
+        "path": "functions/lib/email/templates/notice.js",
+        "sha256": "f01a085faff2954fefab6a2e705a7e461b3cc58e4616e5cb27086b0315280f07"
+      },
+      {
+        "path": "functions/lib/email/templates/series.js",
+        "sha256": "e843c30e75c8de128302cb0c656f4880946f312d514292617f547e4662368d2f"
+      },
+      {
+        "path": "functions/lib/email/templates/welcome.js",
+        "sha256": "d3f193afac284ae931c371d14926f7c5d51a819131750c13c8a6d118e3c1ad21"
+      },
+      {
+        "path": "functions/lib/email/types.js",
+        "sha256": "b0d2bc4142d0c62d43f996aaeb64f22c4889ac853f8a3765758b505d972d0149"
+      },
+      {
+        "path": "functions/lib/googleCalendarSync.js",
+        "sha256": "d074980467750856018848627b5f66ae746598d3ed33f47703c760d307d0bd00"
+      },
+      {
+        "path": "functions/lib/index.js",
+        "sha256": "c6bde07517d950308d89c67ee7cb345768d61ab60017fe84acc6ab4571057138"
+      },
+      {
+        "path": "functions/lib/minuteRefundAdmin.js",
+        "sha256": "dde2ea9101d0450451be3ea69b8be54224dcac4e08d338181fe9221fc24c5bc5"
+      },
+      {
+        "path": "functions/lib/minuteRefundAudit.js",
+        "sha256": "9634b084a285a0158c8d66ffaff05c550d0c5a5fcb5a835069a073cd8c97b647"
+      },
+      {
+        "path": "functions/lib/minuteRefunds.js",
+        "sha256": "36aa2153fec23a3a0573d43dbb8c30933d0c364d9006a90a050d28dcce0b7f58"
+      },
+      {
+        "path": "functions/lib/notifications/appointmentEvents.js",
+        "sha256": "378c11f4db10ef14fa16faf85937546760c99a46ad5e1a84bdda3fdfbbe29097"
+      },
+      {
+        "path": "functions/lib/notifications/bonoEvents.js",
+        "sha256": "c91fffec4b18a7b93e0601473252dc5b3d6c09481b4f543df47653b10101602b"
+      },
+      {
+        "path": "functions/lib/notifications/builders.js",
+        "sha256": "e9e0d5b6ae5617a712d9ca2c56e9c02bc53307dab4843b7bbcad8c9401fa2aeb"
+      },
+      {
+        "path": "functions/lib/notifications/dispatcher.js",
+        "sha256": "a64b25405d7ef3611a2805665355ccae3927243ab2cd8349235d264fc14ee053"
+      },
+      {
+        "path": "functions/lib/notifications/handlers.js",
+        "sha256": "c88e76a06bf7934c4d59329e5a561b19a0f6d99fcfaee4ca17341dfbb736729e"
+      },
+      {
+        "path": "functions/lib/notifications/history.js",
+        "sha256": "ca64c2866ec18816858533fa4f41ae838db2a3fdb635c6a9efec63f936cf30ec"
+      },
+      {
+        "path": "functions/lib/notifications/ledger.js",
+        "sha256": "7c9a2795a92710de82c6ac92f5a7326be1651733cc7f923a2256a4dc08da3387"
+      },
+      {
+        "path": "functions/lib/notifications/outbox.js",
+        "sha256": "aadd2448420cba75ebc10ef84b2df590addf803d2e5f3366ce098b77f43f1126"
+      },
+      {
+        "path": "functions/lib/notifications/push.js",
+        "sha256": "9f0154b2fd03a0c2f4a1784cf1eea72ec583ea5784695310ea1db9b207bc01c9"
+      },
+      {
+        "path": "functions/lib/notifications/schedules.js",
+        "sha256": "c5a486c54cdd4555eb1ad752028a7dc62d3edc2adb1f112dc4cf35e35c0f87b1"
+      },
+      {
+        "path": "functions/lib/notifications/tokens.js",
+        "sha256": "5ef3e09ddb2eedf907f6f5766a02a8e4ca558f62f333c3257368c2ee05310946"
+      },
+      {
+        "path": "functions/lib/notifications/types.js",
+        "sha256": "cb447d723c558aa57b472bd43afca5fc3802b0eb247283fe34b44ab5e2afd334"
+      },
+      {
+        "path": "functions/lib/recurringAppointments.js",
+        "sha256": "ef3017190ff9a53370d5656aabda8a24b934764ce256f17e2f9f905b6e150c24"
+      },
+      {
+        "path": "functions/lib/recurringReschedule.js",
+        "sha256": "4834287e6753232d2605118909895afb96b5623ba192633a1aabdf68f870f761"
+      },
+      {
+        "path": "functions/lib/recurringScheduleReplacement.js",
+        "sha256": "0557af4cd91fafc3b9751a49420c8fdfde07cc4eb4cc9c6cc142def728989352"
+      },
+      {
+        "path": "functions/lib/recurringSeries.js",
+        "sha256": "08ae45f6c9717d856686da8ccde45d1fa4573f032098cc083582e6d1140e32f7"
+      },
+      {
+        "path": "functions/lib/refundAccounting.js",
+        "sha256": "6bc3c4c7603de5a4516a3ab41a145537c2b409b64ca977652b45d5e57f354e4b"
+      },
+      {
+        "path": "functions/lib/releaseMaintenance.js",
+        "sha256": "a9233d029703521526963d0c5b98f9d912b937b567b264775506a25dad5da845"
+      },
+      {
+        "path": "functions/lib/seriesMetadata.js",
+        "sha256": "82e6e86bc21a5e7ccaec73dd2b848d8bbe18b1aa3ba6822e25778c857d6209c9"
+      },
+      {
+        "path": "functions/lib/siteConfig.js",
+        "sha256": "f299e6c224420dae2db00354ff098ab4fc4869bbfc4c1e4018114c57b6d9d094"
+      },
+      {
+        "path": "functions/lib/slotMigrations.js",
+        "sha256": "32d6482155dbefa399b8a2ef90e757ee6500bbeb2e70b81e3bda7da51cf8de2e"
+      },
+      {
+        "path": "functions/lib/slotOccupancy.js",
+        "sha256": "72bf42ec0183565e436e73928f17ae6a6a4c2331f978c3500be8465406d1f1fb"
+      },
+      {
+        "path": "functions/lib/slotOccupancyAudit.js",
+        "sha256": "0fb747e7eac7f33ef3b2b8aa7af97422e5beda0dabfaa7ce56ee703c58bfb1f6"
+      },
+      {
+        "path": "functions/lib/slotValidation.js",
+        "sha256": "e617a3f864ef38c39c77c8b78f67c54da554bb820829d7741f81a28e87d73691"
+      },
+      {
+        "path": "functions/lib/supportChat.js",
+        "sha256": "fe9bb016128c942098c088a774aebe829565a442c3cf25f9419c7f98b0e05bd4"
+      },
+      {
+        "path": "functions/package.json",
+        "sha256": "d907196fd0df1a8c24aeda2ff43f494ad029554f90c4e997939c40b0a8573259"
+      },
+      {
+        "path": "functions/package-lock.json",
+        "sha256": "b026e3203139511c861cf4408f591d2aa2037711825f7d5e81f4399122713183"
+      }
+    ]
+  },
+  "manifestHash": "b223d266b582d7ee0255c26ab2389fa10579dd6af9297abc3621452d9d48c8f8"
 }

@@ -16,6 +16,7 @@ export interface TimeSlot {
 }
 
 export interface CalendarAppointmentLike {
+  recurrenceSeriesId?: unknown;
   status?: unknown;
   name?: unknown;
   email?: unknown;
@@ -59,6 +60,24 @@ export interface CalendarEventPayload {
     timeZone: string;
   };
   colorId: string;
+}
+
+export const CALENDAR_APPOINTMENT_PROPERTY = "focusAppointmentId";
+export const CALENDAR_SYNC_HASH_PROPERTY = "focusSyncHash";
+
+export function stableCalendarEventId(appointmentId: string): string {
+  // Hex is a subset of Calendar's base32hex alphabet.
+  return "fc" + createHash("sha256").update(`appointments/${appointmentId}`).digest("hex");
+}
+
+export function calendarEventAppointmentIds(event: {
+  description?: string | null;
+  extendedProperties?: { private?: Record<string, string> | null } | null;
+}): string[] {
+  const marked = event.extendedProperties?.private?.[CALENDAR_APPOINTMENT_PROPERTY];
+  // The generated ID follows the free-form comment. Take the last structured block.
+  const legacy = [...(event.description ?? "").matchAll(/^ID cita:\r?\n([^\r\n]+)\r?\n\r?\nHorario:\s*$/gm)].at(-1)?.[1]?.trim();
+  return [...new Set([marked, legacy].filter((value): value is string => Boolean(value)))];
 }
 
 const TIME_ZONE = "Europe/Madrid";
@@ -138,18 +157,6 @@ export function normalizeAppointmentStatus(value: unknown): CalendarAppointmentS
   if (status === "rejected" || status === "rechazada") return "rejected";
   if (status === "cancelled" || status === "cancelada") return "cancelled";
   return undefined;
-}
-
-export function shouldDeleteRecurringPendingCalendarEvent(input: {
-  beforeStatus: unknown;
-  afterStatus: unknown;
-  recurrenceSeriesId: unknown;
-  eventId: unknown;
-}): boolean {
-  return normalizeAppointmentStatus(input.beforeStatus) === "approved"
-    && normalizeAppointmentStatus(input.afterStatus) === "pending"
-    && asString(input.recurrenceSeriesId).length > 0
-    && asString(input.eventId).length > 0;
 }
 
 export function normalizeDurationMinutes(value: unknown): number {

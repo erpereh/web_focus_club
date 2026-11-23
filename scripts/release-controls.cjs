@@ -4,7 +4,7 @@ const { fs, path, root, arg, flag, hash, readJson, writeJson, initialize, google
 const { zipFiles } = require('./prepare-coordinated-release.cjs');
 const { verifyFirestoreIndexes } = require('./firestore-index-verifier.cjs');
 const { planBootstrapResume } = require('./bootstrap-resume.cjs');
-const { planFunctionsResume } = require('./functions-resume.cjs');
+const { planFunctionsResume, CALENDAR_FUNCTION } = require('./functions-resume.cjs');
 const incident = require('./interrupted-operations.cjs');
 const CONTROL = 'system_controls/release', QUEUE = 'system_controls/deferred';
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -56,13 +56,23 @@ async function verifyRules(credential, project, expectedFile) {
 }
 async function verifyRunRevision(credential, project, service, revision, limits) {
   const url = `https://run.googleapis.com/v2/projects/${project}/locations/europe-west1/services/${service}`;
-  const [run, deployed] = await Promise.all([googleGet(credential, url), googleGet(credential, url + '/revisions/' + revision)]);
+  const readyRevision = limits.servingBaseline ?? revision;
+  const [run, deployed] = await Promise.all([googleGet(credential, url), googleGet(credential, url + '/revisions/' + readyRevision)]);
   const traffic = (run.trafficStatuses ?? []).filter(target => Number(target.percent) > 0);
-  if (run.generation !== run.observedGeneration || run.latestReadyRevision?.split('/').at(-1) !== revision
-    || traffic.length !== 1 || traffic[0].percent !== 100 || traffic[0].revision?.split('/').at(-1) !== revision
+  const cpuValue = deployed.containers?.[0]?.resources?.limits?.cpu;
+  const cpu = typeof cpuValue === 'string' && cpuValue.endsWith('m') ? Number(cpuValue.slice(0, -1)) / 1000 : Number(cpuValue);
+  if (run.generation !== run.observedGeneration || run.reconciling === true || run.latestReadyRevision?.split('/').at(-1) !== readyRevision
+    || traffic.length !== 1 || traffic[0].percent !== 100 || traffic[0].revision?.split('/').at(-1) !== readyRevision
     || deployed.containers?.[0]?.resources?.limits?.memory !== limits.memory
-    || (limits.concurrency !== undefined && deployed.maxInstanceRequestConcurrency !== limits.concurrency)) {
-    throw new Error(`Cloud Run no acredita el tráfico y los recursos esperados para ${service}.`);
+    || (limits.concurrency !== undefined && deployed.maxInstanceRequestConcurrency !== limits.concurrency)
+    || (limits.maxCpu !== undefined && !(cpu >= 0.3 && cpu <= limits.maxCpu))
+    || (limits.servingBaseline && (run.latestCreatedRevision?.split('/').at(-1) !== revision
+      || run.terminalCondition?.state !== 'CONDITION_FAILED' || !/^Quota exceeded for total allowable CPU per project per region\./.test(run.terminalCondition?.message ?? '')
+      || traffic[0].type !== 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST'))
+    || (limits.maxCpu !== undefined && (run.latestCreatedRevision?.split('/').at(-1) !== revision
+      || run.terminalCondition?.state !== 'CONDITION_SUCCEEDED'))) {
+    const reason = run.terminalCondition?.message?.split('\n')[0];
+    throw new Error(`Cloud Run no acredita el tráfico y los recursos esperados para ${service}.${reason ? ' ' + reason : ''}`);
   }
 }
 
@@ -72,7 +82,17 @@ async function functionsResumePlan(credential, project, manifest, functions) {
   const result = await planFunctionsResume({
     manifest, functions, cache,
     readArchive: async source => zipFiles(await googleGet(credential, `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(source.bucket)}/o/${encodeURIComponent(source.object)}?alt=media&generation=${encodeURIComponent(source.generation)}`, true)),
-    verifyRuntime: (fn, limits) => verifyRunRevision(credential, project, fn.name.split('/').at(-1).toLowerCase(), fn.serviceConfig.revision, limits),
+    verifyRuntime: (fn, limits) => {
+      if ((limits.maxInstances !== undefined && fn.serviceConfig.maxInstanceCount !== limits.maxInstances)
+        || (limits.timeoutSeconds !== undefined && fn.serviceConfig.timeoutSeconds !== limits.timeoutSeconds)
+        || (limits.retry && fn.eventTrigger?.retryPolicy !== limits.retry)) throw new Error(`Instancias, tiempo máximo o reintentos incorrectos para ${fn.name}.`);
+      if (fn.name.endsWith('/' + CALENDAR_FUNCTION) && (fn.eventTrigger?.eventType !== 'google.cloud.firestore.document.v1.written'
+        || !fn.eventTrigger.eventFilters?.some(filter => filter.attribute === 'document' && filter.value === 'appointments/{appointmentId}' && filter.operator === 'match-path-pattern')
+        || !fn.eventTrigger.eventFilters?.some(filter => filter.attribute === 'database' && filter.value === '(default)')
+        || !fn.eventTrigger.eventFilters?.some(filter => filter.attribute === 'namespace' && filter.value === '(default)')
+        || fn.serviceConfig.secretEnvironmentVariables?.map(secret => secret.key).join() !== 'GOOGLE_CALENDAR_ID')) throw new Error('El trigger o el secreto de Calendar no coincide.');
+      return verifyRunRevision(credential, project, fn.name.split('/').at(-1).toLowerCase(), fn.serviceConfig.revision, limits);
+    },
   });
   writeJson(cachePath, cache, false);
   return result;
@@ -122,7 +142,7 @@ async function verifyFinal(credential, project, manifest) {
   await verifyIndexes(credential, project);
   await verifyHosting(credential, project);
 }
-async function drain(db, manifest) {
+async function drain(db, manifest, requirePatchedCalendarDispatcher) {
   const gate = (await db.doc(CONTROL).get()).data();
   if (gate?.phase !== 'frozen' || gate.releaseId !== manifest.releaseId) throw new Error('La recuperación exige mantenimiento completamente cerrado.');
   const deadline = Date.now() + 20 * 60_000;
@@ -130,6 +150,7 @@ async function drain(db, manifest) {
   while (Date.now() < deadline) {
     const pending = await db.collection('release_deferred_events').where('state', '==', 'pending').limit(50).get();
     for (const job of pending.docs) {
+      if (job.get('name') === CALENDAR_FUNCTION) await requirePatchedCalendarDispatcher?.();
       if (job.data().needsReview && !flag('--retry-reviewed')) throw new Error(`El trabajo ${job.id} falló. Revisar su causa antes de usar --retry-reviewed.`);
       await db.runTransaction(async (tx) => {
         const [current, control] = await Promise.all([tx.get(job.ref), tx.get(db.doc(CONTROL))]);
@@ -182,7 +203,7 @@ async function assertReopenState(tx, db, manifest) {
 async function main() {
   const command = process.argv[2];
   const readOnly = ['status', 'preflight', 'assert-stage', 'plan-bootstrap-resume', 'plan-functions-resume', 'audit-interrupted-operations',
-    'verify-bootstrap', 'verify-release', 'verify-before-open', 'verify-indexes'].includes(command);
+    'verify-bootstrap', 'verify-release', 'verify-before-open', 'verify-indexes', 'plan-calendar-hotfix', 'verify-calendar-hotfix'].includes(command);
   const mutations = ['maintenance-close', 'maintenance-open', 'drain-deferred', 'set-minimum-builds', 'enable-automatic-refunds',
     'disable-automatic-refunds', 'resolve-completed-operation', 'resolve-interrupted-operations'];
   if (!readOnly && !mutations.includes(command)) throw new Error('Orden de control no válida.');
@@ -255,6 +276,18 @@ async function main() {
         || config.get('automaticMinuteRefundsEnabled') === true) throw new Error('La continuación definitiva exige mantenimiento congelado y devoluciones automáticas desactivadas.');
       console.log(JSON.stringify(await functionsResumePlan(credential, project, manifest, await deployedFunctions(credential, project)), null, 2));
       return;
+    }
+    if (command === 'plan-calendar-hotfix' || command === 'verify-calendar-hotfix') {
+      if (!manifest.calendarHotfix) throw new Error('Usa el manifiesto revisado del hotfix de Calendar.');
+      const [gate, config, queue] = await db.getAll(gateRef, configRef, db.doc(QUEUE));
+      if (gate.get('phase') !== 'open' || gate.get('releaseId') !== manifest.releaseId || gate.get('occupancyVersion') !== 2
+        || config.get('maintenanceMode') === true || config.get('automaticMinuteRefundsEnabled') === true || Number(queue.get('pending') ?? 0) !== 0) {
+        throw new Error('El hotfix selectivo exige la publicación coordinada abierta, cola vacía y devoluciones automáticas desactivadas.');
+      }
+      const plan = await functionsResumePlan(credential, project, manifest, await deployedFunctions(credential, project));
+      if (plan.pendingFunctions.some(name => name !== CALENDAR_FUNCTION)) throw new Error('Hay otras Functions pendientes. No iniciar el hotfix selectivo.');
+      if (command === 'verify-calendar-hotfix' && plan.pendingFunctions.length) throw new Error('El hotfix todavía no sirve el 100 % del tráfico.');
+      console.log(JSON.stringify(plan, null, 2)); return;
     }
     if (command === 'audit-interrupted-operations' || command === 'resolve-interrupted-operations') {
       const readLogs = () => incident.readIncidentLogs(credential, project);
@@ -333,7 +366,16 @@ async function main() {
       console.log('Concesión cerrada con prueba de finalización. Repetir maintenance-close --wait.');return;
     }
     if (command === 'verify-release') { await verifyFinal(credential, project, manifest); console.log('Functions, Hosting, reglas e índices acreditados.'); return; }
-    if (command === 'drain-deferred') { await verifyFunctions(credential, project, manifest, 'final'); console.log(await drain(db, manifest)); return; }
+    if (command === 'drain-deferred') {
+      const functions = await verifyFunctions(credential, project, manifest, 'final');
+      let dispatcherChecked = false;
+      console.log(await drain(db, manifest, manifest.calendarHotfix ? async () => {
+        if (dispatcherChecked) return;
+        const plan = await functionsResumePlan(credential, project, manifest, functions);
+        if (plan.baselineFunctions.includes('onReleaseDeferredEventWritten')) throw new Error('Antes de recuperar trabajos de Calendar, publica en mantenimiento su dispatcher con la misma versión revisada.');
+        dispatcherChecked = true;
+      } : undefined)); return;
+    }
     if (['verify-before-open', 'maintenance-open'].includes(command)) {
       await verifyFinal(credential, project, manifest);
       await db.runTransaction(async (tx) => {

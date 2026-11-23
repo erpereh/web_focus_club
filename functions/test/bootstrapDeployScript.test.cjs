@@ -6,7 +6,7 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const pwshAvailable = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.ToString()'], { encoding: 'utf8' }).status === 0;
 const literal = value => "'" + value.replaceAll("'", "''") + "'";
-function runScenario({ complete = false, resume = true, lostResponse = false, readFailure = false, noProgress = false, stage = 'Bootstrap' } = {}) {
+function runScenario({ complete = false, resume = true, lostResponse = false, readFailure = false, noProgress = false, stage = 'Bootstrap', wrongCalendarPlan = false } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-bootstrap-script-test-'));
   try {
     const projectDirectory = path.join(directory, 'web_focus_club');
@@ -17,6 +17,7 @@ function runScenario({ complete = false, resume = true, lostResponse = false, re
     fs.copyFileSync(path.resolve(__dirname, '../../scripts/deploy-release.ps1'), scriptPath);
     const plan = pending => ({ verifiedFunctions: pending ? ['alreadyPublished'] : ['alreadyPublished', 'deleteOwnAccount'], pendingFunctions: pending ? ['deleteOwnAccount'] : [],
       batches: pending ? [{ config: 'release/bootstrap/portal/firebase.json', portal: true, codebase: 'portal', functions: ['deleteOwnAccount'] }] : [], rules: { status: complete ? 'verified' : 'pending' } });
+    const calendarPlan = { pendingFunctions: [wrongCalendarPlan ? 'anotherFunction' : 'syncAppointmentWithGoogleCalendar'] };
     const command = `
       $global:LASTEXITCODE=0; $global:published=${complete ? '$true' : '$false'}; $global:invocations=@(); $global:lostResponse=${lostResponse ? '$true' : '$false'}
       function global:node {
@@ -26,11 +27,15 @@ function runScenario({ complete = false, resume = true, lostResponse = false, re
           ${readFailure ? '$global:LASTEXITCODE=9; return' : ''}
           if ($global:published) { ${literal(JSON.stringify(plan(false)))} } else { ${literal(JSON.stringify(plan(true)))} }
         }
+        if ($Items[1] -eq 'plan-calendar-hotfix') {
+          if ($global:published) { '{"pendingFunctions":[]}' } else { ${literal(JSON.stringify(calendarPlan))} }
+        }
+        if ($Items[1] -eq 'verify-calendar-hotfix' -and -not $global:published) { $global:LASTEXITCODE=9 }
       }
       function global:firebase {
         param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Items)
         $global:invocations += ($Items -join ' '); $global:LASTEXITCODE=0
-        if (($Items -join ' ').Contains('functions:portal:deleteOwnAccount')) {
+        if ($Items[-1] -in @('functions:portal:deleteOwnAccount','functions:syncAppointmentWithGoogleCalendar')) {
           ${noProgress ? '$global:published=$false' : '$global:published=$true'}
           if ($global:lostResponse) { $global:lostResponse=$false; $global:LASTEXITCODE=7 }
         }
@@ -72,4 +77,15 @@ test('PowerShell Functions Resume stops if a successful CLI exit does not publis
   const result = runScenario({ stage: 'Functions', noProgress: true });
   assert.equal(result.calls.length, 1);
   assert.match(result.output, /No se ha acreditado la tanda anterior/);
+});
+test('PowerShell Calendar hotfix deploys exactly one function and verifies it without redeploying', { skip: !pwshAvailable }, () => {
+  const stage = { stage: 'CalendarHotfix', resume: false };
+  assert.deepEqual(runScenario(stage).calls, ['deploy --project focus-club-f73b8 --config firebase.json --only functions:syncAppointmentWithGoogleCalendar']);
+  assert.deepEqual(runScenario({ ...stage, complete: true }).calls, []);
+  const failed = runScenario({ ...stage, noProgress: true });
+  assert.match(failed.output, /ERROR=.*9/);
+  assert.equal(failed.calls.length, 1);
+  const unrelated = runScenario({ ...stage, wrongCalendarPlan: true });
+  assert.match(unrelated.output, /otras Functions/);
+  assert.deepEqual(unrelated.calls, []);
 });

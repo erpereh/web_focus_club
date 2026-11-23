@@ -11,17 +11,17 @@
       "name": "Functions shared",
       "command": "npm --prefix functions test",
       "status": "passed",
-      "structuredTests": 592,
+      "structuredTests": 598,
       "legacyAssertionScripts": 6,
-      "lastVerifiedAt": "2026-11-22T21:38:22.970Z"
+      "lastVerifiedAt": "2026-11-23T13:11:52.954Z"
     },
     {
       "name": "Firestore emulator",
       "command": "npm --prefix functions run test:emulator",
       "status": "passed",
-      "tests": 83,
+      "tests": 93,
       "project": "demo-focus-club",
-      "lastVerifiedAt": "2026-11-22T21:38:22.970Z"
+      "lastVerifiedAt": "2026-11-23T13:11:52.954Z"
     },
     {
       "name": "Web",
@@ -229,6 +229,46 @@
         "onReleaseDeferredEventWritten": {
           "memoryMb": 512
         }
+      }
+    },
+    {
+      "name": "November 23 Google Calendar reconciliation and selective hotfix",
+      "verifiedAt": "2026-11-23T13:11:52.954Z",
+      "productionWrites": false,
+      "deploymentsPerformed": false,
+      "functionsStructuredTests": 598,
+      "legacyAssertionScripts": 6,
+      "firestoreEmulatorTests": 93,
+      "newFunctionsTests": 6,
+      "newEmulatorTests": 10,
+      "logs": {
+        "functions": "acb1d3f73f7a59dbae9a13fd9bf10c03b9ad0936dbbd8bc795dc74d848a1fb4a",
+        "emulator": "6881c9d8094b00d0ec91004e179a55f522c909e66f588c7a3a3bf2e819d13c87"
+      },
+      "bootstrapPackagesRetained": 10,
+      "remotePreflight": {
+        "verifiedFunctions": 68,
+        "pendingFunctions": [
+          "syncAppointmentWithGoogleCalendar"
+        ]
+      },
+      "evidence": {
+        "reportHash": "66a75e2aa76561ccc44b0bd1461deab93f5be09d20094612b891bd951be9afe2",
+        "servingRevision": "syncappointmentwithgooglecalendar-00012-nok",
+        "rejectedRevision": "syncappointmentwithgooglecalendar-00013-zay",
+        "activePreserved": 3,
+        "oomLogs": 8,
+        "approvedIndividualMissingLink": 4,
+        "calendarCrossCheck": "not-read",
+        "quotaRead": "HTTP 403"
+      },
+      "localSdkDiscovery": {
+        "availableMemoryMb": 512,
+        "cpu": "gcf_gen1",
+        "concurrency": 1,
+        "maxInstances": 5,
+        "timeoutSeconds": 60,
+        "retry": true
       }
     }
   ]

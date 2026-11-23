@@ -6,6 +6,8 @@ const REQUIRED_RUNTIME = {
   onAppointmentCustomerNotification: { memory: '512Mi', concurrency: 8 },
   onReleaseDeferredEventWritten: { memory: '512Mi' },
 };
+const CALENDAR_FUNCTION = 'syncAppointmentWithGoogleCalendar';
+const CALENDAR_RUNTIME = { memory: '512Mi', maxCpu: 0.34, concurrency: 1, maxInstances: 5, timeoutSeconds: 60, retry: 'RETRY_POLICY_RETRY' };
 
 async function planFunctionsResume({ manifest, functions, readArchive, verifyRuntime, cache = {} }) {
   const expected = new Map();
@@ -20,6 +22,13 @@ async function planFunctionsResume({ manifest, functions, readArchive, verifyRun
   }
   if (!expected.size || manifest.maxFunctionBatchSize !== 5 || !manifest.bootstrap?.captured
     || manifest.bootstrap.artifacts.some(item => !item.compiled)) throw new Error('Inventario de publicación incompleto.');
+  const hotfix = manifest.calendarHotfix;
+  if (hotfix && (!expected.has(CALENDAR_FUNCTION) || !/^[a-f0-9]{64}$/.test(hotfix.baselineManifestHash)
+    || !hotfix.baselineRevision?.startsWith(CALENDAR_FUNCTION.toLowerCase() + '-')
+    || !hotfix.baselineServingRevision?.startsWith(CALENDAR_FUNCTION.toLowerCase() + '-') || !hotfix.baselineDefaultInputs?.length
+    || hotfix.baselineDefaultInputs.some(input => !/^functions\/(?:src\/|lib\/|package(?:-lock)?\.json$)/.test(input.path) || !/^[a-f0-9]{64}$/.test(input.sha256)))) {
+    throw new Error('Manifiesto del hotfix de Calendar inválido.');
+  }
   const bootstrap = new Map();
   for (const artifact of manifest.bootstrap.artifacts) {
     const prefix = path.posix.dirname(artifact.config) + '/functions/';
@@ -48,14 +57,29 @@ async function planFunctionsResume({ manifest, functions, readArchive, verifyRun
     const identity = sourceIdentity(source);
     return async () => {
       const inputs = manifest.inputs.filter(input => input.path.startsWith(prefix));
-      const fingerprint = createHash('sha256').update(JSON.stringify(inputs)).digest('hex');
+      const baseline = hotfix && phase === 'final' && item.codebase === 'default' ? hotfix.baselineDefaultInputs : undefined;
+      const fingerprint = createHash('sha256').update(JSON.stringify({ inputs, baseline })).digest('hex');
       const cached = cache[name];
+      let version = cached?.version;
       if (cached?.identity !== identity || cached.fingerprint !== fingerprint) {
         if (!archives.has(identity)) archives.set(identity, Promise.resolve().then(() => readArchive(source)));
-        if (!matchesFiles(await archives.get(identity), inputs, prefix)) throw new Error(`La fuente publicada de ${name} no coincide con el manifiesto.`);
-        cache[name] = { identity, fingerprint };
+        const files = await archives.get(identity);
+        if (matchesFiles(files, inputs, prefix)) version = 'current';
+        else if (baseline && matchesFiles(files, baseline, prefix)) version = 'baseline';
+        else throw new Error(`La fuente publicada de ${name} no coincide con el manifiesto.`);
+        cache[name] = { identity, fingerprint, version };
       }
-      if (phase === 'final' && REQUIRED_RUNTIME[name]) await verifyRuntime(fn, REQUIRED_RUNTIME[name]);
+      if (hotfix && phase === 'final' && name === CALENDAR_FUNCTION) {
+        if (version === 'baseline') {
+          if (identity !== sourceIdentity(hotfix.baselineSource) || fn.serviceConfig.revision !== hotfix.baselineRevision) {
+            throw new Error('La revisión anterior de Calendar cambió desde la auditoría.');
+          }
+          await verifyRuntime(fn, { memory: '256Mi', concurrency: 80, timeoutSeconds: 60, retry: 'RETRY_POLICY_DO_NOT_RETRY', servingBaseline: hotfix.baselineServingRevision });
+          return;
+        }
+        await verifyRuntime(fn, CALENDAR_RUNTIME);
+      } else if (phase === 'final' && REQUIRED_RUNTIME[name]) await verifyRuntime(fn, REQUIRED_RUNTIME[name]);
+      item.baseline = version === 'baseline';
       item.verified = phase === 'final';
     };
   });
@@ -71,7 +95,8 @@ async function planFunctionsResume({ manifest, functions, readArchive, verifyRun
     projectId: manifest.projectId, releaseId: manifest.releaseId, manifestHash: manifest.manifestHash,
     verifiedFunctions: [...expected.values()].filter(item => item.verified).map(item => item.name),
     pendingFunctions: pendingFunctions.map(item => item.name), batches,
+    ...(hotfix ? { baselineFunctions: [...expected.values()].filter(item => item.baseline).map(item => item.name) } : {}),
   };
 }
 
-module.exports = { planFunctionsResume };
+module.exports = { planFunctionsResume, CALENDAR_FUNCTION };

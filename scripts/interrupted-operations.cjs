@@ -47,7 +47,7 @@ function loggingFilter() {
   return `resource.type="cloud_run_revision" AND resource.labels.service_name="${SERVICE}" AND resource.labels.location="europe-west1" AND ((${windows.join(' OR ')}) OR (timestamp >= "2026-11-20T14:15:00Z" AND (${operations})))`;
 }
 
-async function readIncidentLogs(credential, project, { request = fetch, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+async function readIncidentLogs(credential, project, { filter = loggingFilter(), request = fetch, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
   const token = await credential.getAccessToken();
   const entries = [];
   const tokens = new Set();
@@ -58,7 +58,7 @@ async function readIncidentLogs(credential, project, { request = fetch, sleep = 
       response = await request('https://logging.googleapis.com/v2/entries:list', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token.access_token, 'Content-Type': 'application/json', 'x-goog-user-project': project },
-        body: JSON.stringify({ resourceNames: ['projects/' + project], filter: loggingFilter(), orderBy: 'timestamp asc', pageSize: 250, pageToken }),
+        body: JSON.stringify({ resourceNames: ['projects/' + project], filter, orderBy: 'timestamp asc', pageSize: 250, pageToken }),
         signal: AbortSignal.timeout(30_000),
       });
       if (response.status !== 429 || attempt === 3) break;

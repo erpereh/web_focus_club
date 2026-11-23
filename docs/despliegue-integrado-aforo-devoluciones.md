@@ -4,6 +4,8 @@ Fecha de preparación: 18 de noviembre de 2026. Proyecto: `focus-club-f73b8`. Re
 
 ## Qué se publica
 
+El parche del 23 de noviembre para Google Calendar tiene su propio paso selectivo una vez terminada esta publicación. Usa la sección «Publicación selectiva» del [procedimiento de Google Calendar](google_calendar_sync.md) con el manifiesto actualizado. La revisión que sirve las reservas puede conservar todas las restantes Functions aprobadas.
+
 - Backend compartido: 68 Functions de `web_focus_club/functions`, Node 22. Incluye toda la contabilidad permanente de devoluciones, administración de bonos en servidor, estadísticas, propuestas, renovaciones y ocupación transaccional de pendientes y aprobadas.
 - Backend de la app: únicamente `portal:deleteOwnAccount`, también con bloqueo de mantenimiento. Total definitivo: **69 Functions**, siempre en tandas de máximo cinco.
 - Hosting estático de `web_focus_club/out`, reglas e índices de Firestore de `web_focus_club`. No publicar Storage ni las reglas o índices duplicados del repositorio Flutter.

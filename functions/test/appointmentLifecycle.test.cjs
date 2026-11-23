@@ -373,7 +373,6 @@ assert.match(indexSource, /resolveMaxCapacity\(config, capacityExceptions, prefe
 assert.doesNotMatch(indexSource, /const MAX_CAPACITY\s*=\s*2/);
 assert.match(indexSource, /shouldReconcileAppointmentTransition\(expectedStatus, appointment\.status\)/);
 assert.match(indexSource, /const expectedStatus = changedToApproved \? "approved" : changedToRejected \? "rejected" : "cancelled"/);
-assert.match(indexSource, /if \(status === "rejected" \|\| status === "cancelled"\)/);
 
 const cancelOwnSource = indexSource.slice(
   indexSource.indexOf("export const cancelOwnAppointment"),

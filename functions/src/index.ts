@@ -17,13 +17,8 @@ import { onDocumentCreated, onDocumentDeleted, onDocumentUpdated, onDocumentWrit
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import type { calendar_v3 } from "googleapis/build/src/apis/calendar/v3.js";
 import { ADMIN_APPOINTMENT_RUNTIME, observeAdminAppointmentOperation } from "./adminAppointmentRuntime.js";
-import {
-  buildCalendarEventPayload,
-  buildCalendarSyncHash,
-  normalizeAppointmentStatus,
-  onlyGoogleCalendarSyncFieldsChanged,
-  shouldDeleteRecurringPendingCalendarEvent,
-} from "./googleCalendarSync";
+import { normalizeAppointmentStatus, onlyGoogleCalendarSyncFieldsChanged } from "./googleCalendarSync.js";
+import { CALENDAR_SYNC_RUNTIME, calendarSyncRemote, createCalendarCutover, reconcileAppointmentCalendar } from "./googleCalendarReconciliation.js";
 import {
   BOOKING_NOTICE_TOO_SHORT,
   bookingNoticeMessage,
@@ -567,40 +562,21 @@ function notificationSlot(appointment: AppointmentDoc): TimeSlot | undefined {
   return getAppointmentEffectiveSlot(appointment);
 }
 
-function googleCalendarErrorStatus(error: unknown): number | undefined {
-  if (!isRecord(error)) return undefined;
-
-  if (typeof error.code === "number") return error.code;
-  if (typeof error.status === "number") return error.status;
-
-  const response = error.response;
-  if (isRecord(response) && typeof response.status === "number") return response.status;
-
-  return undefined;
-}
-
-function isGoogleCalendarMissingEventError(error: unknown): boolean {
-  const status = googleCalendarErrorStatus(error);
-  return status === 404 || status === 410;
-}
-
-function shortGoogleCalendarError(error: unknown): string {
-  const message = error instanceof Error ? error.message : "Error desconocido al sincronizar Google Calendar.";
-  return message.replace(/\s+/g, " ").trim().slice(0, 300);
-}
-
 const requireCalendar = createRequire(__filename);
+let googleCalendarService: calendar_v3.Calendar | undefined;
 
 function getGoogleCalendarService(): calendar_v3.Calendar {
+  if (googleCalendarService) return googleCalendarService;
   // Node caches this module. Appointment callables never load Calendar or the
   // roughly one thousand unrelated modules from the googleapis root barrel.
   const { auth: calendarAuth, calendar }: typeof import("googleapis/build/src/apis/calendar/index.js") =
     requireCalendar("googleapis/build/src/apis/calendar/index.js");
   const auth = new calendarAuth.GoogleAuth({
-    scopes: ["https://www.googleapis.com/auth/calendar"],
+    scopes: ["https://www.googleapis.com/auth/calendar.events"],
   });
 
-  return calendar({ version: "v3", auth });
+  googleCalendarService = calendar({ version: "v3", auth });
+  return googleCalendarService;
 }
 
 function getGoogleCalendarId(): string {
@@ -629,64 +605,6 @@ async function resolveAppointmentClient(appointment: AppointmentDoc): Promise<{ 
     email: appointment.email || "",
     phone: appointment.phone || "",
   };
-}
-
-async function deleteGoogleCalendarEventIfExists(
-  calendar: calendar_v3.Calendar,
-  calendarId: string,
-  eventId?: string,
-): Promise<void> {
-  if (!eventId) return;
-
-  try {
-    await calendar.events.delete({
-      calendarId,
-      eventId,
-      sendUpdates: "none",
-    });
-  } catch (error) {
-    if (isGoogleCalendarMissingEventError(error)) return;
-    throw error;
-  }
-}
-
-async function writeGoogleCalendarSyncError(ref: DocumentReference, error: unknown): Promise<void> {
-  await ref.set({
-    googleCalendarSyncStatus: "error",
-    googleCalendarSyncError: shortGoogleCalendarError(error),
-  }, { merge: true });
-}
-
-async function upsertGoogleCalendarEvent(
-  calendar: calendar_v3.Calendar,
-  calendarId: string,
-  eventId: string | undefined,
-  payload: calendar_v3.Schema$Event,
-): Promise<string> {
-  if (eventId) {
-    try {
-      const response = await calendar.events.update({
-        calendarId,
-        eventId,
-        requestBody: payload,
-        sendUpdates: "none",
-      });
-      return response.data.id ?? eventId;
-    } catch (error) {
-      if (!isGoogleCalendarMissingEventError(error)) throw error;
-    }
-  }
-
-  const response = await calendar.events.insert({
-    calendarId,
-    requestBody: payload,
-    sendUpdates: "none",
-  });
-  const createdEventId = response.data.id;
-  if (!createdEventId) {
-    throw new Error("Google Calendar no devolvio ID de evento.");
-  }
-  return createdEventId;
 }
 
 function parseAdminUserRole(value: unknown): AdminUserRole {
@@ -1298,120 +1216,39 @@ export const sendContactMessage = onCall<ContactMessageRequest>(
   }),
 );
 
+const waitForCalendarCutover = createCalendarCutover(db);
 export const syncAppointmentWithGoogleCalendar = onDocumentWritten(
   {
     document: "appointments/{appointmentId}",
     region: REGION,
+    ...CALENDAR_SYNC_RUNTIME,
     secrets: [GOOGLE_CALENDAR_ID],
   },
   guardBackground(db, "syncAppointmentWithGoogleCalendar", async (event) => {
-    const appointmentId = String(event.params.appointmentId);
-    const beforeSnap = event.data?.before;
-    const afterSnap = event.data?.after;
-    const before = beforeSnap?.exists ? beforeSnap.data() as AppointmentDoc : undefined;
-    const after = afterSnap?.exists ? afterSnap.data() as AppointmentDoc : undefined;
-    const previousEventId = after?.googleCalendarEventId || before?.googleCalendarEventId;
-
+    const before = event.data?.before?.data() as AppointmentDoc | undefined;
+    const after = event.data?.after?.data() as AppointmentDoc | undefined;
     if (!before && !after) return;
+    if (before && after && onlyGoogleCalendarSyncFieldsChanged({ ...before }, { ...after })) return;
 
-    if (before && after && onlyGoogleCalendarSyncFieldsChanged({ ...before }, { ...after })) {
-      return;
-    }
-
-    if (!after) {
-      const calendar = getGoogleCalendarService();
-      const calendarId = getGoogleCalendarId();
-      await deleteGoogleCalendarEventIfExists(calendar, calendarId, previousEventId);
-      return;
-    }
-
-    const appointmentRef = afterSnap?.ref;
-    if (!appointmentRef) return;
-
-    try {
-      const status = normalizeAppointmentStatus(after.status);
-      if (!status) {
-        throw new Error("Estado de cita no compatible con Google Calendar.");
-      }
-      if (status === "pending" && after.recurrenceSeriesId) {
-        if (shouldDeleteRecurringPendingCalendarEvent({
-          beforeStatus: before?.status,
-          afterStatus: after.status,
-          recurrenceSeriesId: after.recurrenceSeriesId,
-          eventId: previousEventId,
-        })) {
-          const calendar = getGoogleCalendarService();
-          const calendarId = getGoogleCalendarId();
-          await deleteGoogleCalendarEventIfExists(calendar, calendarId, previousEventId);
-          await appointmentRef.set({
-            googleCalendarEventId: FieldValue.delete(),
-            googleCalendarSyncedAt: new Date().toISOString(),
-            googleCalendarSyncStatus: "deleted",
-            googleCalendarSyncError: FieldValue.delete(),
-            googleCalendarSyncHash: FieldValue.delete(),
-          }, { merge: true });
-        }
-        return;
-      }
-
-      const calendar = getGoogleCalendarService();
-      const calendarId = getGoogleCalendarId();
-
-      if (status === "rejected" || status === "cancelled") {
-        await deleteGoogleCalendarEventIfExists(calendar, calendarId, previousEventId);
-        await appointmentRef.set({
-          googleCalendarEventId: FieldValue.delete(),
-          googleCalendarSyncedAt: new Date().toISOString(),
-          googleCalendarSyncStatus: "deleted",
-          googleCalendarSyncError: FieldValue.delete(),
-          googleCalendarSyncHash: FieldValue.delete(),
-        }, { merge: true });
-        return;
-      }
-
-      const [client, trainerName] = await Promise.all([
-        resolveAppointmentClient(after),
-        resolveTrainerName(after.assignedTrainer),
-      ]);
-      const syncHash = buildCalendarSyncHash({
-        appointmentId,
-        appointment: after,
-        client,
-        trainerName,
-      });
-
-      if (after.googleCalendarEventId && after.googleCalendarSyncHash === syncHash) {
-        return;
-      }
-
-      const eventPayload = buildCalendarEventPayload({
-        appointmentId,
-        appointment: after,
-        client,
-        trainerName,
-      });
-      if (!eventPayload) {
-        throw new Error("No hay fecha/hora valida para sincronizar con Google Calendar.");
-      }
-
-      const syncedEventId = await upsertGoogleCalendarEvent(
-        calendar,
-        calendarId,
-        after.googleCalendarEventId,
-        eventPayload,
-      );
-
-      await appointmentRef.set({
-        googleCalendarEventId: syncedEventId,
-        googleCalendarSyncedAt: new Date().toISOString(),
-        googleCalendarSyncStatus: "synced",
-        googleCalendarSyncError: FieldValue.delete(),
-        googleCalendarSyncHash: syncHash,
-      }, { merge: true });
-    } catch (error) {
-      console.error("[GoogleCalendar] Failed to sync appointment", appointmentId, error);
-      await writeGoogleCalendarSyncError(appointmentRef, error);
-    }
+    await waitForCalendarCutover();
+    const appointmentId = event.params.appointmentId;
+    await reconcileAppointmentCalendar<AppointmentDoc>({
+      db,
+      ref: db.collection("appointments").doc(appointmentId),
+      previousEventId: before?.googleCalendarEventId,
+      mayHaveRecurringEvent: [before, after].some(snapshot => normalizeAppointmentStatus(snapshot?.status) === "approved"
+        || (normalizeAppointmentStatus(snapshot?.status) === "pending" && !snapshot?.recurrenceSeriesId)),
+      remote: () => calendarSyncRemote(getGoogleCalendarService(), getGoogleCalendarId()),
+      resolveDetails: async (appointment) => {
+        const [client, trainerName] = await Promise.all([
+          resolveAppointmentClient(appointment), resolveTrainerName(appointment.assignedTrainer),
+        ]);
+        return { client, trainerName };
+      },
+      reportError: (reason, transient) => {
+        console.error("[GoogleCalendar] Failed to sync appointment", { appointmentId, reason, transient });
+      },
+    });
   }),
 );
 

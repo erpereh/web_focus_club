@@ -89,7 +89,7 @@ async function main() {
   inventory(path.join(root, 'out'), 'out', inputs, true);
   for (const file of ['firebase.json', 'firestore.rules', 'firestore.indexes.json', 'functions/package.json', 'functions/package-lock.json',
     '../app_focus_club/pubspec.yaml', '../app_focus_club/pubspec.lock', '../app_focus_club/functions/package.json', '../app_focus_club/functions/package-lock.json',
-    'docs/despliegue-integrado-aforo-devoluciones.md', 'release/auditoria-historica.md', 'release/test-results.json']) inputs.push({ path: file, sha256: hash(fs.readFileSync(path.resolve(root, file))) });
+    'docs/despliegue-integrado-aforo-devoluciones.md', 'docs/google_calendar_sync.md', 'release/auditoria-historica.md', 'release/test-results.json']) inputs.push({ path: file, sha256: hash(fs.readFileSync(path.resolve(root, file))) });
   const mobile = /version:\s*([^\s+]+)\+(\d+)/.exec(fs.readFileSync(path.resolve(root, '../app_focus_club/pubspec.yaml'), 'utf8'));
   const manifest = { schema: 'focus-coordinated-release-v1', projectId: project, releaseId: RELEASE_ID, maxFunctionBatchSize: 5,
     mobile: { version: mobile[1], build: Number(mobile[2]), storesVerified: false },
@@ -97,6 +97,20 @@ async function main() {
     inputs, bootstrap: { captured: false, artifacts: [], webFunctions: [] },
   };
   const previousManifest = fs.existsSync(path.join(output, 'manifest.json')) ? readJson(path.join(output, 'manifest.json')) : undefined;
+  if (flag('--calendar-hotfix')) {
+    if (!flag('--offline') || !flag('--refresh-manifest') || !flag('--skip-bootstrap-build') || !previousManifest?.bootstrap?.captured) {
+      throw new Error('El hotfix exige --offline --refresh-manifest --skip-bootstrap-build y el manifiesto de la publicación terminada.');
+    }
+    const { manifestHash, ...body } = previousManifest;
+    if (hash(JSON.stringify(body)) !== manifestHash) throw new Error('La huella del manifiesto anterior no coincide.');
+    manifest.calendarHotfix = previousManifest.calendarHotfix ?? {
+      baselineManifestHash: manifestHash,
+      baselineRevision: 'syncappointmentwithgooglecalendar-00013-zay',
+      baselineServingRevision: 'syncappointmentwithgooglecalendar-00012-nok',
+      baselineSource: { bucket: 'gcf-v2-sources-1555015411-europe-west1', object: 'syncAppointmentWithGoogleCalendar/function-source.zip', generation: '1795387601438084' },
+      baselineDefaultInputs: previousManifest.inputs.filter(input => input.path.startsWith('functions/')),
+    };
+  }
   if (flag('--repair-portal-bootstrap')) {
     if (!flag('--offline') || !previousManifest?.bootstrap?.captured) throw new Error('La reparación exige --offline y la captura existente.');
     const { manifestHash, ...body } = previousManifest;
