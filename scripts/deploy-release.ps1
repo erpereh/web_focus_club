@@ -1,12 +1,15 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Bootstrap', 'Functions', 'Hosting', 'Rules', 'CalendarHotfix')]
+    [ValidateSet('Bootstrap', 'Functions', 'Hosting', 'Rules', 'CalendarHotfix', 'RemainingSelective')]
     [string]$Stage,
-    [switch]$Resume
+    [switch]$Resume,
+    [ValidateSet('onNotificationOutboxCreated', 'onUserProfileCreatedWelcomeEmail', 'createUserFromAdmin', 'updateMaxCapacityFromAdmin')]
+    [string]$FunctionName
 )
 
 $ErrorActionPreference = 'Stop'
 if ($Resume -and $Stage -notin @('Bootstrap', 'Functions')) { throw '-Resume solo se admite para Bootstrap y Functions.' }
+if (($Stage -eq 'RemainingSelective') -ne [bool]$FunctionName) { throw 'Indica -FunctionName únicamente con -Stage RemainingSelective.' }
 $raizFocus = Split-Path -Parent $PSScriptRoot
 $proyectoFocus = 'focus-club-f73b8'
 Push-Location -LiteralPath $raizFocus
@@ -26,7 +29,7 @@ try {
             Comprobar-SalidaFocus
         }
     }
-    if ($Stage -ne 'CalendarHotfix') {
+    if ($Stage -notin @('CalendarHotfix', 'RemainingSelective')) {
         & node scripts/release-controls.cjs assert-stage --project $proyectoFocus --manifest release/manifest.json --stage $Stage
         Comprobar-SalidaFocus
     }
@@ -68,7 +71,7 @@ try {
                 $planFocus = ($salidaPlanFocus -join "`n") | ConvertFrom-Json
                 $sinVerificarFocus = @($tandaAnteriorFocus | Where-Object { $_ -notin @($planFocus.verifiedFunctions) })
                 if ($sinVerificarFocus.Count -gt 0) { throw "No se ha acreditado la tanda anterior: $($sinVerificarFocus -join ', '). Revisar y continuar con -Resume." }
-                if ($planFocus.pendingSelective) { throw 'Hay paquetes de aforo pendientes de publicación selectiva individual. El paquete definitivo general no los sustituye.' }
+                if ($planFocus.pendingSelective -or $planFocus.pendingRemainingSelective) { throw 'Hay paquetes pendientes de publicación selectiva individual. El paquete definitivo general no los sustituye.' }
                 if ($primeraComprobacionFocus -and -not $Resume -and @($planFocus.verifiedFunctions).Count -gt 0 -and @($planFocus.pendingFunctions).Count -gt 0) {
                     throw 'Functions definitivas parcialmente publicadas. Usa -Stage Functions -Resume para omitir las verificadas.'
                 }
@@ -107,6 +110,24 @@ try {
                 Publicar-TandasFocus -Configuracion 'firebase.json' -Nombres $pendientesFocus
             } elseif ($pendientesFocus.Count -ne 0) { throw 'El plan contiene otras Functions. Se cancela la publicación selectiva.' }
             & node scripts/release-controls.cjs verify-calendar-hotfix --project $proyectoFocus --manifest release/manifest.json
+            Comprobar-SalidaFocus
+        }
+        'RemainingSelective' {
+            $salidaPlanFocus = & node scripts/release-controls.cjs plan-remaining-selective --project $proyectoFocus --manifest release/manifest.json --function $FunctionName
+            Comprobar-SalidaFocus
+            $planFocus = ($salidaPlanFocus -join "`n") | ConvertFrom-Json
+            if ($FunctionName -notin @($planFocus.remainingSelectiveFunctions)) {
+                $preflightFocus = $planFocus.preflight
+                if ($preflightFocus.name -cne $FunctionName -or $preflightFocus.config -cnotmatch '^release/remaining-selective/[a-f0-9]{20}/firebase\.json$' -or
+                    $preflightFocus.buildCpu -le 0 -or $preflightFocus.runWrites -le 0 -or $preflightFocus.functionWrites -le 0 -or
+                    $preflightFocus.cpu.limit -le $preflightFocus.cpu.peak -or $preflightFocus.memory.limit -le $preflightFocus.memory.peak) {
+                    throw 'El preflight no acredita el paquete exacto y las cuotas. No se inicia la publicación.'
+                }
+                Write-Host "Publicando individualmente $FunctionName"
+                & firebase deploy --non-interactive --project $proyectoFocus --config $preflightFocus.config --only "functions:$FunctionName"
+                Comprobar-SalidaFocus
+            }
+            & node scripts/release-controls.cjs verify-remaining-selective --project $proyectoFocus --manifest release/manifest.json --function $FunctionName
             Comprobar-SalidaFocus
         }
     }

@@ -5,8 +5,10 @@ const { zipFiles } = require('./prepare-coordinated-release.cjs');
 const { verifyFirestoreIndexes } = require('./firestore-index-verifier.cjs');
 const { planBootstrapResume } = require('./bootstrap-resume.cjs');
 const { planFunctionsResume, CALENDAR_FUNCTION } = require('./functions-resume.cjs');
-const { TARGETS, effectiveTraffic } = require('./occupancy-selective.cjs');
+const { FALLBACKS, TARGETS, effectiveTraffic } = require('./occupancy-selective.cjs');
 const incident = require('./interrupted-operations.cjs');
+const remaining = require('./remaining-selective.cjs');
+const retired = require('./retired-operations.cjs');
 const CONTROL = 'system_controls/release', QUEUE = 'system_controls/deferred';
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const httpsUrl = (value) => { try { return new URL(value).protocol === 'https:'; } catch { return false; } };
@@ -91,7 +93,15 @@ async function inspectFunctionTraffic(credential, project, fn, expected) {
     || (timeoutSeconds !== undefined && fn.serviceConfig.timeoutSeconds !== timeoutSeconds)) {
     throw new Error(`Instancias o tiempo máximo incorrectos para ${name}.`);
   }
-  return effectiveTraffic({ run, revision, declared: fn.serviceConfig.revision, ...expected });
+  const result = effectiveTraffic({ run, revision, declared: fn.serviceConfig.revision, ...expected });
+  if (expected.phase === remaining.PHASE) {
+    if (revision.serviceAccount !== fn.serviceConfig.serviceAccountEmail
+      || (!remaining.TARGETS[name].trigger && revision.labels?.['deployment-callable'] !== 'true')) {
+      throw new Error(`Identidad o tipo de ejecución efectivos distintos para ${name}.`);
+    }
+    await remaining.verifyInfrastructure(credential, project, fn);
+  }
+  return result;
 }
 
 async function functionsResumePlan(credential, project, manifest, functions, { saveCache = true } = {}) {
@@ -155,8 +165,18 @@ async function verifyHosting(credential, project) {
     if (!response.ok || hash(Buffer.from(await response.arrayBuffer())) !== hash(fs.readFileSync(file))) throw new Error(`Hosting no coincide en /${route}.`);
   }
 }
+async function retiredPredecessors(credential, project, names) {
+  return Promise.all(names.map(async name => {
+    const service = `projects/${project}/locations/europe-west1/services/${name.toLowerCase()}`;
+    const previous = `${service}/revisions/${FALLBACKS[name].serving}`;
+    const [run, revision] = await Promise.all([googleGet(credential, 'https://run.googleapis.com/v2/' + service),
+      googleGet(credential, 'https://run.googleapis.com/v2/' + previous)]);
+    return remaining.assertPredecessorRetired(run, revision, previous, FALLBACKS[name].digest);
+  }));
+}
 async function verifyFinal(credential, project, manifest) {
   await verifyFunctions(credential, project, manifest, 'final');
+  if (manifest.remainingSelective) await retiredPredecessors(credential, project, Object.keys(remaining.TARGETS));
   await verifyRules(credential, project, path.join(root, 'firestore.rules'));
   await verifyIndexes(credential, project);
   await verifyHosting(credential, project);
@@ -193,7 +213,37 @@ async function drain(db, manifest, requirePatchedCalendarDispatcher) {
   }
   throw new Error('La recuperación no ha terminado. Se conserva el trabajo y el mantenimiento permanece cerrado.');
 }
-async function freezeMaintenance(db, releaseId) {
+function readIdle(tx, db) {
+  return Promise.all([
+    tx.get(db.doc(QUEUE)),
+    tx.get(db.collection('release_operations').where('state', '==', 'active').limit(1)),
+    tx.get(db.collection('release_deferred_events').where('state', 'in', ['pending', 'ready', 'recovering']).limit(1)),
+  ]).then(([queue, active, pending]) => Number(queue.get('pending') ?? 0) === 0 && active.empty && pending.empty);
+}
+async function enterDraining(db, manifest, { requireIdle = Boolean(manifest.remainingSelective) } = {}) {
+  await db.runTransaction(async tx => {
+    const gateRef = db.doc(CONTROL), configRef = db.doc('site_config/main');
+    const [gate, config, idle] = await Promise.all([tx.get(gateRef), tx.get(configRef), requireIdle ? readIdle(tx, db) : true]);
+    if (config.get('automaticMinuteRefundsEnabled') === true) throw new Error('Las devoluciones automáticas deben seguir desactivadas.');
+    if (gate.get('phase') && gate.get('phase') !== 'open') {
+      if (gate.get('releaseId') !== manifest.releaseId || (requireIdle && gate.get('manifestHash') !== manifest.manifestHash)) {
+        throw new Error('Hay otra publicación en curso.');
+      }
+      return;
+    }
+    if (requireIdle && (!idle || gate.get('phase') !== 'open' || gate.get('occupancyVersion') !== 2
+      || gate.get('releaseId') !== manifest.releaseId || config.get('maintenanceMode') === true)) {
+      throw new Error('El cierre exige aforo v2, cero operaciones activas y cola vacía. Producción conserva su fase.');
+    }
+    tx.set(gateRef, { ...gate.data(), phase: 'draining', releaseId: manifest.releaseId, epoch: Number(gate.get('epoch') ?? 0) + 1,
+      occupancyVerifiedEpoch: null, occupancyAuditHash: null, manifestHash: manifest.manifestHash, closedAt: new Date().toISOString(),
+      ...(requireIdle ? { occupancyAuditMode: null, occupancyCountsHash: null } : {}) });
+    tx.set(configRef, { maintenanceMode: true }, { merge: true });
+    tx.create(db.collection('release_control_audits').doc(), { command: 'maintenance-close', releaseId: manifest.releaseId,
+      manifestHash: manifest.manifestHash, at: new Date().toISOString() });
+  });
+}
+async function freezeMaintenance(db, releaseId, { manifestHash } = {}) {
   await db.runTransaction(async tx => {
     const gateRef = db.doc(CONTROL);
     const [gate, config, active] = await Promise.all([
@@ -201,6 +251,7 @@ async function freezeMaintenance(db, releaseId) {
       tx.get(db.collection('release_operations').where('state', '==', 'active').limit(1)),
     ]);
     if (gate.get('releaseId') !== releaseId || !['draining', 'frozen'].includes(gate.get('phase'))
+      || (manifestHash !== undefined && gate.get('manifestHash') !== manifestHash)
       || config.get('maintenanceMode') !== true || config.get('automaticMinuteRefundsEnabled') === true || !active.empty) {
       throw new Error('No se puede congelar el mantenimiento.');
     }
@@ -218,20 +269,36 @@ async function assertReopenState(tx, db, manifest) {
     || !active.empty || config.get('automaticMinuteRefundsEnabled') === true) {
     throw new Error('No se cumplen las condiciones de reapertura. Mantener cerrado.');
   }
+  if (manifest.remainingSelective) {
+    if (config.get('maintenanceMode') !== true) throw new Error('El estado visible del mantenimiento cambió.');
+    await require('../functions/lib/slotOccupancyCounts.js').assertCountsStillVerified(tx, db, manifest.manifestHash);
+  }
+}
+async function reopenMaintenance(db, manifest) {
+  await db.runTransaction(async tx => {
+    await assertReopenState(tx, db, manifest);
+    tx.set(db.doc(CONTROL), { phase: 'open', openedAt: new Date().toISOString() }, { merge: true });
+    tx.set(db.doc('site_config/main'), { maintenanceMode: false }, { merge: true });
+    tx.create(db.collection('release_control_audits').doc(), { command: 'maintenance-open', releaseId: manifest.releaseId,
+      manifestHash: manifest.manifestHash, at: new Date().toISOString() });
+  });
 }
 async function main() {
   const command = process.argv[2];
   const readOnly = ['status', 'preflight', 'assert-stage', 'plan-bootstrap-resume', 'plan-functions-resume', 'audit-interrupted-operations',
     'verify-bootstrap', 'verify-release', 'verify-before-open', 'verify-indexes', 'plan-calendar-hotfix', 'verify-calendar-hotfix',
-    'plan-occupancy-selective', 'verify-occupancy-selective'].includes(command);
+    'plan-occupancy-selective', 'verify-occupancy-selective', 'plan-remaining-selective', 'verify-remaining-selective', 'audit-retired-operations'].includes(command);
   const mutations = ['maintenance-close', 'maintenance-open', 'drain-deferred', 'set-minimum-builds', 'enable-automatic-refunds',
-    'disable-automatic-refunds', 'resolve-completed-operation', 'resolve-interrupted-operations'];
+    'disable-automatic-refunds', 'resolve-completed-operation', 'resolve-interrupted-operations', 'resolve-retired-operations'];
   if (!readOnly && !mutations.includes(command)) throw new Error('Orden de control no válida.');
   const project = readOnly ? arg('--project') : arg('--confirm-project');
   if (project !== 'focus-club-f73b8') throw new Error('Indica explícitamente el proyecto focus-club-f73b8.');
   const manifest = !['status', 'disable-automatic-refunds'].includes(command) ? readJson(arg('--manifest') ?? path.join(root, 'release/manifest.json')) : undefined;
   const occupancyCommand = ['plan-occupancy-selective', 'verify-occupancy-selective'].includes(command);
-  if (manifest) assertManifest(manifest, { skipMobile: occupancyCommand });
+  const remainingCommand = ['plan-remaining-selective', 'verify-remaining-selective'].includes(command);
+  const retiredCommand = ['audit-retired-operations', 'resolve-retired-operations'].includes(command);
+  const strictMaintenance = Boolean(manifest?.remainingSelective && ['verify-release', 'maintenance-close', 'verify-before-open', 'maintenance-open'].includes(command));
+  if (manifest) assertManifest(manifest, { skipMobile: occupancyCommand || remainingCommand || retiredCommand || strictMaintenance });
   const auditOutput = command === 'audit-interrupted-operations' ? arg('--out') : undefined;
   if (command === 'audit-interrupted-operations' && !auditOutput) throw new Error('Indica --out para guardar el informe.');
   const reportPath = arg('--reviewed-report');
@@ -239,6 +306,9 @@ async function main() {
   const reviewedReport = command === 'resolve-interrupted-operations' ? readJson(reportPath) : undefined;
   const approval = { approvedHash: arg('--approved-report-hash'), reviewerUid: arg('--reviewer-uid'), acknowledged: flag('--acknowledge-unresolved-notices') };
   if (command === 'resolve-interrupted-operations') incident.assertReviewedReport(reviewedReport, approval.approvedHash, approval.reviewerUid, approval.acknowledged, manifest);
+  const retiredApproval = { ...approval, acknowledged: flag('--acknowledge-unknown-effect') };
+  const retiredReport = command === 'resolve-retired-operations' && reportPath ? readJson(reportPath) : undefined;
+  if (command === 'resolve-retired-operations') retired.assertReviewed(retiredReport, retiredApproval, manifest);
   if (readOnly) c.readonlyFirestore();
   const { db, credential } = await initialize(project);
   try {
@@ -298,9 +368,11 @@ async function main() {
       console.log(JSON.stringify(await functionsResumePlan(credential, project, manifest, await deployedFunctions(credential, project)), null, 2));
       return;
     }
-    if (occupancyCommand) {
+    if (occupancyCommand || remainingCommand) {
       const name = arg('--function');
-      if (!manifest.occupancySelective || (command === 'verify-occupancy-selective' && !Object.hasOwn(TARGETS, name))) {
+      const targets = remainingCommand ? remaining.TARGETS : TARGETS;
+      const section = remainingCommand ? manifest.remainingSelective : manifest.occupancySelective;
+      if (!section || ((command.startsWith('verify-') || name) && !Object.hasOwn(targets, name))) {
         throw new Error('Indica el manifiesto selectivo revisado y la Function concreta al verificar.');
       }
       const [gate, config, queue] = await db.getAll(gateRef, configRef, db.doc(QUEUE));
@@ -308,11 +380,45 @@ async function main() {
         || config.get('maintenanceMode') === true || config.get('automaticMinuteRefundsEnabled') === true || Number(queue.get('pending') ?? 0) !== 0) {
         throw new Error('La revisión selectiva exige la publicación abierta, aforo v2, cola vacía y devoluciones automáticas desactivadas.');
       }
-      const plan = await functionsResumePlan(credential, project, manifest, await deployedFunctions(credential, project), { saveCache: false });
-      if (command === 'verify-occupancy-selective' && !plan.selectiveFunctions.includes(name)) {
+      const functions = await deployedFunctions(credential, project);
+      const plan = await functionsResumePlan(credential, project, manifest, functions, { saveCache: false });
+      if (remainingCommand) {
+        if (plan.pendingFunctions.some(pending => !Object.hasOwn(remaining.TARGETS, pending))) throw new Error('Hay Functions pendientes fuera del alcance revisado.');
+        const next = plan.pendingRemainingSelective[0]?.name;
+        if (command === 'plan-remaining-selective' && name && next !== name && !plan.remainingSelectiveFunctions.includes(name)) {
+          throw new Error('La Function indicada no es la siguiente pendiente.');
+        }
+        const selected = name ? [name] : Object.keys(targets);
+        await Promise.all(selected.map(selectedName => {
+          const fn = functions.find(item => item.name.endsWith('/' + selectedName));
+          if (!fn) throw new Error(`Function pendiente ausente: ${selectedName}.`);
+          return remaining.verifyInfrastructure(credential, project, fn);
+        }));
+        const predecessors = command === 'verify-remaining-selective' ? [name] : plan.remainingSelectiveFunctions;
+        plan.retiredPredecessors = await retiredPredecessors(credential, project, predecessors);
+        if (name && command === 'plan-remaining-selective' && next === name) {
+          const preflight = require('./remaining-preflight.cjs');
+          plan.preflight = await preflight(credential, project, manifest, functions.find(fn => fn.name.endsWith('/' + name)));
+        }
+      }
+      const verified = remainingCommand ? plan.remainingSelectiveFunctions : plan.selectiveFunctions;
+      if (command.startsWith('verify-') && !verified.includes(name)) {
         throw new Error(`Todavía no sirve el artefacto selectivo revisado de ${name}.`);
       }
       console.log(JSON.stringify(plan, null, 2)); return;
+    }
+    if (retiredCommand) {
+      if (!manifest.remainingSelective) throw new Error('Falta el manifiesto de esta fase.');
+      const getProof = () => retired.readProof(credential, project);
+      if (command === 'audit-retired-operations') {
+        const report = await retired.auditRetiredOperations(db, manifest, getProof);
+        if (arg('--out')) writeJson(require('./occupancy-count-backup.cjs').privatePath(arg('--out')), report);
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        await verifyFinal(credential, project, manifest);
+        console.log(await retired.resolveRetiredOperations(db, manifest, retiredReport, { ...retiredApproval, getProof }));
+      }
+      return;
     }
     if (command === 'plan-calendar-hotfix' || command === 'verify-calendar-hotfix') {
       if (!manifest.calendarHotfix) throw new Error('Usa el manifiesto revisado del hotfix de Calendar.');
@@ -349,7 +455,9 @@ async function main() {
     if (command === 'maintenance-close') {
       // Accept the preparatory or the final release when closing again after launch.
       const current = (await gateRef.get()).data();
-      if (current?.occupancyVersion === 2) {
+      if (strictMaintenance) {
+        await verifyFinal(credential, project, manifest);
+      } else if (current?.occupancyVersion === 2) {
         await verifyFunctions(credential, project, manifest, 'final');
         await verifyRules(credential, project, path.join(root, 'firestore.rules'));
       }
@@ -362,18 +470,7 @@ async function main() {
           if (!flag('--legacy-executions-reviewed')) throw new Error('Revisa en Cloud Logging que las revisiones anteriores terminaron y confirma --legacy-executions-reviewed. Las ejecuciones anteriores al bootstrap no tienen concesión.');
         }
       }
-      await db.runTransaction(async (tx) => {
-        const [gate, config] = await Promise.all([tx.get(gateRef), tx.get(configRef)]);
-        if (config.data()?.automaticMinuteRefundsEnabled === true) throw new Error('Desactiva expresamente las devoluciones automáticas antes de cerrar.');
-        if (gate.data()?.phase && gate.data().phase !== 'open') {
-          if (gate.data().releaseId !== manifest.releaseId) throw new Error('Hay otra publicación en curso.');
-          return;
-        }
-        tx.set(gateRef, { ...gate.data(), phase: 'draining', releaseId: manifest.releaseId, epoch: Number(gate.data()?.epoch ?? 0) + 1,
-          occupancyVerifiedEpoch: null, occupancyAuditHash: null, manifestHash: manifest.manifestHash, closedAt: new Date().toISOString() });
-        tx.set(configRef, { maintenanceMode: true }, { merge: true });
-        tx.create(db.collection('release_control_audits').doc(),{command:'maintenance-close',releaseId:manifest.releaseId,manifestHash:manifest.manifestHash,at:new Date().toISOString()});
-      });
+      await enterDraining(db, manifest, { requireIdle: strictMaintenance });
       const deadline = Date.now() + 15 * 60_000;
       while (true) {
         const active = await db.collection('release_operations').where('state','==','active').limit(1).get();
@@ -381,12 +478,13 @@ async function main() {
         if (!flag('--wait') || Date.now() > deadline) throw new Error('Quedan operaciones admitidas. No se presume que hayan terminado. Mantener cerrado y revisar status.');
         await sleep(2000);
       }
-      await freezeMaintenance(db, manifest.releaseId);
+      await freezeMaintenance(db, manifest.releaseId, { manifestHash: strictMaintenance ? manifest.manifestHash : undefined });
       console.log('Mantenimiento congelado. No hay operaciones admitidas en ejecución.'); return;
     }
     if(command==='resolve-completed-operation'){
       const id=arg('--operation-id');
       if(!/^[0-9a-f-]{36}$/.test(id??''))throw new Error('Indica el identificador exacto de la operación.');
+      if (retired.CASES.some(item => item.id === id)) throw new Error('Este registro debe conservarse y resolverse mediante evidencia revisada.');
       const token=await credential.getAccessToken();
       // Logging entries:list is a read operation; no execution is stopped or assumed expired.
       const response=await fetch('https://logging.googleapis.com/v2/entries:list',{method:'POST',headers:{Authorization:`Bearer ${token.access_token}`,'Content-Type':'application/json'},body:JSON.stringify({resourceNames:[`projects/${project}`],filter:`jsonPayload.releaseOperationId="${id}" AND jsonPayload.releaseOperationState="handler_finished"`,pageSize:1,orderBy:'timestamp desc'})});
@@ -415,14 +513,8 @@ async function main() {
     }
     if (['verify-before-open', 'maintenance-open'].includes(command)) {
       await verifyFinal(credential, project, manifest);
-      await db.runTransaction(async (tx) => {
-        await assertReopenState(tx, db, manifest);
-        if (command === 'maintenance-open') {
-          tx.set(gateRef, { phase: 'open', openedAt: new Date().toISOString() }, { merge: true });
-          tx.set(configRef, { maintenanceMode: false }, { merge: true });
-          tx.create(db.collection('release_control_audits').doc(),{command:'maintenance-open',releaseId:manifest.releaseId,manifestHash:manifest.manifestHash,at:new Date().toISOString()});
-        }
-      }, command === 'verify-before-open' ? { readOnly: true } : undefined);
+      if (command === 'maintenance-open') await reopenMaintenance(db, manifest);
+      else await db.runTransaction(tx => assertReopenState(tx, db, manifest), { readOnly: true });
       console.log(command === 'maintenance-open' ? 'Operaciones reabiertas. Devoluciones automáticas desactivadas.' : 'Condiciones de reapertura comprobadas.'); return;
     }
     if (command === 'set-minimum-builds') {
@@ -456,4 +548,4 @@ async function main() {
   } finally { await db.terminate(); }
 }
 if (require.main === module) main().catch((error) => { console.error(error.message); process.exitCode = 1; });
-module.exports = { verifyFunctions, verifyIndexes, verifyHosting, verifyRules, drain, freezeMaintenance, assertReopenState, main };
+module.exports = { verifyFunctions, verifyFinal, verifyIndexes, verifyHosting, verifyRules, drain, enterDraining, freezeMaintenance, assertReopenState, reopenMaintenance, main };

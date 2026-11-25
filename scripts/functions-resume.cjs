@@ -2,6 +2,7 @@ const { createHash } = require('node:crypto');
 const path = require('node:path');
 const { sourceIdentity, matchesFiles } = require('./bootstrap-resume.cjs');
 const { FALLBACKS, TARGETS, SELECTIVE_PHASE, selectiveArtifacts } = require('./occupancy-selective.cjs');
+const remaining = require('./remaining-selective.cjs');
 
 const REQUIRED_RUNTIME = {
   onAppointmentCustomerNotification: { memory: '512Mi', concurrency: 8 },
@@ -9,9 +10,12 @@ const REQUIRED_RUNTIME = {
 };
 const CALENDAR_FUNCTION = 'syncAppointmentWithGoogleCalendar';
 const CALENDAR_RUNTIME = { memory: '512Mi', maxCpu: 0.34, concurrency: 1, maxInstances: 5, timeoutSeconds: 60, retry: 'RETRY_POLICY_RETRY' };
+const OPERATOR_ONLY = new Set(['functions/src/slotOccupancyCounts.ts', 'functions/lib/slotOccupancyCounts.js']);
 
 async function planFunctionsResume({ manifest, functions, readArchive, verifyRuntime, verifyTraffic, cache = {} }) {
-  const selective = selectiveArtifacts(manifest);
+  const occupancy = selectiveArtifacts(manifest);
+  const outstanding = remaining.remainingArtifacts(manifest);
+  const selective = new Map([...occupancy, ...outstanding]);
   const expected = new Map();
   for (const [codebase, names, prefix] of [
     ['default', manifest.webFunctions, 'functions/'],
@@ -54,20 +58,22 @@ async function planFunctionsResume({ manifest, functions, readArchive, verifyRun
     seen.add(name);
     const phase = fn.labels?.focus_phase;
     const artifact = selective.get(name);
-    const prefix = phase === 'final' ? item.prefix : phase === 'bootstrap' ? bootstrap.get(name) : phase === SELECTIVE_PHASE ? artifact?.prefix : undefined;
+    const selectivePhase = outstanding.has(name) ? remaining.PHASE : SELECTIVE_PHASE;
+    const isSelective = Boolean(artifact && phase === selectivePhase);
+    const prefix = phase === 'final' ? item.prefix : phase === 'bootstrap' ? bootstrap.get(name) : isSelective ? artifact.prefix : undefined;
     if (fn.labels?.focus_release !== manifest.releaseId || !prefix) throw new Error(`Versión remota desconocida para ${name}.`);
     const source = fn.buildConfig.source?.storageSource;
     const identity = sourceIdentity(source);
     return async () => {
-      const inputs = manifest.inputs.filter(input => input.path.startsWith(prefix));
+      const inputs = manifest.inputs.filter(input => input.path.startsWith(prefix) && !OPERATOR_ONLY.has(input.path));
       const baseline = hotfix && phase === 'final' && item.codebase === 'default' ? hotfix.baselineDefaultInputs : undefined;
       const fingerprint = createHash('sha256').update(JSON.stringify({ inputs, baseline })).digest('hex');
       const cached = cache[name];
       let version = cached?.version;
-      if (phase === SELECTIVE_PHASE || cached?.identity !== identity || cached.fingerprint !== fingerprint) {
+      if (isSelective || cached?.identity !== identity || cached.fingerprint !== fingerprint) {
         if (!archives.has(identity)) archives.set(identity, Promise.resolve().then(() => readArchive(source)));
         const files = await archives.get(identity);
-        if (matchesFiles(files, inputs, prefix) && (phase !== SELECTIVE_PHASE || files.size === inputs.length)) version = 'current';
+        if (matchesFiles(files, inputs, prefix) && (!isSelective || files.size === inputs.length)) version = 'current';
         else if (baseline && matchesFiles(files, baseline, prefix)) version = 'baseline';
         else throw new Error(`La fuente publicada de ${name} no coincide con el manifiesto.`);
         cache[name] = { identity, fingerprint, version };
@@ -86,18 +92,20 @@ async function planFunctionsResume({ manifest, functions, readArchive, verifyRun
         if (phase === SELECTIVE_PHASE && (fn.eventTrigger || fn.serviceConfig.secretEnvironmentVariables?.length)) {
           throw new Error(`Trigger o secretos inesperados para el paquete selectivo ${name}.`);
         }
+        if (phase === remaining.PHASE) remaining.assertFunctionContract(manifest.projectId, fn);
         item.traffic = await verifyTraffic(fn, { phase, release: manifest.releaseId, fallback: FALLBACKS[name],
-          limits: phase === SELECTIVE_PHASE ? TARGETS[name] : phase === 'final' ? REQUIRED_RUNTIME[name] : undefined });
+          limits: phase === remaining.PHASE ? remaining.RUNTIME : phase === SELECTIVE_PHASE ? TARGETS[name] : phase === 'final' ? REQUIRED_RUNTIME[name] : undefined });
       }
       item.baseline = version === 'baseline';
-      item.verified = (phase === 'final' || phase === SELECTIVE_PHASE) && item.traffic === 'verified';
+      item.verified = (phase === 'final' || isSelective) && item.traffic === 'verified';
       item.selective = phase === SELECTIVE_PHASE;
+      item.remainingSelective = phase === remaining.PHASE;
     };
   });
   for (const name of bootstrap.keys()) if (!seen.has(name)) throw new Error(`Falta la Function Bootstrap ${name}.`);
   for (let start = 0; start < tasks.length; start += 5) await Promise.all(tasks.slice(start, start + 5).map(task => task()));
   const pendingFunctions = [...expected.values()].filter(item => !item.verified);
-  const pendingSelective = [...selective.values()].filter(item => !expected.get(item.name)?.selective && !expected.get(item.name)?.verified);
+  const pending = artifacts => [...artifacts.values()].filter(item => !expected.get(item.name)?.verified);
   const batches = [];
   for (const codebase of ['default', 'portal']) {
     const names = pendingFunctions.filter(item => item.codebase === codebase && !selective.has(item.name)).map(item => item.name);
@@ -107,8 +115,10 @@ async function planFunctionsResume({ manifest, functions, readArchive, verifyRun
     projectId: manifest.projectId, releaseId: manifest.releaseId, manifestHash: manifest.manifestHash,
     verifiedFunctions: [...expected.values()].filter(item => item.verified).map(item => item.name),
     pendingFunctions: pendingFunctions.map(item => item.name), batches,
-    pendingSelective: pendingSelective.map(({ name, config }) => ({ name, config })),
+    pendingSelective: pending(occupancy).map(({ name, config }) => ({ name, config })),
+    pendingRemainingSelective: pending(outstanding).map(({ name, config }) => ({ name, config })),
     selectiveFunctions: [...expected.values()].filter(item => item.selective).map(item => item.name),
+    remainingSelectiveFunctions: [...expected.values()].filter(item => item.remainingSelective).map(item => item.name),
     servingFallbacks: [...expected.values()].filter(item => item.traffic === 'fallback').map(item => item.name),
     ...(hotfix ? { baselineFunctions: [...expected.values()].filter(item => item.baseline).map(item => item.name) } : {}),
   };

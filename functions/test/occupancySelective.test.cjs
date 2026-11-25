@@ -67,7 +67,7 @@ test('the compiled selective package is accepted only for its callable, archive 
   assert.deepEqual([...reviewed.keys()], Object.keys(TARGETS));
   const item = reviewed.get(name);
   const files = new Map(item.inputs.map(({ path }) => [path.slice(item.prefix.length), c.fs.readFileSync(c.path.join(c.root, path))]));
-  const testManifest = { ...manifest, calendarHotfix: undefined, webFunctions: [...reviewed.keys()], portalFunctions: [],
+  const testManifest = { ...manifest, calendarHotfix: undefined, remainingSelective: undefined, webFunctions: [...reviewed.keys()], portalFunctions: [],
     bootstrap: { ...manifest.bootstrap, artifacts: [...new Set([...reviewed.values()].map(x => x.baseConfig))].map(config => ({ config, compiled: true,
       functions: [...reviewed.values()].filter(x => x.baseConfig === config).map(x => x.name) })) } };
   const functions = [...reviewed].map(([id]) => ({

@@ -95,3 +95,37 @@ test('PowerShell Calendar hotfix deploys exactly one function and verifies it wi
   assert.match(unrelated.output, /otras Functions/);
   assert.deepEqual(unrelated.calls, []);
 });
+
+test('PowerShell remaining selective uses the reviewed singleton and stops on failed checks', { skip: !pwshAvailable }, () => {
+  const name = 'onNotificationOutboxCreated';
+  const config = 'release/remaining-selective/1234567890abcdef1234/firebase.json';
+  const preflight = { name, config, buildCpu: 4, runWrites: 30, functionWrites: 60, cpu: { limit: 20000, peak: 10000 }, memory: { limit: 42949672960, peak: 3000000 } };
+  const script = path.resolve(__dirname, '../../scripts/deploy-release.ps1');
+  const run = (plan, { dryRead = 0, deploy = 0, verify = 0 } = {}) => {
+    const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
+      function global:node {
+        param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Items)
+        if ($Items[1] -eq 'plan-remaining-selective') { $global:LASTEXITCODE=${dryRead}; ${literal(JSON.stringify(plan))} }
+        elseif ($Items[1] -eq 'verify-remaining-selective') { Write-Host 'verified'; $global:LASTEXITCODE=${verify} }
+        else { throw 'Unexpected control' }
+      }
+      function global:firebase {
+        param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Items)
+        Write-Host ('DEPLOY=' + ($Items -join ' ')); $global:LASTEXITCODE=${deploy}
+      }
+      try { & ${literal(script)} -Stage RemainingSelective -FunctionName ${name} } catch { Write-Host ('ERROR=' + $_.Exception.Message) }
+    `], { encoding: 'utf8', timeout: 30_000 });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  };
+  const first = run({ preflight });
+  assert.match(first, new RegExp(`DEPLOY=deploy --non-interactive --project focus-club-f73b8 --config ${config} --only functions:${name}`));
+  assert.match(first, /verified/);
+  const retry = run({ remainingSelectiveFunctions: [name] });
+  assert.doesNotMatch(retry, /DEPLOY=/);
+  assert.match(retry, /verified/);
+  assert.doesNotMatch(run({ preflight }, { dryRead: 9 }), /DEPLOY=|verified/);
+  assert.doesNotMatch(run({ preflight: { ...preflight, config: 'firebase.json' } }), /DEPLOY=|verified/);
+  assert.doesNotMatch(run({ preflight }, { deploy: 7 }), /verified/);
+  assert.match(run({ preflight }, { verify: 8 }), /ERROR=.*8/);
+});

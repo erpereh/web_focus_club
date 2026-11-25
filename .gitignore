@@ -85,6 +85,7 @@ worklog.md
 # Reviewed local deployment artifacts and audit evidence (never Hosting content).
 /release/bootstrap/
 /release/occupancy-selective/
+/release/remaining-selective/
 /release/verification-*.json
 /release/*audit*.json
 /release/test-logs/
