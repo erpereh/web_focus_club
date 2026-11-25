@@ -68,6 +68,7 @@ try {
                 $planFocus = ($salidaPlanFocus -join "`n") | ConvertFrom-Json
                 $sinVerificarFocus = @($tandaAnteriorFocus | Where-Object { $_ -notin @($planFocus.verifiedFunctions) })
                 if ($sinVerificarFocus.Count -gt 0) { throw "No se ha acreditado la tanda anterior: $($sinVerificarFocus -join ', '). Revisar y continuar con -Resume." }
+                if ($planFocus.pendingSelective) { throw 'Hay paquetes de aforo pendientes de publicación selectiva individual. El paquete definitivo general no los sustituye.' }
                 if ($primeraComprobacionFocus -and -not $Resume -and @($planFocus.verifiedFunctions).Count -gt 0 -and @($planFocus.pendingFunctions).Count -gt 0) {
                     throw 'Functions definitivas parcialmente publicadas. Usa -Stage Functions -Resume para omitir las verificadas.'
                 }

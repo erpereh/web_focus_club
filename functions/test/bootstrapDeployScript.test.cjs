@@ -6,7 +6,7 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const pwshAvailable = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.ToString()'], { encoding: 'utf8' }).status === 0;
 const literal = value => "'" + value.replaceAll("'", "''") + "'";
-function runScenario({ complete = false, resume = true, lostResponse = false, readFailure = false, noProgress = false, stage = 'Bootstrap', wrongCalendarPlan = false } = {}) {
+function runScenario({ complete = false, resume = true, lostResponse = false, readFailure = false, noProgress = false, stage = 'Bootstrap', wrongCalendarPlan = false, pendingSelective = false } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-bootstrap-script-test-'));
   try {
     const projectDirectory = path.join(directory, 'web_focus_club');
@@ -16,7 +16,8 @@ function runScenario({ complete = false, resume = true, lostResponse = false, re
     fs.mkdirSync(path.join(projectDirectory, 'scripts'));
     fs.copyFileSync(path.resolve(__dirname, '../../scripts/deploy-release.ps1'), scriptPath);
     const plan = pending => ({ verifiedFunctions: pending ? ['alreadyPublished'] : ['alreadyPublished', 'deleteOwnAccount'], pendingFunctions: pending ? ['deleteOwnAccount'] : [],
-      batches: pending ? [{ config: 'release/bootstrap/portal/firebase.json', portal: true, codebase: 'portal', functions: ['deleteOwnAccount'] }] : [], rules: { status: complete ? 'verified' : 'pending' } });
+      batches: pending ? [{ config: 'release/bootstrap/portal/firebase.json', portal: true, codebase: 'portal', functions: ['deleteOwnAccount'] }] : [],
+      ...(pendingSelective ? { pendingSelective: [{ name: 'updateOwnAppointmentSlot' }] } : {}), rules: { status: complete ? 'verified' : 'pending' } });
     const calendarPlan = { pendingFunctions: [wrongCalendarPlan ? 'anotherFunction' : 'syncAppointmentWithGoogleCalendar'] };
     const command = `
       $global:LASTEXITCODE=0; $global:published=${complete ? '$true' : '$false'}; $global:invocations=@(); $global:lostResponse=${lostResponse ? '$true' : '$false'}
@@ -77,6 +78,11 @@ test('PowerShell Functions Resume stops if a successful CLI exit does not publis
   const result = runScenario({ stage: 'Functions', noProgress: true });
   assert.equal(result.calls.length, 1);
   assert.match(result.output, /No se ha acreditado la tanda anterior/);
+});
+test('PowerShell generic deployment stops before deploying a pending occupancy hotfix', { skip: !pwshAvailable }, () => {
+  const result = runScenario({ stage: 'Functions', pendingSelective: true });
+  assert.deepEqual(result.calls, []);
+  assert.match(result.output, /publicación selectiva individual/);
 });
 test('PowerShell Calendar hotfix deploys exactly one function and verifies it without redeploying', { skip: !pwshAvailable }, () => {
   const stage = { stage: 'CalendarHotfix', resume: false };

@@ -97,6 +97,12 @@ async function main() {
     inputs, bootstrap: { captured: false, artifacts: [], webFunctions: [] },
   };
   const previousManifest = fs.existsSync(path.join(output, 'manifest.json')) ? readJson(path.join(output, 'manifest.json')) : undefined;
+  if (previousManifest?.occupancySelective) {
+    const { manifestHash, ...body } = previousManifest;
+    if (hash(JSON.stringify(body)) !== manifestHash) throw new Error('La huella del manifiesto anterior no coincide.');
+    manifest.occupancySelective = previousManifest.occupancySelective;
+    manifest.inputs.push(...previousManifest.inputs.filter(input => input.path.startsWith('release/occupancy-selective/')));
+  }
   if (flag('--calendar-hotfix')) {
     if (!flag('--offline') || !flag('--refresh-manifest') || !flag('--skip-bootstrap-build') || !previousManifest?.bootstrap?.captured) {
       throw new Error('El hotfix exige --offline --refresh-manifest --skip-bootstrap-build y el manifiesto de la publicación terminada.');

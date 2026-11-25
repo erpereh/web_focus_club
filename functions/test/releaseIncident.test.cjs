@@ -79,6 +79,7 @@ function finalFixture() {
     manifest, functions: [fn(names[0], 'final'), ...names.slice(1, 5).map(name => fn(name, 'bootstrap'))],
     readArchive: async source => new Map([['lib/index.js', Buffer.from(source.object)]]),
     verifyRuntime: async () => {},
+    verifyTraffic: async () => 'verified',
   } };
 }
 
@@ -96,15 +97,19 @@ test('final deployment requires reviewed source and reviewed runtime on cached r
   options.functions.push(fn('onAppointmentCustomerNotification', 'final'));
   options.cache = {};
   let checks = 0;
-  options.verifyRuntime = async (_fn, limits) => {
-    checks++;
-    assert.deepEqual(limits, { memory: '512Mi', concurrency: 8 });
+  options.verifyTraffic = async (fn, { limits }) => {
+    if (fn.name.endsWith('/onAppointmentCustomerNotification')) {
+      checks++;
+      assert.deepEqual(limits, { memory: '512Mi', concurrency: 8 });
+    }
+    return 'verified';
   };
   await planFunctionsResume(options);
   await planFunctionsResume(options);
   assert.equal(checks, 2);
-  options.verifyRuntime = async () => { throw new Error('wrong runtime'); };
+  options.verifyTraffic = async () => { throw new Error('wrong runtime'); };
   await assert.rejects(planFunctionsResume(options), /wrong runtime/);
+  options.verifyTraffic = async () => 'verified';
   options.functions[0].buildConfig.source.storageSource.object = 'unexpected';
   await assert.rejects(planFunctionsResume(options), /no coincide/);
 });

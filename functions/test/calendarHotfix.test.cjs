@@ -93,6 +93,7 @@ test('selective final plan preserves reviewed baseline endpoints and demands new
   const runtimes = [];
   const plan = functions => planFunctionsResume({ manifest, functions,
     verifyRuntime: async (selected, runtime) => { runtimes.push([selected.serviceConfig.revision, runtime]); },
+    verifyTraffic: async () => 'verified',
     readArchive: async ({ generation }) => new Map([['lib/index.js', Buffer.from(generation === '13' ? current : baseline)]]) });
   assert.deepEqual((await plan([base, untouched])).pendingFunctions, [FUNCTION]);
   assert.equal(runtimes[0][1].servingBaseline, manifest.calendarHotfix.baselineServingRevision);

@@ -80,11 +80,12 @@ async function deployedFunctions(cred, projectId) {
   } while (pageToken);
   return result;
 }
-function assertManifest(manifest) {
+function assertManifest(manifest, { skipMobile = false } = {}) {
   if (manifest.schema !== 'focus-coordinated-release-v1' || manifest.projectId !== 'focus-club-f73b8' || manifest.maxFunctionBatchSize !== 5) throw new Error('Manifiesto incompatible.');
   const { manifestHash, ...body } = manifest;
   if (hash(JSON.stringify(body)) !== manifestHash) throw new Error('La huella del manifiesto no coincide. Regenerarlo.');
   for (const input of manifest.inputs) {
+    if (skipMobile && input.path.startsWith('../app_focus_club/')) continue;
     if (hash(fs.readFileSync(path.resolve(root, input.path))) !== input.sha256) throw new Error(`Artefacto modificado: ${input.path}`);
   }
 }

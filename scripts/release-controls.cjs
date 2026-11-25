@@ -5,6 +5,7 @@ const { zipFiles } = require('./prepare-coordinated-release.cjs');
 const { verifyFirestoreIndexes } = require('./firestore-index-verifier.cjs');
 const { planBootstrapResume } = require('./bootstrap-resume.cjs');
 const { planFunctionsResume, CALENDAR_FUNCTION } = require('./functions-resume.cjs');
+const { TARGETS, effectiveTraffic } = require('./occupancy-selective.cjs');
 const incident = require('./interrupted-operations.cjs');
 const CONTROL = 'system_controls/release', QUEUE = 'system_controls/deferred';
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -76,11 +77,29 @@ async function verifyRunRevision(credential, project, service, revision, limits)
   }
 }
 
-async function functionsResumePlan(credential, project, manifest, functions) {
+async function inspectFunctionTraffic(credential, project, fn, expected) {
+  const name = fn.name.split('/').at(-1);
+  const service = `projects/${project}/locations/europe-west1/services/${name.toLowerCase()}`;
+  if (fn.serviceConfig.service !== service) throw new Error(`Cloud Run no identifica el servicio esperado de ${name}.`);
+  const run = await googleGet(credential, 'https://run.googleapis.com/v2/' + service);
+  if (run.name !== service || !run.latestReadyRevision?.startsWith(service + '/revisions/')) {
+    throw new Error(`Cloud Run no identifica una revisión efectiva para ${name}.`);
+  }
+  const revision = await googleGet(credential, 'https://run.googleapis.com/v2/' + run.latestReadyRevision);
+  const { maxInstances, timeoutSeconds } = expected.limits ?? {};
+  if ((maxInstances !== undefined && fn.serviceConfig.maxInstanceCount !== maxInstances)
+    || (timeoutSeconds !== undefined && fn.serviceConfig.timeoutSeconds !== timeoutSeconds)) {
+    throw new Error(`Instancias o tiempo máximo incorrectos para ${name}.`);
+  }
+  return effectiveTraffic({ run, revision, declared: fn.serviceConfig.revision, ...expected });
+}
+
+async function functionsResumePlan(credential, project, manifest, functions, { saveCache = true } = {}) {
   const cachePath = path.join(root, 'release/verification-functions-resume.json');
   const cache = fs.existsSync(cachePath) ? readJson(cachePath) : {};
   const result = await planFunctionsResume({
     manifest, functions, cache,
+    verifyTraffic: (fn, expected) => inspectFunctionTraffic(credential, project, fn, expected),
     readArchive: async source => zipFiles(await googleGet(credential, `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(source.bucket)}/o/${encodeURIComponent(source.object)}?alt=media&generation=${encodeURIComponent(source.generation)}`, true)),
     verifyRuntime: (fn, limits) => {
       if ((limits.maxInstances !== undefined && fn.serviceConfig.maxInstanceCount !== limits.maxInstances)
@@ -94,7 +113,7 @@ async function functionsResumePlan(credential, project, manifest, functions) {
       return verifyRunRevision(credential, project, fn.name.split('/').at(-1).toLowerCase(), fn.serviceConfig.revision, limits);
     },
   });
-  writeJson(cachePath, cache, false);
+  if (saveCache) writeJson(cachePath, cache, false);
   return result;
 }
 
@@ -203,14 +222,16 @@ async function assertReopenState(tx, db, manifest) {
 async function main() {
   const command = process.argv[2];
   const readOnly = ['status', 'preflight', 'assert-stage', 'plan-bootstrap-resume', 'plan-functions-resume', 'audit-interrupted-operations',
-    'verify-bootstrap', 'verify-release', 'verify-before-open', 'verify-indexes', 'plan-calendar-hotfix', 'verify-calendar-hotfix'].includes(command);
+    'verify-bootstrap', 'verify-release', 'verify-before-open', 'verify-indexes', 'plan-calendar-hotfix', 'verify-calendar-hotfix',
+    'plan-occupancy-selective', 'verify-occupancy-selective'].includes(command);
   const mutations = ['maintenance-close', 'maintenance-open', 'drain-deferred', 'set-minimum-builds', 'enable-automatic-refunds',
     'disable-automatic-refunds', 'resolve-completed-operation', 'resolve-interrupted-operations'];
   if (!readOnly && !mutations.includes(command)) throw new Error('Orden de control no válida.');
   const project = readOnly ? arg('--project') : arg('--confirm-project');
   if (project !== 'focus-club-f73b8') throw new Error('Indica explícitamente el proyecto focus-club-f73b8.');
   const manifest = !['status', 'disable-automatic-refunds'].includes(command) ? readJson(arg('--manifest') ?? path.join(root, 'release/manifest.json')) : undefined;
-  if (manifest) assertManifest(manifest);
+  const occupancyCommand = ['plan-occupancy-selective', 'verify-occupancy-selective'].includes(command);
+  if (manifest) assertManifest(manifest, { skipMobile: occupancyCommand });
   const auditOutput = command === 'audit-interrupted-operations' ? arg('--out') : undefined;
   if (command === 'audit-interrupted-operations' && !auditOutput) throw new Error('Indica --out para guardar el informe.');
   const reportPath = arg('--reviewed-report');
@@ -276,6 +297,22 @@ async function main() {
         || config.get('automaticMinuteRefundsEnabled') === true) throw new Error('La continuación definitiva exige mantenimiento congelado y devoluciones automáticas desactivadas.');
       console.log(JSON.stringify(await functionsResumePlan(credential, project, manifest, await deployedFunctions(credential, project)), null, 2));
       return;
+    }
+    if (occupancyCommand) {
+      const name = arg('--function');
+      if (!manifest.occupancySelective || (command === 'verify-occupancy-selective' && !Object.hasOwn(TARGETS, name))) {
+        throw new Error('Indica el manifiesto selectivo revisado y la Function concreta al verificar.');
+      }
+      const [gate, config, queue] = await db.getAll(gateRef, configRef, db.doc(QUEUE));
+      if (gate.get('phase') !== 'open' || gate.get('releaseId') !== manifest.releaseId || gate.get('occupancyVersion') !== 2
+        || config.get('maintenanceMode') === true || config.get('automaticMinuteRefundsEnabled') === true || Number(queue.get('pending') ?? 0) !== 0) {
+        throw new Error('La revisión selectiva exige la publicación abierta, aforo v2, cola vacía y devoluciones automáticas desactivadas.');
+      }
+      const plan = await functionsResumePlan(credential, project, manifest, await deployedFunctions(credential, project), { saveCache: false });
+      if (command === 'verify-occupancy-selective' && !plan.selectiveFunctions.includes(name)) {
+        throw new Error(`Todavía no sirve el artefacto selectivo revisado de ${name}.`);
+      }
+      console.log(JSON.stringify(plan, null, 2)); return;
     }
     if (command === 'plan-calendar-hotfix' || command === 'verify-calendar-hotfix') {
       if (!manifest.calendarHotfix) throw new Error('Usa el manifiesto revisado del hotfix de Calendar.');
